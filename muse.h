@@ -205,12 +205,23 @@ typedef struct {
     size_t count;
     size_t capacity;
   } available_ids;
+
+  muNode root;
+  bool rooted; // Just to make it nicer to use
 } muContext;
 
-void muse_free_context(muContext *ctx);
+MUSEDEF void muse_free_context(muContext *ctx);
 
-muNode muse_node_create(muContext *ctx);
-void muse_node_destroy(muContext *ctx, muNode node);
+MUSEDEF void muse_root_attach(muContext *ctx, muNode node);
+MUSEDEF void muse_root_drop(muContext *ctx);
+
+MUSEDEF void muse_node_parented(muContext *ctx, muNode parent, muNode child);
+MUSEDEF void muse_node_after(muContext *ctx, muNode sibling, muNode node);
+MUSEDEF void muse_node_before(muContext *ctx, muNode sibling, muNode node);
+MUSEDEF void muse_node_unparented(muContext *ctx, muNode node);
+
+MUSEDEF muNode muse_node_create(muContext *ctx);
+MUSEDEF void muse_node_destroy(muContext *ctx, muNode node);
 
 #endif // MUSE_H_
 
@@ -218,7 +229,7 @@ void muse_node_destroy(muContext *ctx, muNode node);
 
 #ifdef MUSE_IMPLEMENTATION
 
-void muse_free_context(muContext *ctx) {
+MUSEDEF void muse_free_context(muContext *ctx) {
   muse_da_free(&ctx->available_ids);
 
   muse_sparse_free(&ctx->hierarchies);
@@ -226,7 +237,14 @@ void muse_free_context(muContext *ctx) {
   muse_sparse_free(&ctx->computed);
 }
 
-muNode muse_node_create(muContext *ctx) {
+MUSEDEF void muse_root_attach(muContext *ctx, muNode node) {
+  ctx->root = node;
+  ctx->rooted = true;
+}
+
+MUSEDEF void muse_root_drop(muContext *ctx) { ctx->rooted = false; }
+
+MUSEDEF muNode muse_node_create(muContext *ctx) {
   if (ctx->available_ids.count > 0) {
     muId id = ctx->available_ids.items[--ctx->available_ids.count];
     id.generation += 1;
@@ -240,7 +258,7 @@ muNode muse_node_create(muContext *ctx) {
   });
 }
 
-void muse_node_destroy(muContext *ctx, muNode node) {
+MUSEDEF void muse_node_destroy(muContext *ctx, muNode node) {
   muse_sparse_remove(&ctx->computed, node);
   muse_sparse_remove(&ctx->hierarchies, node);
   muse_sparse_remove(&ctx->constraints, node);
