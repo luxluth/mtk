@@ -52,6 +52,13 @@
 
 #define muse_da_free(da) free((da)->items)
 
+#define MUSE_DA(T)                                                             \
+  struct {                                                                     \
+    T *items;                                                                  \
+    size_t count;                                                              \
+    size_t capacity;                                                           \
+  }
+
 #define MUSE_TODO(message)                                                     \
   do {                                                                         \
     fprintf(stderr, "%s:%d: TODO: %s\n", __FILE__, __LINE__, message);         \
@@ -73,21 +80,9 @@
 
 #define MUSE_SPARSE_SET(T)                                                     \
   struct {                                                                     \
-    struct {                                                                   \
-      size_t *items;                                                           \
-      size_t count;                                                            \
-      size_t capacity;                                                         \
-    } sparse;                                                                  \
-    struct {                                                                   \
-      muId *items;                                                             \
-      size_t count;                                                            \
-      size_t capacity;                                                         \
-    } dense;                                                                   \
-    struct {                                                                   \
-      T *items;                                                                \
-      size_t count;                                                            \
-      size_t capacity;                                                         \
-    } components;                                                              \
+    MUSE_DA(size_t) sparse;                                                    \
+    MUSE_DA(muId) dense;                                                       \
+    MUSE_DA(T) components;                                                     \
   }
 
 #define muse_sparse_has(set, entity_id)                                        \
