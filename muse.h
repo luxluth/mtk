@@ -2,6 +2,7 @@
 #define MUSE_H_
 
 #include <assert.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -170,36 +171,86 @@ typedef struct {
   size_t numeral, generation;
 } muId;
 
+#define MUSE_UNDEFINED_MUID                                                    \
+  ((muId){.numeral = MUSE_SPARSE_NULL, .generation = MUSE_SPARSE_NULL})
+
+MUSEDEF bool muse_muid_is_valid(muId id);
+MUSEDEF bool muse_muid_eq(muId a, muId b);
+
 typedef muId muNode;
 
 typedef struct {
-  muId parent;
-  muId first_child;
-  muId last_child;
-  muId next_sibling;
-  muId prev_sibling;
+  muNode parent;
+  muNode first_child;
+  muNode last_child;
+  muNode next_sibling;
+  muNode prev_sibling;
 } muHierarchy;
 
+#define MUSE_HIERARCHY_DEFAULT                                                 \
+  ((muHierarchy){.parent = MUSE_UNDEFINED_MUID,                                \
+                 .first_child = MUSE_UNDEFINED_MUID,                           \
+                 .last_child = MUSE_UNDEFINED_MUID,                            \
+                 .next_sibling = MUSE_UNDEFINED_MUID,                          \
+                 .prev_sibling = MUSE_UNDEFINED_MUID})
+
+// #define muse_hierarchy_it(hier)
+
+typedef enum {
+  MUSE_FLEX_ROW = 0,    // Left-to-Right
+  MUSE_FLEX_COLUMN = 1, // Top-to-Bottom
+} muFlexDirection;
+
+typedef enum {
+  MUSE_POSITION_STRATEGY_INFLOW = 0,
+  MUSE_POSITION_STRATEGY_ABSOLUTE = 1,
+} muPositionStrategyKind;
+
 typedef struct {
-  muSize size[2]; // Index 0 = Width, Index 1 = Height
+  muPositionStrategyKind strategy;
+  union {
+    struct {
+      float top;
+      float left;
+      float bottom;
+      float right;
+    } absolute;
+  };
+} muPositionStrategy;
+
+typedef struct {
+  struct {
+    muSize width;
+    muSize height;
+  } dimension;
+
+  muPositionStrategy positioning;
+  muFlexDirection flex_direction;
 } muConstraints;
+
+#define mu_position(s, ...) ((muPositionStrategy){.strategy = s, __VA_ARGS__})
+
+#define mu_absolute(...)                                                       \
+  mu_position(                                                                 \
+      MUSE_POSITION_STRATEGY_ABSOLUTE,                                         \
+      .absolute = {                                                            \
+          .top = NAN, .left = NAN, .bottom = NAN, .right = NAN, __VA_ARGS__})
 
 typedef struct {
   float x, y, w, h;
 } muComputed;
 
 typedef struct {
+} muDirty;
+
+typedef struct {
   MUSE_SPARSE_SET(muHierarchy) hierarchies;
   MUSE_SPARSE_SET(muConstraints) constraints;
   MUSE_SPARSE_SET(muComputed) computed;
+  MUSE_SPARSE_SET(muDirty) dirties;
 
   size_t next_entity_numeral;
-
-  struct {
-    muId *items;
-    size_t count;
-    size_t capacity;
-  } available_ids;
+  MUSE_DA(muId) available_ids;
 
   muNode root;
   bool rooted; // Just to make it nicer to use
@@ -210,12 +261,23 @@ MUSEDEF void muse_free_context(muContext *ctx);
 MUSEDEF void muse_root_attach(muContext *ctx, muNode node);
 MUSEDEF void muse_root_drop(muContext *ctx);
 
-MUSEDEF void muse_node_parented(muContext *ctx, muNode parent, muNode child);
-MUSEDEF void muse_node_after(muContext *ctx, muNode sibling, muNode node);
-MUSEDEF void muse_node_before(muContext *ctx, muNode sibling, muNode node);
-MUSEDEF void muse_node_unparented(muContext *ctx, muNode node);
+// Append a child node to the end of the parent node tree
+MUSEDEF bool muse_node_append(muContext *ctx, muNode parent, muNode child);
+// Append a child node to the start of the parent node tree
+MUSEDEF bool muse_node_prepend(muContext *ctx, muNode parent, muNode child);
+// Detach a node from its parent but don't destroy it,
+// ideal for moving element and appending them
+// elsewhere. If you want to completly remove the node
+// and its subsequent children use `muse_node_destroy`
+MUSEDEF bool muse_node_remove(muContext *ctx, muNode node);
+// Put a node after a designated sibling
+MUSEDEF bool muse_node_put_after(muContext *ctx, muNode sibling, muNode node);
+// Put a node before a designated sibling
+MUSEDEF bool muse_node_put_before(muContext *ctx, muNode sibling, muNode node);
 
+// Create a new valid node. It's not inserted in the tree but it exists
 MUSEDEF muNode muse_node_create(muContext *ctx);
+// Destroy a node from the tree removing it children at the same time
 MUSEDEF void muse_node_destroy(muContext *ctx, muNode node);
 
 #endif // MUSE_H_
@@ -224,12 +286,21 @@ MUSEDEF void muse_node_destroy(muContext *ctx, muNode node);
 
 #ifdef MUSE_IMPLEMENTATION
 
+MUSEDEF bool muse_muid_is_valid(muId id) {
+  return id.numeral != MUSE_SPARSE_NULL && id.generation != MUSE_SPARSE_NULL;
+}
+
+MUSEDEF bool muse_muid_eq(muId a, muId b) {
+  return (a.numeral == b.numeral) && (a.generation == b.generation);
+}
+
 MUSEDEF void muse_free_context(muContext *ctx) {
   muse_da_free(&ctx->available_ids);
 
   muse_sparse_free(&ctx->hierarchies);
   muse_sparse_free(&ctx->constraints);
   muse_sparse_free(&ctx->computed);
+  muse_sparse_free(&ctx->dirties);
 }
 
 MUSEDEF void muse_root_attach(muContext *ctx, muNode node) {
@@ -237,7 +308,10 @@ MUSEDEF void muse_root_attach(muContext *ctx, muNode node) {
   ctx->rooted = true;
 }
 
-MUSEDEF void muse_root_drop(muContext *ctx) { ctx->rooted = false; }
+MUSEDEF void muse_root_drop(muContext *ctx) {
+  ctx->root = MUSE_UNDEFINED_MUID;
+  ctx->rooted = false;
+}
 
 MUSEDEF muNode muse_node_create(muContext *ctx) {
   if (ctx->available_ids.count > 0) {
@@ -255,10 +329,242 @@ MUSEDEF muNode muse_node_create(muContext *ctx) {
 
 MUSEDEF void muse_node_destroy(muContext *ctx, muNode node) {
   muse_sparse_remove(&ctx->computed, node);
-  muse_sparse_remove(&ctx->hierarchies, node);
   muse_sparse_remove(&ctx->constraints, node);
+  muse_sparse_remove(&ctx->dirties, node);
 
+  // TODO: set parent as dirty first
+  muse_sparse_remove(&ctx->hierarchies, node);
+
+  // TODO: do more than that
   muse_da_append(&ctx->available_ids, node);
+}
+
+MUSEDEF bool muse_node_remove(muContext *ctx, muNode node) {
+  if (!muse_muid_is_valid(node) || !muse_sparse_has(&ctx->hierarchies, node))
+    return false;
+
+  muHierarchy *current_hrc = muse_sparse_get(&ctx->hierarchies, node);
+  muNode parent = current_hrc->parent;
+
+  if (!muse_muid_is_valid(parent)) {
+    return true;
+  }
+
+  muHierarchy *parent_hrc = muse_sparse_get(&ctx->hierarchies, parent);
+  muNode prev = current_hrc->prev_sibling;
+  muNode next = current_hrc->next_sibling;
+
+  if (muse_muid_is_valid(prev)) {
+    muHierarchy *prev_hrc = muse_sparse_get(&ctx->hierarchies, prev);
+    prev_hrc->next_sibling = next;
+  } else {
+    // If there is no previous sibling, this node was the first child.
+    parent_hrc->first_child = next;
+  }
+
+  if (muse_muid_is_valid(next)) {
+    muHierarchy *next_hrc = muse_sparse_get(&ctx->hierarchies, next);
+    next_hrc->prev_sibling = prev;
+  } else {
+    // If there is no next sibling, this node was the last child.
+    parent_hrc->last_child = prev;
+  }
+
+  current_hrc->parent = MUSE_UNDEFINED_MUID;
+  current_hrc->prev_sibling = MUSE_UNDEFINED_MUID;
+  current_hrc->next_sibling = MUSE_UNDEFINED_MUID;
+
+  muse_sparse_insert(&ctx->dirties, parent, (muDirty){});
+
+  return true;
+}
+
+MUSEDEF bool muse_node_append(muContext *ctx, muNode parent, muNode child) {
+  if (!muse_muid_is_valid(parent) || !muse_muid_is_valid(child)) {
+    return false;
+  }
+
+  if (parent.numeral == child.numeral) {
+    return false;
+  }
+
+  muse_node_remove(ctx, child);
+
+  if (!muse_sparse_has(&ctx->hierarchies, parent)) {
+    muse_sparse_insert(&ctx->hierarchies, parent, MUSE_HIERARCHY_DEFAULT);
+  }
+  if (!muse_sparse_has(&ctx->hierarchies, child)) {
+    muse_sparse_insert(&ctx->hierarchies, child, MUSE_HIERARCHY_DEFAULT);
+  }
+
+  muHierarchy *parent_hrc = muse_sparse_get(&ctx->hierarchies, parent);
+  muHierarchy *child_hrc = muse_sparse_get(&ctx->hierarchies, child);
+
+  child_hrc->parent = parent;
+
+  if (!muse_muid_is_valid(parent_hrc->first_child)) {
+    // Case A: First and only child
+    parent_hrc->first_child = child;
+    parent_hrc->last_child = child;
+  } else {
+    // Case B: Append to existing siblings
+    muNode last = parent_hrc->last_child;
+    muHierarchy *last_hrc = muse_sparse_get(&ctx->hierarchies, last);
+
+    last_hrc->next_sibling = child;
+    child_hrc->prev_sibling = last;
+    parent_hrc->last_child = child;
+  }
+
+  muse_sparse_insert(&ctx->dirties, parent, (muDirty){});
+
+  return true;
+}
+
+MUSEDEF bool muse_node_prepend(muContext *ctx, muNode parent, muNode child) {
+  if (!muse_muid_is_valid(parent) || !muse_muid_is_valid(child)) {
+    return false;
+  }
+
+  if (parent.numeral == child.numeral) {
+    return false;
+  }
+
+  muse_node_remove(ctx, child);
+
+  if (!muse_sparse_has(&ctx->hierarchies, parent)) {
+    muse_sparse_insert(&ctx->hierarchies, parent, MUSE_HIERARCHY_DEFAULT);
+  }
+  if (!muse_sparse_has(&ctx->hierarchies, child)) {
+    muse_sparse_insert(&ctx->hierarchies, child, MUSE_HIERARCHY_DEFAULT);
+  }
+
+  muHierarchy *parent_hrc = muse_sparse_get(&ctx->hierarchies, parent);
+  muHierarchy *child_hrc = muse_sparse_get(&ctx->hierarchies, child);
+
+  child_hrc->parent = parent;
+
+  if (!muse_muid_is_valid(parent_hrc->first_child)) {
+    // Case A: First and only child
+    parent_hrc->first_child = child;
+    parent_hrc->last_child = child;
+  } else {
+    // Case B: Prepend to existing siblings
+    muNode first = parent_hrc->first_child;
+    muHierarchy *first_hrc = muse_sparse_get(&ctx->hierarchies, first);
+
+    first_hrc->prev_sibling = child;
+    child_hrc->next_sibling = first;
+    parent_hrc->first_child = child;
+  }
+
+  muse_sparse_insert(&ctx->dirties, parent, (muDirty){});
+
+  return true;
+}
+
+MUSEDEF bool muse_node_put_after(muContext *ctx, muNode sibling, muNode node) {
+  if (!muse_muid_is_valid(sibling) || !muse_muid_is_valid(node)) {
+    return false;
+  }
+
+  if (sibling.numeral == node.numeral) {
+    return false;
+  }
+
+  muse_node_remove(ctx, node);
+
+  if (!muse_sparse_has(&ctx->hierarchies, sibling)) {
+    // Cannot attach to sibling with no parent
+    return false;
+  }
+
+  if (!muse_sparse_has(&ctx->hierarchies, node)) {
+    muse_sparse_insert(&ctx->hierarchies, node, MUSE_HIERARCHY_DEFAULT);
+  }
+
+  muHierarchy *sibling_hrc = muse_sparse_get(&ctx->hierarchies, sibling);
+  muHierarchy *node_hrc = muse_sparse_get(&ctx->hierarchies, node);
+  muNode parent = sibling_hrc->parent;
+
+  if (!muse_muid_is_valid(parent)) {
+    // Sibling got no parent - What kind of trickery are you doing ?
+    return false;
+  }
+
+  muHierarchy *parent_hrc = muse_sparse_get(&ctx->hierarchies, parent);
+
+  muNode sibling_next = sibling_hrc->next_sibling;
+  node_hrc->parent = parent;
+
+  if (muse_muid_is_valid(sibling_next)) {
+    muHierarchy *sibling_next_hrc =
+        muse_sparse_get(&ctx->hierarchies, sibling_next);
+    node_hrc->next_sibling = sibling_next;
+    sibling_next_hrc->prev_sibling = node;
+  } else {
+    // my prev sibling is last child
+    parent_hrc->last_child = node;
+  }
+
+  sibling_hrc->next_sibling = node;
+  node_hrc->prev_sibling = sibling;
+
+  muse_sparse_insert(&ctx->dirties, parent, (muDirty){});
+
+  return true;
+}
+
+MUSEDEF bool muse_node_put_before(muContext *ctx, muNode sibling, muNode node) {
+  if (!muse_muid_is_valid(sibling) || !muse_muid_is_valid(node)) {
+    return false;
+  }
+
+  if (sibling.numeral == node.numeral) {
+    return false;
+  }
+
+  muse_node_remove(ctx, node);
+
+  if (!muse_sparse_has(&ctx->hierarchies, sibling)) {
+    // Cannot attach to sibling with no parent
+    return false;
+  }
+
+  if (!muse_sparse_has(&ctx->hierarchies, node)) {
+    muse_sparse_insert(&ctx->hierarchies, node, MUSE_HIERARCHY_DEFAULT);
+  }
+
+  muHierarchy *sibling_hrc = muse_sparse_get(&ctx->hierarchies, sibling);
+  muHierarchy *node_hrc = muse_sparse_get(&ctx->hierarchies, node);
+  muNode parent = sibling_hrc->parent;
+
+  if (!muse_muid_is_valid(parent)) {
+    // Sibling got no parent - Do you actually understand how this works ?
+    return false;
+  }
+
+  muHierarchy *parent_hrc = muse_sparse_get(&ctx->hierarchies, parent);
+
+  muNode sibling_prev = sibling_hrc->prev_sibling;
+  node_hrc->parent = parent;
+
+  if (muse_muid_is_valid(sibling_prev)) {
+    muHierarchy *sibling_prev_hrc =
+        muse_sparse_get(&ctx->hierarchies, sibling_prev);
+    node_hrc->prev_sibling = sibling_prev;
+    sibling_prev_hrc->next_sibling = node;
+  } else {
+    // my prev sibling is first child
+    parent_hrc->first_child = node;
+  }
+
+  node_hrc->next_sibling = sibling;
+  sibling_hrc->prev_sibling = node;
+
+  muse_sparse_insert(&ctx->dirties, parent, (muDirty){});
+
+  return true;
 }
 
 #endif // MUSE_IMPLEMENTATION
