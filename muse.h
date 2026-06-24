@@ -259,7 +259,9 @@ typedef struct {
 
 MUSEDEF void muse_free_context(muContext *ctx);
 
+// Set this node as the root of the tree
 MUSEDEF void muse_root_attach(muContext *ctx, muNode node);
+// Remove the current root (not cleaned up)
 MUSEDEF void muse_root_drop(muContext *ctx);
 
 // Append a child node to the end of the parent node tree
@@ -280,6 +282,20 @@ MUSEDEF bool muse_node_put_before(muContext *ctx, muNode sibling, muNode node);
 MUSEDEF muNode muse_node_create(muContext *ctx);
 // Destroy a node from the tree removing it children at the same time
 MUSEDEF void muse_node_destroy(muContext *ctx, muNode node);
+
+// Mark a node as dirty
+MUSEDEF void muse_node_set_dirty(muContext *ctx, muNode node);
+
+// Add constraints or overwrite the current existing contraints on a node
+MUSEDEF void muse_constraints_set(muContext *ctx, muNode node,
+                                  muConstraints constraints);
+
+// Get a pointer to a node constraints
+// You may want to set the node as dirty afterwards
+MUSEDEF muConstraints *muse_constraints_get_mut(muContext *ctx, muNode node);
+
+// Compute the final layout filling up the context with muComputed
+MUSEDEF void muse_compute_layout(muContext *ctx);
 
 #endif // MUSE_H_
 
@@ -389,7 +405,7 @@ MUSEDEF bool muse_node_remove(muContext *ctx, muNode node) {
   current_hrc->prev_sibling = MUSE_UNDEFINED_MUID;
   current_hrc->next_sibling = MUSE_UNDEFINED_MUID;
 
-  muse_sparse_insert(&ctx->dirties, parent, (muDirty){});
+  muse_node_set_dirty(ctx, parent);
 
   return true;
 }
@@ -431,7 +447,7 @@ MUSEDEF bool muse_node_append(muContext *ctx, muNode parent, muNode child) {
     parent_hrc->last_child = child;
   }
 
-  muse_sparse_insert(&ctx->dirties, parent, (muDirty){});
+  muse_node_set_dirty(ctx, parent);
 
   return true;
 }
@@ -473,7 +489,7 @@ MUSEDEF bool muse_node_prepend(muContext *ctx, muNode parent, muNode child) {
     parent_hrc->first_child = child;
   }
 
-  muse_sparse_insert(&ctx->dirties, parent, (muDirty){});
+  muse_node_set_dirty(ctx, parent);
 
   return true;
 }
@@ -525,7 +541,7 @@ MUSEDEF bool muse_node_put_after(muContext *ctx, muNode sibling, muNode node) {
   sibling_hrc->next_sibling = node;
   node_hrc->prev_sibling = sibling;
 
-  muse_sparse_insert(&ctx->dirties, parent, (muDirty){});
+  muse_node_set_dirty(ctx, parent);
 
   return true;
 }
@@ -577,9 +593,36 @@ MUSEDEF bool muse_node_put_before(muContext *ctx, muNode sibling, muNode node) {
   node_hrc->next_sibling = sibling;
   sibling_hrc->prev_sibling = node;
 
-  muse_sparse_insert(&ctx->dirties, parent, (muDirty){});
+  muse_node_set_dirty(ctx, parent);
 
   return true;
 }
+
+MUSEDEF void muse_node_set_dirty(muContext *ctx, muNode node) {
+  if (!muse_muid_is_valid(node))
+    return;
+  muse_sparse_insert(&ctx->dirties, node, (muDirty){});
+}
+
+MUSEDEF void muse_constraints_set(muContext *ctx, muNode node,
+                                  muConstraints constraints) {
+  if (!muse_muid_is_valid(node))
+    return;
+
+  muse_sparse_insert(&ctx->constraints, node, constraints);
+  muse_node_set_dirty(ctx, node);
+}
+
+MUSEDEF muConstraints *muse_constraints_get_mut(muContext *ctx, muNode node) {
+  if (!muse_muid_is_valid(node))
+    return NULL;
+
+  if (!muse_sparse_has(&ctx->constraints, node))
+    return NULL;
+
+  return muse_sparse_get(&ctx->constraints, node);
+}
+
+MUSEDEF void muse_compute_layout(muContext *ctx) {}
 
 #endif // MUSE_IMPLEMENTATION
