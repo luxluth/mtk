@@ -226,6 +226,7 @@ typedef struct {
 
   muPositionStrategy positioning;
   muFlexDirection flex_direction;
+  float padding;
 } muConstraints;
 
 #define mu_position(s, ...) ((muPositionStrategy){.strategy = s, __VA_ARGS__})
@@ -328,14 +329,28 @@ MUSEDEF muNode muse_node_create(muContext *ctx) {
 }
 
 MUSEDEF void muse_node_destroy(muContext *ctx, muNode node) {
+  if (!muse_muid_is_valid(node))
+    return;
+
+  muse_node_remove(ctx, node);
+  muHierarchy *hrc = muse_sparse_get(&ctx->hierarchies, node);
+  if (hrc != NULL) {
+    muNode current_child = hrc->first_child;
+    while (muse_muid_is_valid(current_child)) {
+      muHierarchy *child_hrc =
+          muse_sparse_get(&ctx->hierarchies, current_child);
+      muNode next = child_hrc->next_sibling;
+
+      muse_node_destroy(ctx, current_child);
+      current_child = next;
+    }
+  }
+
   muse_sparse_remove(&ctx->computed, node);
   muse_sparse_remove(&ctx->constraints, node);
   muse_sparse_remove(&ctx->dirties, node);
-
-  // TODO: set parent as dirty first
   muse_sparse_remove(&ctx->hierarchies, node);
 
-  // TODO: do more than that
   muse_da_append(&ctx->available_ids, node);
 }
 
