@@ -21,5 +21,7 @@ int main(void) {
   printf("@(%lu|%lu)\n", root.numeral, root.generation);
   printf("@(%lu|%lu)\n", child.numeral, child.generation);
 
+  muse_compute_layout(&ctx, 800, 600);
+
   return 0;
 }

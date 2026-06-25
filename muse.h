@@ -1,18 +1,30 @@
 #ifndef MUSE_H_
 #define MUSE_H_
 
-#include <assert.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 #ifndef MUSEDEF
 #define MUSEDEF
 #endif /* MUSEDEF */
 
 //////////////////// da (Tsoding way)
+
+#ifndef MUSE_ASSERT
+#include <assert.h>
+#define MUSE_ASSERT assert
+#endif /* MUSE_ASSERT */
+
+#ifndef MUSE_REALLOC
+#include <stdlib.h>
+#define MUSE_REALLOC realloc
+#endif /* MUSE_REALLOC */
+
+#ifndef MUSE_FREE
+#include <stdlib.h>
+#define MUSE_FREE free
+#endif /* MUSE_FREE */
 
 #ifdef __cplusplus
 #define __MUSE_DECLTYPE_CAST(T) (decltype(T))
@@ -32,8 +44,8 @@
         (da)->capacity *= 2;                                                   \
       }                                                                        \
       (da)->items = __MUSE_DECLTYPE_CAST((da)->items)                          \
-          realloc((da)->items, (da)->capacity * sizeof(*(da)->items));         \
-      assert((da)->items != NULL && "Buy more RAM lol");                       \
+          MUSE_REALLOC((da)->items, (da)->capacity * sizeof(*(da)->items));    \
+      MUSE_ASSERT((da)->items != NULL && "Buy more RAM lol");                  \
     }                                                                          \
   } while (0)
 
@@ -51,7 +63,9 @@
     (da)->count += (new_items_count);                                          \
   } while (0)
 
-#define muse_da_free(da) free((da)->items)
+#define muse_da_free(da) MUSE_FREE((da)->items)
+#define muse_da_foreach(Type, it, da)                                          \
+  for (Type *it = (da)->items; it < (da)->items + (da)->count; ++it)
 
 #define MUSE_DA(T)                                                             \
   struct {                                                                     \
@@ -140,6 +154,21 @@
 
 //////
 
+#define muse_first_child(ctx, parent)                                          \
+  (muse_sparse_has(&(ctx)->hierarchies, (parent))                              \
+       ? muse_sparse_get(&(ctx)->hierarchies, (parent))->first_child           \
+       : MUSE_UNDEFINED_MUID)
+
+#define muse_next_sibling(ctx, node)                                           \
+  (muse_sparse_has(&(ctx)->hierarchies, (node))                                \
+       ? muse_sparse_get(&(ctx)->hierarchies, (node))->next_sibling            \
+       : MUSE_UNDEFINED_MUID)
+
+#define muse_foreach_child(it_name, ctx, parent)                               \
+  for (muNode it_name = muse_first_child((ctx), (parent));                     \
+       muse_muid_is_valid(it_name);                                            \
+       it_name = muse_next_sibling((ctx), it_name))
+
 typedef enum {
   MU_PERCENT,
   MU_FIXED,
@@ -227,6 +256,7 @@ typedef struct {
   muPositionStrategy positioning;
   muFlexDirection flex_direction;
   float padding;
+  float border;
 } muConstraints;
 
 #define mu_position(s, ...) ((muPositionStrategy){.strategy = s, __VA_ARGS__})
@@ -245,13 +275,39 @@ typedef struct {
 } muDirty;
 
 typedef struct {
+  char *data;
+  void *userdata;
+} muText;
+
+typedef struct muContext muContext;
+
+typedef struct {
+  // The actual horizontal space the text occupies
+  float computed_width;
+  // The total vertical space, accounting for all wrapped lines and line-height
+  // spacing.
+  float computed_height;
+  // The distance from the top of the computed bounding box to the typographic
+  // baseline
+  // TODO: add alignement strategy (Not yet implememted)
+  float baseline_offset;
+} muTextComputedOutput;
+
+typedef muTextComputedOutput muTextSizingFunc(muContext *ctx, muId text,
+                                              float available_width,
+                                              float available_height);
+
+typedef struct muContext {
   MUSE_SPARSE_SET(muHierarchy) hierarchies;
   MUSE_SPARSE_SET(muConstraints) constraints;
   MUSE_SPARSE_SET(muComputed) computed;
   MUSE_SPARSE_SET(muDirty) dirties;
+  MUSE_SPARSE_SET(muText) texts;
 
   size_t next_entity_numeral;
   MUSE_DA(muId) available_ids;
+
+  muTextSizingFunc *text_sizing_func;
 
   muNode root;
   bool rooted; // Just to make it nicer to use
@@ -295,11 +351,12 @@ MUSEDEF void muse_constraints_set(muContext *ctx, muNode node,
 MUSEDEF muConstraints *muse_constraints_get_mut(muContext *ctx, muNode node);
 
 // Compute the final layout filling up the context with muComputed
-MUSEDEF void muse_compute_layout(muContext *ctx);
+MUSEDEF void muse_compute_layout(muContext *ctx, float viewport_width,
+                                 float viewport_height);
 
 #endif // MUSE_H_
 
-#define MUSE_IMPLEMENTATION
+// #define MUSE_IMPLEMENTATION
 
 #ifdef MUSE_IMPLEMENTATION
 
@@ -623,6 +680,241 @@ MUSEDEF muConstraints *muse_constraints_get_mut(muContext *ctx, muNode node) {
   return muse_sparse_get(&ctx->constraints, node);
 }
 
-MUSEDEF void muse_compute_layout(muContext *ctx) {}
+static void muse__m_compute_top_down(muContext *ctx, muNode node,
+                                     muComputed parent_bounds) {
+
+  if (!muse_muid_is_valid(node))
+    return;
+
+  if (!muse_sparse_has(&ctx->computed, node)) {
+    muse_sparse_insert(&ctx->computed, node, (muComputed){0});
+  }
+
+  muComputed *comp = muse_sparse_get(&ctx->computed, node);
+  muConstraints *cons = muse_sparse_get(&ctx->constraints, node);
+
+  if (cons != NULL && muse_sparse_has(&ctx->dirties, node)) {
+    // WIDTH
+    if (cons->dimension.width.kind == MU_FIXED) {
+      comp->w = (float)cons->dimension.width.px;
+    } else if (cons->dimension.width.kind == MU_PERCENT) {
+      comp->w = parent_bounds.w * cons->dimension.width.percent;
+    } else {
+      // MU_FIT or MU_FILL
+      comp->w = 0.0f;
+    }
+
+    // HEIGHT
+    if (cons->dimension.height.kind == MU_FIXED) {
+      comp->h = (float)cons->dimension.height.px;
+    } else if (cons->dimension.height.kind == MU_PERCENT) {
+      comp->h = parent_bounds.h * cons->dimension.height.percent;
+    } else {
+      comp->h = 0.0f;
+    }
+
+    // ABSOLUTE POSITIONING
+    if (cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE) {
+      bool has_left = !isnan(cons->positioning.absolute.left);
+      bool has_right = !isnan(cons->positioning.absolute.right);
+      bool has_top = !isnan(cons->positioning.absolute.top);
+      bool has_bottom = !isnan(cons->positioning.absolute.bottom);
+
+      if (has_left && has_right) {
+        if (cons->dimension.width.kind == MU_FIT ||
+            cons->dimension.width.kind == MU_FILL) {
+          comp->w = parent_bounds.w - cons->positioning.absolute.left -
+                    cons->positioning.absolute.right;
+          comp->x = parent_bounds.x + cons->positioning.absolute.left;
+        } else {
+          // Left wins
+          comp->x = parent_bounds.x + cons->positioning.absolute.left;
+        }
+      } else if (has_left) {
+        comp->x = parent_bounds.x + cons->positioning.absolute.left;
+      } else if (has_right) {
+        comp->x = parent_bounds.x + parent_bounds.w -
+                  cons->positioning.absolute.right - comp->w;
+      }
+
+      if (has_top && has_bottom) {
+        if (cons->dimension.height.kind == MU_FIT ||
+            cons->dimension.height.kind == MU_FILL) {
+          comp->h = parent_bounds.h - cons->positioning.absolute.top -
+                    cons->positioning.absolute.bottom;
+          comp->y = parent_bounds.y + cons->positioning.absolute.top;
+        } else {
+          // Top wins
+          comp->y = parent_bounds.y + cons->positioning.absolute.top;
+        }
+      } else if (has_top) {
+        comp->y = parent_bounds.y + cons->positioning.absolute.top;
+      } else if (has_bottom) {
+        comp->y = parent_bounds.y + parent_bounds.h -
+                  cons->positioning.absolute.bottom - comp->h;
+      }
+    }
+  }
+
+  // BORDER-BOX: Shrink the available bounds for the children
+  muComputed my_bounds = *muse_sparse_get(&ctx->computed, node);
+  float offset = (cons != NULL) ? (cons->padding + cons->border) : 0.0f;
+
+  muComputed content_bounds = {.x = my_bounds.x + offset,
+                               .y = my_bounds.y + offset,
+                               .w = my_bounds.w - (offset * 2.0f),
+                               .h = my_bounds.h - (offset * 2.0f)};
+
+  if (content_bounds.w < 0.0f)
+    content_bounds.w = 0.0f;
+  if (content_bounds.h < 0.0f)
+    content_bounds.h = 0.0f;
+
+  muse_foreach_child(child, ctx, node) {
+    muse__m_compute_top_down(ctx, child, content_bounds);
+  }
+}
+
+static void muse__m_compute_bottom_up(muContext *ctx, muNode node) {
+  if (!muse_muid_is_valid(node))
+    return;
+
+  muse_foreach_child(child, ctx, node) {
+    muse__m_compute_bottom_up(ctx, child);
+  }
+
+  muConstraints *cons = muse_sparse_get(&ctx->constraints, node);
+  muComputed *comp = muse_sparse_get(&ctx->computed, node);
+
+  if (cons != NULL && muse_sparse_has(&ctx->dirties, node)) {
+    bool fit_w = cons->dimension.width.kind == MU_FIT;
+    bool fit_h = cons->dimension.height.kind == MU_FIT;
+
+    if (fit_w || fit_h) {
+      float intrinsic_w = 0.0f;
+      float intrinsic_h = 0.0f;
+
+      if (muse_sparse_has(&ctx->texts, node) && ctx->text_sizing_func != NULL) {
+        float avail_w = fit_w ? INFINITY : comp->w;
+        float avail_h = fit_h ? INFINITY : comp->h;
+
+        muTextComputedOutput text_size =
+            ctx->text_sizing_func(ctx, node, avail_w, avail_h);
+
+        intrinsic_w = text_size.computed_width;
+        intrinsic_h = text_size.computed_height;
+      } else {
+        float sum_main = 0.0f;
+        float max_cross = 0.0f;
+
+        muse_foreach_child(child, ctx, node) {
+          muConstraints *c_cons = muse_sparse_get(&ctx->constraints, child);
+          if (c_cons &&
+              c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE)
+            continue;
+
+          muComputed *c_comp = muse_sparse_get(&ctx->computed, child);
+          if (!c_comp)
+            continue;
+
+          if (cons->flex_direction == MUSE_FLEX_ROW) {
+            sum_main += c_comp->w;
+            if (c_comp->h > max_cross)
+              max_cross = c_comp->h;
+          } else {
+            sum_main += c_comp->h;
+            if (c_comp->w > max_cross)
+              max_cross = c_comp->w;
+          }
+        }
+
+        intrinsic_w =
+            (cons->flex_direction == MUSE_FLEX_ROW) ? sum_main : max_cross;
+        intrinsic_h =
+            (cons->flex_direction == MUSE_FLEX_COLUMN) ? sum_main : max_cross;
+      }
+
+      float total_offset = (cons->padding + cons->border) * 2.0f;
+
+      if (fit_w)
+        comp->w = intrinsic_w + total_offset;
+      if (fit_h)
+        comp->h = intrinsic_h + total_offset;
+    }
+  }
+}
+
+MUSEDEF void muse_compute_layout(muContext *ctx, float viewport_width,
+                                 float viewport_height) {
+  if (!ctx->rooted)
+    return;
+  if (ctx->dirties.dense.count == 0)
+    return;
+
+  // PASS 1: Dirty propagation
+  for (size_t i = 0; i < ctx->dirties.dense.count; i++) {
+    muNode dirty_node = ctx->dirties.dense.items[i];
+
+    muConstraints *constraints = muse_sparse_get(&ctx->constraints, dirty_node);
+    muHierarchy *hrc = muse_sparse_get(&ctx->hierarchies, dirty_node);
+
+    if (constraints == NULL || hrc == NULL)
+      continue;
+
+    // A) Pull : If my size changed, does my parent care ?
+    muNode curr_parent = hrc->parent;
+    while (muse_muid_is_valid(curr_parent)) {
+      // Parent already dirty we move on
+      if (muse_sparse_has(&ctx->dirties, curr_parent))
+        break;
+
+      muConstraints *p_cons = muse_sparse_get(&ctx->constraints, curr_parent);
+      if (p_cons != NULL && (p_cons->dimension.width.kind == MU_FIT ||
+                             p_cons->dimension.height.kind == MU_FIT)) {
+        // Parent is FIT so it cares about the children size
+        muse_node_set_dirty(ctx, curr_parent);
+
+        // Walking up
+        muHierarchy *p_hrc = muse_sparse_get(&ctx->hierarchies, curr_parent);
+        curr_parent = (p_hrc != NULL) ? p_hrc->parent : MUSE_UNDEFINED_MUID;
+      } else {
+        // Parent doesn't care dimension is FIXED, PERCENT or FILL
+        break;
+      }
+    }
+
+    // B) Push: If my size changed, do my children care ?
+    muse_foreach_child(child, ctx, dirty_node) {
+      if (muse_sparse_has(&ctx->dirties, child))
+        continue;
+
+      muConstraints *c_cons = muse_sparse_get(&ctx->constraints, child);
+      if (c_cons != NULL && (c_cons->dimension.width.kind == MU_PERCENT ||
+                             c_cons->dimension.height.kind == MU_PERCENT ||
+                             c_cons->dimension.width.kind == MU_FILL ||
+                             c_cons->dimension.height.kind == MU_FILL)) {
+        // Child relies on a fraction of my available space
+        muse_node_set_dirty(ctx, child);
+
+        // NOTE: We don't recurse manually here. By inserting it into
+        // the array, the main `for` loop will eventually reach this
+        // child and process its sub-tree automaticly.
+      }
+    }
+  }
+
+  muComputed viewport_bounds = {
+      .x = 0.0f, .y = 0.0f, .w = viewport_width, .h = viewport_height};
+
+  // PASS 2: Available Space
+  muse__m_compute_top_down(ctx, ctx->root, viewport_bounds);
+
+  // PASS 3: Intrinsic Sizing
+  muse__m_compute_bottom_up(ctx, ctx->root);
+
+  // PASS 4: Flex Distribution
+  // PASS 5: Positional Alignment
+  // PASS 6: Clear Dirties
+}
 
 #endif // MUSE_IMPLEMENTATION
