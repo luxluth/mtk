@@ -338,17 +338,25 @@ MUSEDEF bool muse_node_put_before(muContext *ctx, muNode sibling, muNode node);
 MUSEDEF muNode muse_node_create(muContext *ctx);
 // Destroy a node from the tree removing it children at the same time
 MUSEDEF void muse_node_destroy(muContext *ctx, muNode node);
-
 // Mark a node as dirty
 MUSEDEF void muse_node_set_dirty(muContext *ctx, muNode node);
 
 // Add constraints or overwrite the current existing contraints on a node
 MUSEDEF void muse_constraints_set(muContext *ctx, muNode node,
                                   muConstraints constraints);
-
 // Get a pointer to a node constraints
 // You may want to set the node as dirty afterwards
-MUSEDEF muConstraints *muse_constraints_get_mut(muContext *ctx, muNode node);
+MUSEDEF muConstraints *muse_constraints_get(muContext *ctx, muNode node);
+
+// Set a node to add like a text by provisioning a text structure
+MUSEDEF void muse_text_set(muContext *ctx, muNode node, muText text);
+// Remove the ability of a node to act like a text
+// I don't know why you'll need this but it is there
+MUSEDEF void muse_text_unset(muContext *ctx, muNode node);
+// Get a pointer to a `muText` from a node
+// If you happen to modify the text you may want to also call
+// `muse_node_set_dirty`
+MUSEDEF muText *muse_text_get(muContext *ctx, muNode node);
 
 // Compute the final layout filling up the context with muComputed
 MUSEDEF void muse_compute_layout(muContext *ctx, float viewport_width,
@@ -356,7 +364,7 @@ MUSEDEF void muse_compute_layout(muContext *ctx, float viewport_width,
 
 #endif // MUSE_H_
 
-// #define MUSE_IMPLEMENTATION
+#define MUSE_IMPLEMENTATION
 
 #ifdef MUSE_IMPLEMENTATION
 
@@ -670,7 +678,7 @@ MUSEDEF void muse_constraints_set(muContext *ctx, muNode node,
   muse_node_set_dirty(ctx, node);
 }
 
-MUSEDEF muConstraints *muse_constraints_get_mut(muContext *ctx, muNode node) {
+MUSEDEF muConstraints *muse_constraints_get(muContext *ctx, muNode node) {
   if (!muse_muid_is_valid(node))
     return NULL;
 
@@ -842,6 +850,31 @@ static void muse__m_compute_bottom_up(muContext *ctx, muNode node) {
         comp->h = intrinsic_h + total_offset;
     }
   }
+}
+
+MUSEDEF void muse_text_set(muContext *ctx, muNode node, muText text) {
+  if (!muse_muid_is_valid(node))
+    return;
+  muse_sparse_insert(&ctx->texts, node, text);
+  muse_node_set_dirty(ctx, node);
+}
+
+MUSEDEF void muse_text_unset(muContext *ctx, muNode node) {
+  if (!muse_muid_is_valid(node))
+    return;
+
+  muse_sparse_remove(&ctx->texts, node);
+  muse_node_set_dirty(ctx, node);
+}
+
+MUSEDEF muText *muse_text_get(muContext *ctx, muNode node) {
+  if (!muse_muid_is_valid(node))
+    return NULL;
+
+  if (!muse_sparse_has(&ctx->texts, node))
+    return NULL;
+
+  return muse_sparse_get(&ctx->texts, node);
 }
 
 MUSEDEF void muse_compute_layout(muContext *ctx, float viewport_width,
