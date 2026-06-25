@@ -1,0 +1,120 @@
+pub mod colors;
+pub(crate) mod node;
+pub mod render;
+pub mod style;
+pub(crate) mod sys;
+pub mod text;
+
+pub use crate::node::Node;
+use crate::render::RenderCommand;
+pub use crate::style::*;
+pub use crate::text::*;
+use std::collections::HashMap;
+use std::ffi::CString;
+
+pub struct Context {
+    pub(crate) ctx: *mut sys::muContext,
+    pub(crate) texts: HashMap<Node, CString>,
+    pub(crate) text_userdatas: HashMap<Node, *mut Box<dyn std::any::Any>>,
+}
+
+impl Context {
+    pub fn new() -> Self {
+        let ctx = Box::into_raw(Box::new(unsafe { std::mem::zeroed::<sys::muContext>() }));
+        Self {
+            ctx,
+            texts: HashMap::new(),
+            text_userdatas: HashMap::new(),
+        }
+    }
+
+    /// Create a new valid node. It's not inserted in the tree but it exists.
+    pub fn create_node(&mut self) -> Node {
+        Node(unsafe { sys::muse_node_create(self.ctx) })
+    }
+
+    /// Destroy a node from the tree removing its children at the same time.
+    pub fn destroy_node(&mut self, node: Node) {
+        self.texts.remove(&node);
+        if let Some(ptr) = self.text_userdatas.remove(&node) {
+            unsafe {
+                let _ = Box::from_raw(ptr);
+            }
+        }
+        unsafe {
+            sys::muse_node_destroy(self.ctx, node.0);
+        }
+    }
+
+    /// Set this node as the root of the tree.
+    pub fn root_attach(&mut self, node: Node) {
+        unsafe {
+            sys::muse_root_attach(self.ctx, node.0);
+        }
+    }
+
+    /// Remove the current root (not cleaned up or destroyed).
+    pub fn root_drop(&mut self) {
+        unsafe {
+            sys::muse_root_drop(self.ctx);
+        }
+    }
+
+    /// Compute the final layout filling up the context with computed bounds.
+    pub fn compute_layout(&mut self, viewport_width: f32, viewport_height: f32) {
+        unsafe {
+            sys::muse_compute_layout(self.ctx, viewport_width, viewport_height);
+        }
+    }
+
+    /// Builds a flattened, Z-sorted array of commands to be consumed by the renderer.
+    pub fn build_render_list(&mut self, viewport: Rect) {
+        unsafe {
+            sys::muse_build_render_list(self.ctx, viewport.into());
+        }
+    }
+
+    /// Iterates over the current render list commands.
+    pub fn render_list(&self) -> impl Iterator<Item = RenderCommand<'_>> {
+        let list = unsafe { &(*self.ctx).render_list };
+        let slice = if list.items.is_null() || list.count == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(list.items, list.count) }
+        };
+
+        slice.iter().map(|cmd| RenderCommand { cmd })
+    }
+
+    /// Sets the text sizing function used during layout computation.
+    pub fn set_text_sizing_func<F>(&mut self, func: F)
+    where
+        F: Fn(Node, &str, Option<&dyn std::any::Any>, f32, f32) -> TextComputedOutput + 'static,
+    {
+        crate::text::SIZING_FUNCS.with(|funcs| {
+            funcs.borrow_mut().insert(self.ctx as usize, Box::new(func));
+        });
+        unsafe {
+            (*self.ctx).text_sizing_func = Some(crate::text::text_sizing_trampoline);
+        }
+    }
+}
+
+impl Drop for Context {
+    fn drop(&mut self) {
+        crate::text::SIZING_FUNCS.with(|funcs| {
+            funcs.borrow_mut().remove(&(self.ctx as usize));
+        });
+
+        for (_, ptr) in self.text_userdatas.drain() {
+            unsafe {
+                let _ = Box::from_raw(ptr);
+            }
+        }
+
+        unsafe {
+            sys::muse_context_free(self.ctx);
+            let _ = Box::from_raw(self.ctx);
+        }
+    }
+}

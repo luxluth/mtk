@@ -476,8 +476,6 @@ MUSEDEF muComputed *muse_computed_get(muContext *ctx, muNode node);
 
 #endif // MUSE_H_
 
-#define MUSE_IMPLEMENTATION
-
 #ifdef MUSE_IMPLEMENTATION
 
 MUSEDEF bool muse_muid_is_valid(muId id) {
