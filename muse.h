@@ -231,6 +231,22 @@ typedef enum {
 } muFlexDirection;
 
 typedef enum {
+  MUSE_JUSTIFY_START = 0,
+  MUSE_JUSTIFY_CENTER,
+  MUSE_JUSTIFY_END,
+  MUSE_JUSTIFY_SPACE_BETWEEN,
+  MUSE_JUSTIFY_SPACE_AROUND,
+  MUSE_JUSTIFY_SPACE_EVENLY
+} muJustifyContent;
+
+typedef enum {
+  MUSE_ALIGN_START = 0,
+  MUSE_ALIGN_CENTER,
+  MUSE_ALIGN_END,
+  MUSE_ALIGN_STRETCH
+} muAlignItems;
+
+typedef enum {
   MUSE_POSITION_STRATEGY_INFLOW = 0,
   MUSE_POSITION_STRATEGY_ABSOLUTE = 1,
 } muPositionStrategyKind;
@@ -255,6 +271,11 @@ typedef struct {
 
   muPositionStrategy positioning;
   muFlexDirection flex_direction;
+
+  muJustifyContent justify_content;
+  muAlignItems align_items;
+  float gap;
+
   float padding;
   float border;
 } muConstraints;
@@ -348,7 +369,7 @@ MUSEDEF void muse_constraints_set(muContext *ctx, muNode node,
 // You may want to set the node as dirty afterwards
 MUSEDEF muConstraints *muse_constraints_get(muContext *ctx, muNode node);
 
-// Set a node to add like a text by provisioning a text structure
+// Transform a node into a text element
 MUSEDEF void muse_text_set(muContext *ctx, muNode node, muText text);
 // Remove the ability of a node to act like a text
 // I don't know why you'll need this but it is there
@@ -388,6 +409,7 @@ MUSEDEF void muse_free_context(muContext *ctx) {
 MUSEDEF void muse_root_attach(muContext *ctx, muNode node) {
   ctx->root = node;
   ctx->rooted = true;
+  muse_node_set_dirty(ctx, node);
 }
 
 MUSEDEF void muse_root_drop(muContext *ctx) {
@@ -431,6 +453,7 @@ MUSEDEF void muse_node_destroy(muContext *ctx, muNode node) {
   muse_sparse_remove(&ctx->constraints, node);
   muse_sparse_remove(&ctx->dirties, node);
   muse_sparse_remove(&ctx->hierarchies, node);
+  muse_sparse_remove(&ctx->texts, node);
 
   muse_da_append(&ctx->available_ids, node);
 }
@@ -688,6 +711,31 @@ MUSEDEF muConstraints *muse_constraints_get(muContext *ctx, muNode node) {
   return muse_sparse_get(&ctx->constraints, node);
 }
 
+MUSEDEF void muse_text_set(muContext *ctx, muNode node, muText text) {
+  if (!muse_muid_is_valid(node))
+    return;
+  muse_sparse_insert(&ctx->texts, node, text);
+  muse_node_set_dirty(ctx, node);
+}
+
+MUSEDEF void muse_text_unset(muContext *ctx, muNode node) {
+  if (!muse_muid_is_valid(node))
+    return;
+
+  muse_sparse_remove(&ctx->texts, node);
+  muse_node_set_dirty(ctx, node);
+}
+
+MUSEDEF muText *muse_text_get(muContext *ctx, muNode node) {
+  if (!muse_muid_is_valid(node))
+    return NULL;
+
+  if (!muse_sparse_has(&ctx->texts, node))
+    return NULL;
+
+  return muse_sparse_get(&ctx->texts, node);
+}
+
 static void muse__m_compute_top_down(muContext *ctx, muNode node,
                                      muComputed parent_bounds) {
 
@@ -814,6 +862,7 @@ static void muse__m_compute_bottom_up(muContext *ctx, muNode node) {
       } else {
         float sum_main = 0.0f;
         float max_cross = 0.0f;
+        int child_count = 0;
 
         muse_foreach_child(child, ctx, node) {
           muConstraints *c_cons = muse_sparse_get(&ctx->constraints, child);
@@ -825,6 +874,8 @@ static void muse__m_compute_bottom_up(muContext *ctx, muNode node) {
           if (!c_comp)
             continue;
 
+          child_count += 1;
+
           if (cons->flex_direction == MUSE_FLEX_ROW) {
             sum_main += c_comp->w;
             if (c_comp->h > max_cross)
@@ -834,6 +885,10 @@ static void muse__m_compute_bottom_up(muContext *ctx, muNode node) {
             if (c_comp->w > max_cross)
               max_cross = c_comp->w;
           }
+        }
+
+        if (child_count > 1) {
+          sum_main += cons->gap * (child_count - 1);
         }
 
         intrinsic_w =
@@ -852,29 +907,219 @@ static void muse__m_compute_bottom_up(muContext *ctx, muNode node) {
   }
 }
 
-MUSEDEF void muse_text_set(muContext *ctx, muNode node, muText text) {
-  if (!muse_muid_is_valid(node))
-    return;
-  muse_sparse_insert(&ctx->texts, node, text);
-  muse_node_set_dirty(ctx, node);
-}
-
-MUSEDEF void muse_text_unset(muContext *ctx, muNode node) {
+static void muse__m_compute_flex_distribution(muContext *ctx, muNode node) {
   if (!muse_muid_is_valid(node))
     return;
 
-  muse_sparse_remove(&ctx->texts, node);
-  muse_node_set_dirty(ctx, node);
+  muConstraints *cons = muse_sparse_get(&ctx->constraints, node);
+  muComputed *comp = muse_sparse_get(&ctx->computed, node);
+
+  if (cons != NULL && comp != NULL) {
+    float offset = cons->padding + cons->border;
+    float inner_w = comp->w - (offset * 2.0f);
+    float inner_h = comp->h - (offset * 2.0f);
+    if (inner_w < 0.0f)
+      inner_w = 0.0f;
+    if (inner_h < 0.0f)
+      inner_h = 0.0f;
+
+    int fill_count = 0;
+    int valid_child_count = 0;
+    float used_main_space = 0.0f;
+
+    // A) We measure how much space is used by non-fill children
+    muse_foreach_child(child, ctx, node) {
+      muConstraints *c_cons = muse_sparse_get(&ctx->constraints, child);
+      muComputed *c_comp = muse_sparse_get(&ctx->computed, child);
+
+      if (c_cons == NULL || c_comp == NULL ||
+          c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE)
+        continue;
+
+      valid_child_count += 1;
+
+      bool is_main_fill = (cons->flex_direction == MUSE_FLEX_ROW)
+                              ? (c_cons->dimension.width.kind == MU_FILL)
+                              : (c_cons->dimension.height.kind == MU_FILL);
+
+      if (is_main_fill) {
+        fill_count += 1;
+      } else {
+        used_main_space +=
+            (cons->flex_direction == MUSE_FLEX_ROW) ? c_comp->w : c_comp->h;
+      }
+    }
+
+    if (valid_child_count > 1) {
+      used_main_space += cons->gap * (valid_child_count - 1);
+    }
+
+    // B) We calculate distribution size
+    float available_main =
+        (cons->flex_direction == MUSE_FLEX_ROW) ? inner_w : inner_h;
+    float remaining_space = available_main - used_main_space;
+    if (remaining_space < 0.0f)
+      remaining_space = 0.0f;
+
+    float space_per_fill =
+        (fill_count > 0) ? (remaining_space / (float)fill_count) : 0.0f;
+
+    // C) We assign the fill space
+    muse_foreach_child(child, ctx, node) {
+      muConstraints *c_cons = muse_sparse_get(&ctx->constraints, child);
+      muComputed *c_comp = muse_sparse_get(&ctx->computed, child);
+
+      if (c_cons == NULL || c_comp == NULL ||
+          c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE)
+        continue;
+
+      if (c_cons->dimension.width.kind == MU_FILL) {
+        c_comp->w =
+            (cons->flex_direction == MUSE_FLEX_ROW) ? space_per_fill : inner_w;
+      }
+
+      if (c_cons->dimension.height.kind == MU_FILL) {
+        c_comp->h = (cons->flex_direction == MUSE_FLEX_COLUMN) ? space_per_fill
+                                                               : inner_h;
+      }
+    }
+  }
+
+  muse_foreach_child(child, ctx, node) {
+    muse__m_compute_flex_distribution(ctx, child);
+  }
 }
 
-MUSEDEF muText *muse_text_get(muContext *ctx, muNode node) {
+static void muse__m_compute_positional_alignment(muContext *ctx, muNode node,
+                                                 float start_x, float start_y) {
   if (!muse_muid_is_valid(node))
-    return NULL;
+    return;
 
-  if (!muse_sparse_has(&ctx->texts, node))
-    return NULL;
+  muConstraints *cons = muse_sparse_get(&ctx->constraints, node);
+  muComputed *comp = muse_sparse_get(&ctx->computed, node);
 
-  return muse_sparse_get(&ctx->texts, node);
+  if (cons != NULL && comp != NULL) {
+    // Absolute nodes already calculated their X/Y in Pass 2
+    if (cons->positioning.strategy != MUSE_POSITION_STRATEGY_ABSOLUTE) {
+      comp->x = start_x;
+      comp->y = start_y;
+    }
+
+    float offset = cons->padding + cons->border;
+    float inner_w = comp->w - (offset * 2.0f);
+    float inner_h = comp->h - (offset * 2.0f);
+
+    float inner_main =
+        (cons->flex_direction == MUSE_FLEX_ROW) ? inner_w : inner_h;
+    float inner_cross =
+        (cons->flex_direction == MUSE_FLEX_ROW) ? inner_h : inner_w;
+
+    float total_main = 0.0f;
+    int child_count = 0;
+
+    muse_foreach_child(child, ctx, node) {
+      muConstraints *c_cons = muse_sparse_get(&ctx->constraints, child);
+      if (c_cons == NULL ||
+          c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE)
+        continue;
+
+      muComputed *c_comp = muse_sparse_get(&ctx->computed, child);
+      total_main +=
+          (cons->flex_direction == MUSE_FLEX_ROW) ? c_comp->w : c_comp->h;
+      child_count += 1;
+    }
+
+    if (child_count > 1) {
+      total_main += cons->gap * (child_count - 1);
+    }
+
+    float remaining_main = inner_main - total_main;
+    if (remaining_main < 0.0f)
+      remaining_main = 0.0f;
+
+    float start_main_offset = 0.0f;
+    float space_between = cons->gap;
+
+    switch (cons->justify_content) {
+    case MUSE_JUSTIFY_CENTER:
+      start_main_offset = remaining_main / 2.0f;
+      break;
+    case MUSE_JUSTIFY_END:
+      start_main_offset = remaining_main;
+      break;
+    case MUSE_JUSTIFY_SPACE_BETWEEN:
+      if (child_count > 1)
+        space_between = remaining_main / (child_count - 1) + cons->gap;
+      break;
+    case MUSE_JUSTIFY_SPACE_AROUND:
+      if (child_count > 0) {
+        space_between = remaining_main / child_count + cons->gap;
+        start_main_offset = (space_between - cons->gap) / 2.0f;
+      }
+      break;
+    case MUSE_JUSTIFY_SPACE_EVENLY:
+      if (child_count > 0) {
+        space_between = remaining_main / (child_count + 1) + cons->gap;
+        start_main_offset = space_between - cons->gap;
+      }
+      break;
+    default:
+      break;
+    }
+
+    float cursor_main =
+        ((cons->flex_direction == MUSE_FLEX_ROW) ? comp->x : comp->y) + offset +
+        start_main_offset;
+    float cross_start =
+        ((cons->flex_direction == MUSE_FLEX_ROW) ? comp->y : comp->x) + offset;
+
+    muse_foreach_child(child, ctx, node) {
+      muConstraints *c_cons = muse_sparse_get(&ctx->constraints, child);
+      muComputed *c_comp = muse_sparse_get(&ctx->computed, child);
+
+      if (c_cons == NULL || c_comp == NULL)
+        continue;
+
+      if (c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE) {
+        muse__m_compute_positional_alignment(ctx, child, comp->x, comp->y);
+        continue;
+      }
+
+      float child_cross =
+          (cons->flex_direction == MUSE_FLEX_ROW) ? c_comp->h : c_comp->w;
+      float cross_offset = 0.0f;
+
+      switch (cons->align_items) {
+      case MUSE_ALIGN_CENTER:
+        cross_offset = (inner_cross - child_cross) / 2.0f;
+        break;
+      case MUSE_ALIGN_END:
+        cross_offset = inner_cross - child_cross;
+        break;
+      case MUSE_ALIGN_STRETCH:
+        if (cons->flex_direction == MUSE_FLEX_ROW &&
+            c_cons->dimension.height.kind != MU_FIXED) {
+          c_comp->h = inner_cross;
+        } else if (cons->flex_direction == MUSE_FLEX_COLUMN &&
+                   c_cons->dimension.width.kind != MU_FIXED) {
+          c_comp->w = inner_cross;
+        }
+        break;
+      default:
+        break;
+      }
+
+      if (cons->flex_direction == MUSE_FLEX_ROW) {
+        muse__m_compute_positional_alignment(ctx, child, cursor_main,
+                                             cross_start + cross_offset);
+        cursor_main += c_comp->w + space_between;
+      } else {
+        muse__m_compute_positional_alignment(
+            ctx, child, cross_start + cross_offset, cursor_main);
+        cursor_main += c_comp->h + space_between;
+      }
+    }
+  }
 }
 
 MUSEDEF void muse_compute_layout(muContext *ctx, float viewport_width,
@@ -946,8 +1191,18 @@ MUSEDEF void muse_compute_layout(muContext *ctx, float viewport_width,
   muse__m_compute_bottom_up(ctx, ctx->root);
 
   // PASS 4: Flex Distribution
+  muse__m_compute_flex_distribution(ctx, ctx->root);
+
   // PASS 5: Positional Alignment
+  muse__m_compute_positional_alignment(ctx, ctx->root, 0.0f, 0.0f);
+
   // PASS 6: Clear Dirties
+  for (size_t i = 0; i < ctx->dirties.dense.count; i++) {
+    muNode dirty_node = ctx->dirties.dense.items[i];
+    ctx->dirties.sparse.items[dirty_node.numeral] = MUSE_SPARSE_NULL;
+  }
+  ctx->dirties.dense.count = 0;
+  ctx->dirties.components.count = 0;
 }
 
 #endif // MUSE_IMPLEMENTATION
