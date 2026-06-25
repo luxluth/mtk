@@ -159,15 +159,30 @@
        ? muse_sparse_get(&(ctx)->hierarchies, (parent))->first_child           \
        : MUSE_UNDEFINED_MUID)
 
+#define muse_last_child(ctx, parent)                                           \
+  (muse_sparse_has(&(ctx)->hierarchies, (parent))                              \
+       ? muse_sparse_get(&(ctx)->hierarchies, (parent))->last_child            \
+       : MUSE_UNDEFINED_MUID)
+
 #define muse_next_sibling(ctx, node)                                           \
   (muse_sparse_has(&(ctx)->hierarchies, (node))                                \
        ? muse_sparse_get(&(ctx)->hierarchies, (node))->next_sibling            \
+       : MUSE_UNDEFINED_MUID)
+
+#define muse_prev_sibling(ctx, node)                                           \
+  (muse_sparse_has(&(ctx)->hierarchies, (node))                                \
+       ? muse_sparse_get(&(ctx)->hierarchies, (node))->prev_sibling            \
        : MUSE_UNDEFINED_MUID)
 
 #define muse_foreach_child(it_name, ctx, parent)                               \
   for (muNode it_name = muse_first_child((ctx), (parent));                     \
        muse_muid_is_valid(it_name);                                            \
        it_name = muse_next_sibling((ctx), it_name))
+
+#define muse_foreach_child_reverse(it_name, ctx, parent)                       \
+  for (muNode it_name = muse_last_child((ctx), (parent));                      \
+       muse_muid_is_valid(it_name);                                            \
+       it_name = muse_prev_sibling((ctx), it_name))
 
 typedef enum {
   MU_PERCENT,
@@ -193,8 +208,26 @@ typedef struct {
 } muSize;
 
 typedef struct {
+  float top;
+  float bottom;
+  float left;
+  float right;
+} muEdges;
+
+#define mu_edges_all(v)                                                        \
+  ((muEdges){.top = (v), .bottom = (v), .left = (v), .right = (v)})
+#define mu_edges_lr(v)                                                         \
+  ((muEdges){.top = 0, .bottom = 0, .left = (v), .right = (v)})
+#define mu_edges_tb(v)                                                         \
+  ((muEdges){.top = (v), .bottom = (v), .left = 0, .right = 0})
+
+typedef struct {
   float x, y;
 } muVector2;
+
+typedef struct {
+  float x, y, w, h;
+} muRect;
 
 typedef struct {
   size_t numeral, generation;
@@ -203,10 +236,13 @@ typedef struct {
 #define MUSE_UNDEFINED_MUID                                                    \
   ((muId){.numeral = MUSE_SPARSE_NULL, .generation = MUSE_SPARSE_NULL})
 
+// Check if a muId|muNode is valid
 MUSEDEF bool muse_muid_is_valid(muId id);
+// Compare two muId|muNode to see if they match
 MUSEDEF bool muse_muid_eq(muId a, muId b);
 
 typedef muId muNode;
+typedef MUSE_DA(muNode) muNodeList;
 
 typedef struct {
   muNode parent;
@@ -263,10 +299,23 @@ typedef struct {
   };
 } muPositionStrategy;
 
+typedef enum {
+  MU_OVERFLOW_VISIBLE = 0,
+  MU_OVERFLOW_HIDDEN,
+  MU_OVERFLOW_SCROLL
+} muOverflow;
+
 typedef struct {
   struct {
     muSize width;
     muSize height;
+
+    float min_width;
+    float max_width;
+    float min_height;
+    float max_height;
+
+    float aspect_ratio;
   } dimension;
 
   muPositionStrategy positioning;
@@ -276,8 +325,12 @@ typedef struct {
   muAlignItems align_items;
   float gap;
 
-  float padding;
-  float border;
+  muEdges padding;
+  muEdges border;
+
+  muOverflow overflow;
+  muVector2 scroll;
+  int32_t z_index;
 } muConstraints;
 
 #define mu_position(s, ...) ((muPositionStrategy){.strategy = s, __VA_ARGS__})
@@ -293,6 +346,7 @@ typedef struct {
 } muComputed;
 
 typedef struct {
+  char dummy;
 } muDirty;
 
 typedef struct {
@@ -318,6 +372,27 @@ typedef muTextComputedOutput muTextSizingFunc(muContext *ctx, muId text,
                                               float available_width,
                                               float available_height);
 
+typedef enum {
+  MU_CMD_DRAWQUAD,
+  MU_CMD_TEXT,
+} muRenderCommandKind;
+
+typedef struct {
+  muNode node;
+  union {
+    muText *text;
+  } info;
+
+  muComputed computed;
+  muRect clip;
+  muRenderCommandKind kind;
+
+  int32_t z_index;
+  bool has_clip;
+} muRenderCommand;
+
+typedef MUSE_DA(muRenderCommand) muRenderList;
+
 typedef struct muContext {
   MUSE_SPARSE_SET(muHierarchy) hierarchies;
   MUSE_SPARSE_SET(muConstraints) constraints;
@@ -325,16 +400,20 @@ typedef struct muContext {
   MUSE_SPARSE_SET(muDirty) dirties;
   MUSE_SPARSE_SET(muText) texts;
 
-  size_t next_entity_numeral;
   MUSE_DA(muId) available_ids;
+  muRenderList render_list;
 
   muTextSizingFunc *text_sizing_func;
+  size_t next_entity_numeral;
 
   muNode root;
+
   bool rooted; // Just to make it nicer to use
+  bool render_list_dirty;
 } muContext;
 
-MUSEDEF void muse_free_context(muContext *ctx);
+// Deallocate the full context
+MUSEDEF void muse_context_free(muContext *ctx);
 
 // Set this node as the root of the tree
 MUSEDEF void muse_root_attach(muContext *ctx, muNode node);
@@ -361,6 +440,12 @@ MUSEDEF muNode muse_node_create(muContext *ctx);
 MUSEDEF void muse_node_destroy(muContext *ctx, muNode node);
 // Mark a node as dirty
 MUSEDEF void muse_node_set_dirty(muContext *ctx, muNode node);
+// Returns a list of nodes intersecting the X/Y coordinates, ordered
+// front-to-back.
+// NOTE: After processing interactions on the returned list, you
+// may want to free the temporary list with `muse_da_free` but you do as you
+// whish.
+MUSEDEF muNodeList muse_node_pick(muContext *ctx, float x, float y);
 
 // Add constraints or overwrite the current existing contraints on a node
 MUSEDEF void muse_constraints_set(muContext *ctx, muNode node,
@@ -383,6 +468,12 @@ MUSEDEF muText *muse_text_get(muContext *ctx, muNode node);
 MUSEDEF void muse_compute_layout(muContext *ctx, float viewport_width,
                                  float viewport_height);
 
+// Builds a flattened, Z-sorted array of commands to be consumed by the renderer
+MUSEDEF void muse_build_render_list(muContext *ctx, muRect viewport);
+
+// Get the computed bounding box and offset of the node
+MUSEDEF muComputed *muse_computed_get(muContext *ctx, muNode node);
+
 #endif // MUSE_H_
 
 #define MUSE_IMPLEMENTATION
@@ -397,13 +488,15 @@ MUSEDEF bool muse_muid_eq(muId a, muId b) {
   return (a.numeral == b.numeral) && (a.generation == b.generation);
 }
 
-MUSEDEF void muse_free_context(muContext *ctx) {
+MUSEDEF void muse_context_free(muContext *ctx) {
   muse_da_free(&ctx->available_ids);
+  muse_da_free(&ctx->render_list);
 
   muse_sparse_free(&ctx->hierarchies);
   muse_sparse_free(&ctx->constraints);
   muse_sparse_free(&ctx->computed);
   muse_sparse_free(&ctx->dirties);
+  muse_sparse_free(&ctx->texts);
 }
 
 MUSEDEF void muse_root_attach(muContext *ctx, muNode node) {
@@ -494,7 +587,6 @@ MUSEDEF bool muse_node_remove(muContext *ctx, muNode node) {
   current_hrc->next_sibling = MUSE_UNDEFINED_MUID;
 
   muse_node_set_dirty(ctx, parent);
-
   return true;
 }
 
@@ -689,7 +781,8 @@ MUSEDEF bool muse_node_put_before(muContext *ctx, muNode sibling, muNode node) {
 MUSEDEF void muse_node_set_dirty(muContext *ctx, muNode node) {
   if (!muse_muid_is_valid(node))
     return;
-  muse_sparse_insert(&ctx->dirties, node, (muDirty){});
+  muse_sparse_insert(&ctx->dirties, node, (muDirty){0});
+  ctx->render_list_dirty = true;
 }
 
 MUSEDEF void muse_constraints_set(muContext *ctx, muNode node,
@@ -736,6 +829,46 @@ MUSEDEF muText *muse_text_get(muContext *ctx, muNode node) {
   return muse_sparse_get(&ctx->texts, node);
 }
 
+MUSEDEF muComputed *muse_computed_get(muContext *ctx, muNode node) {
+  if (!muse_muid_is_valid(node))
+    return NULL;
+
+  if (!muse_sparse_has(&ctx->computed, node))
+    return NULL;
+
+  return muse_sparse_get(&ctx->computed, node);
+}
+
+static void muse__m_clamp_min_max(muComputed *comp, muConstraints *cons) {
+  if (cons->dimension.min_width > 0.0f && comp->w < cons->dimension.min_width) {
+    comp->w = cons->dimension.min_width;
+  }
+  if (cons->dimension.max_width > 0.0f && comp->w > cons->dimension.max_width) {
+    comp->w = cons->dimension.max_width;
+  }
+
+  if (cons->dimension.min_height > 0.0f &&
+      comp->h < cons->dimension.min_height) {
+    comp->h = cons->dimension.min_height;
+  }
+  if (cons->dimension.max_height > 0.0f &&
+      comp->h > cons->dimension.max_height) {
+    comp->h = cons->dimension.max_height;
+  }
+}
+
+static void muse__m_apply_aspect_ratio(muComputed *comp, muConstraints *cons) {
+  if (cons->dimension.aspect_ratio > 0.0f) {
+    if (cons->dimension.width.kind != MU_FIT &&
+        cons->dimension.width.kind != MU_FILL) {
+      comp->h = comp->w / cons->dimension.aspect_ratio;
+    } else if (cons->dimension.height.kind != MU_FIT &&
+               cons->dimension.height.kind != MU_FILL) {
+      comp->w = comp->h * cons->dimension.aspect_ratio;
+    }
+  }
+}
+
 static void muse__m_compute_top_down(muContext *ctx, muNode node,
                                      muComputed parent_bounds) {
 
@@ -768,6 +901,9 @@ static void muse__m_compute_top_down(muContext *ctx, muNode node,
     } else {
       comp->h = 0.0f;
     }
+
+    muse__m_clamp_min_max(comp, cons);
+    muse__m_apply_aspect_ratio(comp, cons);
 
     // ABSOLUTE POSITIONING
     if (cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE) {
@@ -814,12 +950,19 @@ static void muse__m_compute_top_down(muContext *ctx, muNode node,
 
   // BORDER-BOX: Shrink the available bounds for the children
   muComputed my_bounds = *muse_sparse_get(&ctx->computed, node);
-  float offset = (cons != NULL) ? (cons->padding + cons->border) : 0.0f;
 
-  muComputed content_bounds = {.x = my_bounds.x + offset,
-                               .y = my_bounds.y + offset,
-                               .w = my_bounds.w - (offset * 2.0f),
-                               .h = my_bounds.h - (offset * 2.0f)};
+  float off_l =
+      (cons != NULL) ? (cons->padding.left + cons->border.left) : 0.0f;
+  float off_t = (cons != NULL) ? (cons->padding.top + cons->border.top) : 0.0f;
+  float off_r =
+      (cons != NULL) ? (cons->padding.right + cons->border.right) : 0.0f;
+  float off_b =
+      (cons != NULL) ? (cons->padding.bottom + cons->border.bottom) : 0.0f;
+
+  muComputed content_bounds = {.x = my_bounds.x + off_l,
+                               .y = my_bounds.y + off_t,
+                               .w = my_bounds.w - (off_l + off_r),
+                               .h = my_bounds.h - (off_t + off_b)};
 
   if (content_bounds.w < 0.0f)
     content_bounds.w = 0.0f;
@@ -897,12 +1040,18 @@ static void muse__m_compute_bottom_up(muContext *ctx, muNode node) {
             (cons->flex_direction == MUSE_FLEX_COLUMN) ? sum_main : max_cross;
       }
 
-      float total_offset = (cons->padding + cons->border) * 2.0f;
+      float off_w = cons->padding.left + cons->border.left +
+                    cons->padding.right + cons->border.right;
+      float off_h = cons->padding.top + cons->border.top +
+                    cons->padding.bottom + cons->border.bottom;
 
       if (fit_w)
-        comp->w = intrinsic_w + total_offset;
+        comp->w = intrinsic_w + off_w;
       if (fit_h)
-        comp->h = intrinsic_h + total_offset;
+        comp->h = intrinsic_h + off_h;
+
+      muse__m_clamp_min_max(comp, cons);
+      muse__m_apply_aspect_ratio(comp, cons);
     }
   }
 }
@@ -915,9 +1064,14 @@ static void muse__m_compute_flex_distribution(muContext *ctx, muNode node) {
   muComputed *comp = muse_sparse_get(&ctx->computed, node);
 
   if (cons != NULL && comp != NULL) {
-    float offset = cons->padding + cons->border;
-    float inner_w = comp->w - (offset * 2.0f);
-    float inner_h = comp->h - (offset * 2.0f);
+
+    float off_w = cons->padding.left + cons->border.left + cons->padding.right +
+                  cons->border.right;
+    float off_h = cons->padding.top + cons->border.top + cons->padding.bottom +
+                  cons->border.bottom;
+
+    float inner_w = comp->w - off_w;
+    float inner_h = comp->h - off_h;
     if (inner_w < 0.0f)
       inner_w = 0.0f;
     if (inner_h < 0.0f)
@@ -973,14 +1127,23 @@ static void muse__m_compute_flex_distribution(muContext *ctx, muNode node) {
           c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE)
         continue;
 
+      bool modified = false;
+
       if (c_cons->dimension.width.kind == MU_FILL) {
         c_comp->w =
             (cons->flex_direction == MUSE_FLEX_ROW) ? space_per_fill : inner_w;
+        modified = true;
       }
 
       if (c_cons->dimension.height.kind == MU_FILL) {
         c_comp->h = (cons->flex_direction == MUSE_FLEX_COLUMN) ? space_per_fill
                                                                : inner_h;
+        modified = true;
+      }
+
+      if (modified) {
+        muse__m_clamp_min_max(c_comp, c_cons);
+        muse__m_apply_aspect_ratio(c_comp, c_cons);
       }
     }
   }
@@ -1005,9 +1168,13 @@ static void muse__m_compute_positional_alignment(muContext *ctx, muNode node,
       comp->y = start_y;
     }
 
-    float offset = cons->padding + cons->border;
-    float inner_w = comp->w - (offset * 2.0f);
-    float inner_h = comp->h - (offset * 2.0f);
+    float off_l = cons->padding.left + cons->border.left;
+    float off_t = cons->padding.top + cons->border.top;
+    float off_w = off_l + cons->padding.right + cons->border.right;
+    float off_h = off_t + cons->padding.bottom + cons->border.bottom;
+
+    float inner_w = comp->w - off_w;
+    float inner_h = comp->h - off_h;
 
     float inner_main =
         (cons->flex_direction == MUSE_FLEX_ROW) ? inner_w : inner_h;
@@ -1067,11 +1234,17 @@ static void muse__m_compute_positional_alignment(muContext *ctx, muNode node,
       break;
     }
 
+    float base_x = comp->x - cons->scroll.x;
+    float base_y = comp->y - cons->scroll.y;
+
     float cursor_main =
-        ((cons->flex_direction == MUSE_FLEX_ROW) ? comp->x : comp->y) + offset +
+        ((cons->flex_direction == MUSE_FLEX_ROW) ? base_x : base_y) +
+        ((cons->flex_direction == MUSE_FLEX_ROW) ? off_l : off_t) +
         start_main_offset;
+
     float cross_start =
-        ((cons->flex_direction == MUSE_FLEX_ROW) ? comp->y : comp->x) + offset;
+        ((cons->flex_direction == MUSE_FLEX_ROW) ? base_y : base_x) +
+        ((cons->flex_direction == MUSE_FLEX_ROW) ? off_t : off_l);
 
     muse_foreach_child(child, ctx, node) {
       muConstraints *c_cons = muse_sparse_get(&ctx->constraints, child);
@@ -1081,7 +1254,7 @@ static void muse__m_compute_positional_alignment(muContext *ctx, muNode node,
         continue;
 
       if (c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE) {
-        muse__m_compute_positional_alignment(ctx, child, comp->x, comp->y);
+        muse__m_compute_positional_alignment(ctx, child, base_x, base_y);
         continue;
       }
 
@@ -1203,6 +1376,195 @@ MUSEDEF void muse_compute_layout(muContext *ctx, float viewport_width,
   }
   ctx->dirties.dense.count = 0;
   ctx->dirties.components.count = 0;
+  ctx->render_list_dirty = true;
+}
+
+typedef struct {
+  muNode node;
+  muRect clip;
+  size_t sequence;
+  int32_t z_index;
+  bool has_clip;
+} muse__m_SortItem;
+
+typedef MUSE_DA(muse__m_SortItem) muse__m_SortList;
+
+static void muse__m_flatten_recursive(muContext *ctx, muNode node,
+                                      muse__m_SortList *list, size_t *seq,
+                                      muRect current_clip, bool has_clip) {
+  if (!muse_muid_is_valid(node))
+    return;
+
+  muConstraints *cons = muse_sparse_get(&ctx->constraints, node);
+  int32_t z = cons != NULL ? cons->z_index : 0;
+  muComputed *comp = muse_sparse_get(&ctx->computed, node);
+
+  muRect new_clip = current_clip;
+  bool new_has_clip = has_clip;
+
+  if (cons != NULL && cons->overflow == MU_OVERFLOW_HIDDEN && comp != NULL) {
+    if (has_clip) {
+      float x1 = (new_clip.x > comp->x) ? new_clip.x : comp->x;
+      float y1 = (new_clip.y > comp->y) ? new_clip.y : comp->y;
+      float x2 = (new_clip.x + new_clip.w < comp->x + comp->w)
+                     ? new_clip.x + new_clip.w
+                     : comp->x + comp->w;
+      float y2 = (new_clip.y + new_clip.h < comp->y + comp->h)
+                     ? new_clip.y + new_clip.h
+                     : comp->y + comp->h;
+
+      new_clip.x = x1;
+      new_clip.y = y1;
+      new_clip.w = (x2 > x1) ? (x2 - x1) : 0.0f;
+      new_clip.h = (y2 > y1) ? (y2 - y1) : 0.0f;
+    } else {
+      new_clip = (muRect){comp->x, comp->y, comp->w, comp->h};
+      new_has_clip = true;
+    }
+  }
+
+  bool visible = true;
+  if (has_clip && comp != NULL) {
+    if (comp->x >= current_clip.x + current_clip.w ||
+        comp->x + comp->w <= current_clip.x ||
+        comp->y >= current_clip.y + current_clip.h ||
+        comp->y + comp->h <= current_clip.y) {
+      visible = false;
+    }
+  }
+
+  if (visible) {
+    muse__m_SortItem item = {.node = node,
+                             .z_index = z,
+                             .sequence = (*seq)++,
+                             .clip = current_clip,
+                             .has_clip = has_clip};
+    muse_da_append(list, item);
+  }
+
+  if (new_has_clip && (new_clip.w <= 0.0f || new_clip.h <= 0.0f)) {
+    return;
+  }
+
+  muse_foreach_child(child, ctx, node) {
+    muse__m_flatten_recursive(ctx, child, list, seq, new_clip, new_has_clip);
+  }
+}
+
+static int muse__m_render_cmp(const void *a, const void *b) {
+  const muse__m_SortItem *ia = (const muse__m_SortItem *)a;
+  const muse__m_SortItem *ib = (const muse__m_SortItem *)b;
+  if (ia->z_index != ib->z_index) {
+    return (ia->z_index > ib->z_index) - (ia->z_index < ib->z_index);
+  }
+  // Stable sort: keep tree order if z-indexes match
+  return (ia->sequence > ib->sequence) - (ia->sequence < ib->sequence);
+}
+
+MUSEDEF void muse_build_render_list(muContext *ctx, muRect viewport) {
+  if (!ctx->rooted) {
+    ctx->render_list.count = 0;
+    return;
+  }
+
+  if (!ctx->render_list_dirty)
+    return;
+
+  ctx->render_list.count = 0;
+
+  muse__m_SortList temp_list = {0};
+  size_t seq = 0;
+  muse__m_flatten_recursive(ctx, ctx->root, &temp_list, &seq, viewport, true);
+  if (temp_list.count > 0) {
+    qsort(temp_list.items, temp_list.count, sizeof(muse__m_SortItem),
+          muse__m_render_cmp);
+    muse_da_reserve(&ctx->render_list, temp_list.count);
+  }
+
+  for (size_t i = 0; i < temp_list.count; i++) {
+    muNode node = temp_list.items[i].node;
+    int32_t z = temp_list.items[i].z_index;
+    muRect clip = temp_list.items[i].clip;
+    bool has_clip = temp_list.items[i].has_clip;
+    muComputed *comp = muse_sparse_get(&ctx->computed, node);
+
+    if (comp != NULL) {
+      muRenderCommand quad_cmd = {.kind = MU_CMD_DRAWQUAD,
+                                  .node = node,
+                                  .computed = *comp,
+                                  .clip = clip,
+                                  .has_clip = has_clip,
+                                  .z_index = z};
+
+      muse_da_append(&ctx->render_list, quad_cmd);
+      muText *text = muse_sparse_get(&ctx->texts, node);
+      if (text != NULL && text->data != NULL) {
+        muRenderCommand text_cmd = {.kind = MU_CMD_TEXT,
+                                    .info = {.text = text},
+                                    .node = node,
+                                    .computed = *comp,
+                                    .clip = clip,
+                                    .has_clip = has_clip,
+                                    .z_index = z};
+        muse_da_append(&ctx->render_list, text_cmd);
+      }
+    }
+  }
+
+  muse_da_free(&temp_list);
+  ctx->render_list_dirty = false;
+}
+
+MUSEDEF muNodeList muse_node_pick(muContext *ctx, float x, float y) {
+  muNodeList hits = {0};
+
+  if (!ctx->rooted || ctx->render_list.count == 0)
+    return hits;
+
+  muNode last_checked = MUSE_UNDEFINED_MUID;
+
+  for (size_t i = ctx->render_list.count; i > 0; i--) {
+    muRenderCommand cmd = ctx->render_list.items[i - 1];
+    muNode node = cmd.node;
+
+    if (muse_muid_eq(node, last_checked))
+      continue;
+    last_checked = node;
+
+    bool in_bounds =
+        (x >= cmd.computed.x && x <= cmd.computed.x + cmd.computed.w &&
+         y >= cmd.computed.y && y <= cmd.computed.y + cmd.computed.h);
+
+    if (!in_bounds)
+      continue;
+
+    bool clipped = false;
+    muHierarchy *hrc = muse_sparse_get(&ctx->hierarchies, node);
+    muNode curr_parent = (hrc != NULL) ? hrc->parent : MUSE_UNDEFINED_MUID;
+
+    while (muse_muid_is_valid(curr_parent)) {
+      muConstraints *p_cons = muse_sparse_get(&ctx->constraints, curr_parent);
+      muComputed *p_comp = muse_sparse_get(&ctx->computed, curr_parent);
+
+      if (p_cons != NULL && p_comp != NULL &&
+          p_cons->overflow == MU_OVERFLOW_HIDDEN) {
+        if (x < p_comp->x || x > p_comp->x + p_comp->w || y < p_comp->y ||
+            y > p_comp->y + p_comp->h) {
+          clipped = true;
+          break;
+        }
+      }
+
+      muHierarchy *p_hrc = muse_sparse_get(&ctx->hierarchies, curr_parent);
+      curr_parent = (p_hrc != NULL) ? p_hrc->parent : MUSE_UNDEFINED_MUID;
+    }
+
+    if (!clipped) {
+      muse_da_append(&hits, node);
+    }
+  }
+
+  return hits;
 }
 
 #endif // MUSE_IMPLEMENTATION
