@@ -1,3 +1,5 @@
+use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
+
 use crate::sys;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -129,6 +131,97 @@ impl Into<sys::muVector2> for Vector2 {
 impl From<sys::muVector2> for Vector2 {
     fn from(v: sys::muVector2) -> Self {
         Self { x: v.x, y: v.y }
+    }
+}
+
+impl From<f32> for Vector2 {
+    fn from(value: f32) -> Self {
+        Vector2 { x: value, y: value }
+    }
+}
+
+impl From<(f32, f32)> for Vector2 {
+    fn from((x, y): (f32, f32)) -> Self {
+        Vector2 { x, y }
+    }
+}
+
+impl Add<Vector2> for Vector2 {
+    type Output = Vector2;
+
+    fn add(self, rhs: Vector2) -> Self::Output {
+        Vector2 {
+            x: self.x + rhs.x,
+            y: self.y + rhs.y,
+        }
+    }
+}
+
+impl Sub<Vector2> for Vector2 {
+    type Output = Vector2;
+
+    fn sub(self, rhs: Vector2) -> Self::Output {
+        Vector2 {
+            x: self.x - rhs.x,
+            y: self.y - rhs.y,
+        }
+    }
+}
+
+impl Add<f32> for Vector2 {
+    type Output = Vector2;
+
+    fn add(self, rhs: f32) -> Self::Output {
+        self + Vector2::from(rhs)
+    }
+}
+
+impl Sub<f32> for Vector2 {
+    type Output = Vector2;
+
+    fn sub(self, rhs: f32) -> Self::Output {
+        self - Vector2::from(rhs)
+    }
+}
+
+impl AddAssign<Vector2> for Vector2 {
+    fn add_assign(&mut self, rhs: Vector2) {
+        *self = *self + rhs;
+    }
+}
+
+impl AddAssign<f32> for Vector2 {
+    fn add_assign(&mut self, rhs: f32) {
+        *self = *self + rhs;
+    }
+}
+
+impl SubAssign<Vector2> for Vector2 {
+    fn sub_assign(&mut self, rhs: Vector2) {
+        *self = *self - rhs;
+    }
+}
+
+impl SubAssign<f32> for Vector2 {
+    fn sub_assign(&mut self, rhs: f32) {
+        *self = *self - rhs;
+    }
+}
+
+impl Mul<f32> for Vector2 {
+    type Output = Vector2;
+
+    fn mul(self, rhs: f32) -> Self::Output {
+        Vector2 {
+            x: self.x * rhs,
+            y: self.y * rhs,
+        }
+    }
+}
+
+impl MulAssign<f32> for Vector2 {
+    fn mul_assign(&mut self, rhs: f32) {
+        *self = *self * rhs;
     }
 }
 

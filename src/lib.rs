@@ -1,3 +1,4 @@
+pub mod animation;
 pub mod colors;
 pub(crate) mod node;
 pub mod render;
