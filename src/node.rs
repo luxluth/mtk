@@ -1,3 +1,4 @@
+use crate::effects::Effects;
 use crate::style::{Computed, Constraints};
 use crate::{Context, sys};
 use std::hash::Hash;
@@ -81,6 +82,12 @@ impl Node {
         }
     }
 
+    /// Add effects or overwrite the current existing effects on a node.
+    pub fn set_effects(&self, ctxt: &mut Context, effects: Effects) {
+        ctxt.effects.insert(*self, effects);
+        ctxt.dirty_effects.insert(*self);
+    }
+
     /// Fetch, modify, and apply constraints in one go. Useful for making small adjustments.
     pub fn update_constraints<F>(&self, ctxt: &mut Context, update_fn: F)
     where
@@ -91,9 +98,31 @@ impl Node {
         self.set_constraints(ctxt, constraints);
     }
 
+    /// Fetch, modify, and apply effects in one go.
+    pub fn update_effects<F>(&self, ctxt: &mut Context, update_fn: F)
+    where
+        F: FnOnce(&mut Effects),
+    {
+        if let Some(effects) = ctxt.effects.get_mut(&self) {
+            update_fn(effects);
+            ctxt.dirty_effects.insert(*self);
+        } else {
+            let mut effects = Effects::default();
+            update_fn(&mut effects);
+            ctxt.effects.insert(*self, effects);
+            ctxt.dirty_effects.insert(*self);
+        }
+    }
+
     /// Builder method to add constraints or overwrite the current existing constraints on a node.
     pub fn with_constraints(self, ctxt: &mut Context, constraints: Constraints) -> Self {
         self.set_constraints(ctxt, constraints);
+        self
+    }
+
+    /// Builder method to add effects or overwrite the current existing effects on a node.
+    pub fn with_effects(self, ctxt: &mut Context, effects: Effects) -> Self {
+        self.set_effects(ctxt, effects);
         self
     }
 

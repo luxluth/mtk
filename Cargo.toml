@@ -1,10 +1,24 @@
 [package]
 name = "mtk"
+description = "Muse GUI Toolkit"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+cosmic-text = "0.19.0"
+cpal = "0.18"
+resvg = "0.47.0"
+symphonia = { version = "0.6.0", features = ["mp3"] }
+symphonia-bundle-mp3 = "0.6.0"
+tiny-skia = "0.12.0"
+wgpu = "29.0.3"
+winit = "0.30.13"
+zune-image = "0.5.0"
 
 [build-dependencies]
 bindgen = "0.72.1"
 cc = "1.2.65"
+
+[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd", target_os = "dragonfly"))'.dependencies]
+cpal = { version = "0.18", features = ["pipewire"] }
+pipewire = "0.10.0"

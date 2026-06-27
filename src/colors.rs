@@ -231,10 +231,10 @@ pub mod macros {
     #[macro_export]
     macro_rules! clr {
         ($name:ident) => {
-            $crate::paint::Color::$name
+            $crate::colors::Color::$name
         };
         ($hex:literal) => {
-            $crate::paint::Color::Hex($hex)
+            $crate::colors::Color::Hex($hex)
         };
     }
 
@@ -249,7 +249,7 @@ pub mod macros {
     #[macro_export]
     macro_rules! rgb {
         ($r:expr, $g:expr, $b:expr) => {
-            $crate::paint::Color {
+            $crate::colors::Color {
                 r: $r,
                 g: $g,
                 b: $b,
@@ -269,7 +269,7 @@ pub mod macros {
     #[macro_export]
     macro_rules! rgba {
         ($r:expr, $g:expr, $b:expr, $a:expr) => {
-            $crate::paint::Color {
+            $crate::colors::Color {
                 r: $r,
                 g: $g,
                 b: $b,
@@ -293,7 +293,7 @@ pub mod macros {
     #[macro_export]
     macro_rules! hsl {
         ($h:expr, $s:expr, $l:expr) => {
-            $crate::paint::Color::from_hsl($h as f32, $s as f32, $l as f32)
+            $crate::colors::Color::from_hsl($h as f32, $s as f32, $l as f32)
         };
     }
 
@@ -312,7 +312,7 @@ pub mod macros {
     #[macro_export]
     macro_rules! hsla {
         ($h:expr, $s:expr, $l:expr, $a:expr) => {
-            $crate::paint::Color::from_hsla($h as f32, $s as f32, $l as f32, $a as f32)
+            $crate::colors::Color::from_hsla($h as f32, $s as f32, $l as f32, $a as f32)
         };
     }
 }

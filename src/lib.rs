@@ -1,22 +1,32 @@
 pub mod animation;
 pub mod colors;
+pub mod effects;
 pub(crate) mod node;
 pub mod render;
 pub mod style;
 pub(crate) mod sys;
 pub mod text;
+pub mod ui;
+pub mod windowing;
 
+use crate::effects::Effects;
 pub use crate::node::Node;
 use crate::render::RenderCommand;
 pub use crate::style::*;
 pub use crate::text::*;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::ffi::CString;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 pub struct Context {
     pub(crate) ctx: *mut sys::muContext,
     pub(crate) texts: HashMap<Node, CString>,
+    pub(crate) effects: HashMap<Node, Effects>,
+    pub(crate) dirty_effects: HashSet<Node>,
     pub(crate) text_userdatas: HashMap<Node, *mut Box<dyn std::any::Any>>,
+    pub(crate) text_context: SharedTextContext,
 }
 
 impl Context {
@@ -25,7 +35,10 @@ impl Context {
         Self {
             ctx,
             texts: HashMap::new(),
+            effects: HashMap::new(),
+            dirty_effects: HashSet::new(),
             text_userdatas: HashMap::new(),
+            text_context: Arc::new(Mutex::new(TextContext::new())),
         }
     }
 
@@ -37,11 +50,15 @@ impl Context {
     /// Destroy a node from the tree removing its children at the same time.
     pub fn destroy_node(&mut self, node: Node) {
         self.texts.remove(&node);
+        self.effects.remove(&node);
+        self.dirty_effects.remove(&node);
+
         if let Some(ptr) = self.text_userdatas.remove(&node) {
             unsafe {
                 let _ = Box::from_raw(ptr);
             }
         }
+
         unsafe {
             sys::muse_node_destroy(self.ctx, node.0);
         }
