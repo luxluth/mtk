@@ -11,6 +11,7 @@ use std::sync::Mutex;
 /// Holds the shared text rendering state.
 pub(crate) struct TextContext {
     pub font_system: FontSystem,
+    #[allow(unused)]
     pub swash_cache: SwashCache,
 }
 
@@ -25,9 +26,9 @@ impl TextContext {
     }
 }
 
-pub type SharedTextContext = Arc<Mutex<TextContext>>;
+pub(crate) type SharedTextContext = Arc<Mutex<TextContext>>;
 
-pub fn measure_text(
+pub(crate) fn measure_text(
     text: &str,
     text_style: &crate::ui::style::TextStyle,
     avail_w: f32,

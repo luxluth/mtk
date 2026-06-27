@@ -1,5 +1,7 @@
 #![allow(non_upper_case_globals)]
 
+use crate::animation::Animatable;
+
 /// RGBA defined color values
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Color {
@@ -198,6 +200,23 @@ impl Color {
             srgb_to_linear(self.b),
             self.a as f32 / 255.0,
         ]
+    }
+}
+
+impl Animatable for Color {
+    fn interpolate(start: &Self, end: &Self, t: f64) -> Self {
+        let p = t as f32;
+        let p_inv = 1.0 - p;
+        Self {
+            r: (start.r as f32 * p_inv + end.r as f32 * p).round() as u8,
+            g: (start.g as f32 * p_inv + end.g as f32 * p).round() as u8,
+            b: (start.b as f32 * p_inv + end.b as f32 * p).round() as u8,
+            a: (start.a as f32 * p_inv + end.a as f32 * p).round() as u8,
+        }
+    }
+
+    fn is_finished(&self, target: &Self) -> bool {
+        self.r == target.r && self.g == target.g && self.b == target.b && self.a == target.a
     }
 }
 

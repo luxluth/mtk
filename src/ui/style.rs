@@ -132,7 +132,8 @@ impl<V> ViewStyleExt for V {
 
 pub struct StyledViewState {
     pub is_hovered: bool,
-    pub padding_anim: Option<AnimatedValue>,
+    pub padding_anim: Option<AnimatedValue<f32>>,
+    pub color_anim: Option<AnimatedValue<Color>>,
     // TODO: Add more animations
 }
 
@@ -141,6 +142,7 @@ impl StyledViewState {
         Self {
             is_hovered: false,
             padding_anim: None,
+            color_anim: None,
         }
     }
 }
@@ -173,12 +175,12 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
         for (target, _, _) in &self.style.transitions {
             match target {
                 AnimationTarget::Padding => {
-                    view_state.padding_anim = Some(AnimatedValue::new(
-                        self.style.base_constraints.padding.top as f64,
-                    ));
+                    view_state.padding_anim =
+                        Some(AnimatedValue::new(self.style.base_constraints.padding.top));
                 }
                 AnimationTarget::BackgroundColor => {
-                    todo!("BG animation")
+                    view_state.color_anim =
+                        Some(AnimatedValue::new(self.style.base_effects.background_color));
                 }
             }
         }
@@ -220,15 +222,13 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
                 .find(|t| t.0 == AnimationTarget::Padding);
 
             if let Some((_, duration, curve)) = transition {
-                let target_pad = target_constraints.padding.top as f64;
+                let target_pad = target_constraints.padding.top;
                 padding_anim.set_target(target_pad, now_ms(), *duration, *curve);
             }
 
             if padding_anim.tick(now_ms()) {
                 is_animating = true;
-                node.update_constraints(ctx, |c| {
-                    c.padding = Edges::all(padding_anim.current as f32)
-                });
+                node.update_constraints(ctx, |c| c.padding = Edges::all(padding_anim.current));
             } else {
                 node.update_constraints(ctx, |c| {
                     c.padding = Edges::all(target_constraints.padding.top)
@@ -238,7 +238,29 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
             node.set_constraints(ctx, target_constraints);
         }
 
-        node.set_effects(ctx, target_effects.clone());
+        let mut final_effects = target_effects.clone();
+
+        if let Some(color_anim) = &mut view_state.color_anim {
+            let transition = self
+                .style
+                .transitions
+                .iter()
+                .find(|t| t.0 == AnimationTarget::BackgroundColor);
+
+            if let Some((_, duration, curve)) = transition {
+                let target_color = target_effects.background_color;
+                color_anim.set_target(target_color, now_ms(), *duration, *curve);
+            }
+
+            if color_anim.tick(now_ms()) {
+                is_animating = true;
+                final_effects.background_color = color_anim.current;
+            } else {
+                final_effects.background_color = target_effects.background_color;
+            }
+        }
+
+        node.set_effects(ctx, final_effects);
 
         let target_text_style = if view_state.is_hovered {
             self.style
@@ -268,9 +290,10 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
     }
 
     fn message(&self, element: &mut Self::Element, state: &mut State, event: Event) {
-        // TODO: here we would intercept MouseEnter/MouseLeave events
-        // If event == MouseEnter { element.1.is_hovered = true; }
-        // If event == MouseLeave { element.1.is_hovered = false; }
+        if let Event::CursorMoved { hit_nodes, .. } = &event {
+            let node = self.inner.get_node(&element.0);
+            element.1.is_hovered = hit_nodes.contains(&node);
+        }
 
         self.inner.message(&mut element.0, state, event);
     }

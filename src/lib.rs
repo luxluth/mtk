@@ -116,6 +116,34 @@ impl Context {
             (*self.ctx).text_sizing_func = Some(crate::text::text_sizing_trampoline);
         }
     }
+
+    /// Pick nodes under the given coordinates, returning a list of hit nodes.
+    pub fn pick(&mut self, x: f32, y: f32) -> Vec<Node> {
+        let list = unsafe { sys::muse_node_pick(self.ctx, x, y) };
+        if list.items.is_null() || list.count == 0 {
+            if !list.items.is_null() {
+                unsafe extern "C" {
+                    fn free(ptr: *mut std::ffi::c_void);
+                }
+                unsafe {
+                    free(list.items as *mut std::ffi::c_void);
+                }
+            }
+            return Vec::new();
+        }
+
+        let slice = unsafe { std::slice::from_raw_parts(list.items, list.count) };
+        let nodes = slice.iter().map(|sys_node| Node(*sys_node)).collect();
+
+        unsafe extern "C" {
+            fn free(ptr: *mut std::ffi::c_void);
+        }
+        unsafe {
+            free(list.items as *mut std::ffi::c_void);
+        }
+
+        nodes
+    }
 }
 
 impl Drop for Context {

@@ -184,10 +184,10 @@ where
                 event_loop.exit();
             }
             WindowEvent::CursorMoved { position, .. } => {
-                let mtk_event = crate::ui::Event::CursorMoved {
-                    x: position.x as f32,
-                    y: position.y as f32,
-                };
+                let x = position.x as f32;
+                let y = position.y as f32;
+                let hit_nodes = self.context.pick(x, y);
+                let mtk_event = crate::ui::Event::CursorMoved { x, y, hit_nodes };
                 self.dispatch_and_rebuild(mtk_event);
             }
             WindowEvent::MouseInput { state, .. } => {

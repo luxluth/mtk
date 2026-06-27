@@ -69,21 +69,44 @@ impl Curve {
     }
 }
 
+pub trait Animatable: Clone {
+    fn interpolate(start: &Self, end: &Self, t: f64) -> Self;
+    fn is_finished(&self, target: &Self) -> bool;
+}
+
+impl Animatable for f64 {
+    fn interpolate(start: &Self, end: &Self, t: f64) -> Self {
+        *start + (*end - *start) * t
+    }
+    fn is_finished(&self, target: &Self) -> bool {
+        (*self - *target).abs() < 1e-5
+    }
+}
+
+impl Animatable for f32 {
+    fn interpolate(start: &Self, end: &Self, t: f64) -> Self {
+        *start + (*end - *start) * (t as f32)
+    }
+    fn is_finished(&self, target: &Self) -> bool {
+        (*self - *target).abs() < 1e-5
+    }
+}
+
 #[derive(Debug, Clone)]
-pub struct AnimatedValue {
-    pub current: f64,
-    pub target: f64,
-    pub start: f64,
+pub struct AnimatedValue<T> {
+    pub current: T,
+    pub target: T,
+    pub start: T,
     pub start_time: f64, // ms
     pub duration: f64,   // ms
     pub curve: Curve,
 }
 
-impl AnimatedValue {
-    pub fn new(initial: f64) -> Self {
+impl<T: Animatable> AnimatedValue<T> {
+    pub fn new(initial: T) -> Self {
         Self {
-            current: initial,
-            target: initial,
+            current: initial.clone(),
+            target: initial.clone(),
             start: initial,
             start_time: 0.0,
             duration: 0.0,
@@ -91,9 +114,9 @@ impl AnimatedValue {
         }
     }
 
-    pub fn set_target(&mut self, new_target: f64, now: f64, duration: f64, curve: Curve) {
-        if (self.target - new_target).abs() > 1e-5 {
-            self.start = self.current;
+    pub fn set_target(&mut self, new_target: T, now: f64, duration: f64, curve: Curve) {
+        if !self.target.is_finished(&new_target) {
+            self.start = self.current.clone();
             self.target = new_target;
             self.start_time = now;
             self.duration = duration;
@@ -103,25 +126,25 @@ impl AnimatedValue {
 
     /// Advances the animation. Returns `true` if still animating, `false` if done.
     pub fn tick(&mut self, now: f64) -> bool {
-        if (self.current - self.target).abs() < 1e-5 {
-            self.current = self.target;
+        if self.current.is_finished(&self.target) {
+            self.current = self.target.clone();
             return false;
         }
 
         if self.duration <= 0.0 {
-            self.current = self.target;
+            self.current = self.target.clone();
             return false;
         }
 
         let elapsed = now - self.start_time;
         if elapsed >= self.duration {
-            self.current = self.target;
+            self.current = self.target.clone();
             return false;
         }
 
         let t = elapsed / self.duration;
         let progress = self.curve.eval(t);
-        self.current = self.start + (self.target - self.start) * progress;
+        self.current = T::interpolate(&self.start, &self.target, progress);
 
         true
     }

@@ -5,9 +5,16 @@ pub mod widgets;
 
 pub use style::{AnimationTarget, Style, ViewStyleExt};
 
+#[derive(Clone)]
 pub enum Event {
-    CursorMoved { x: f32, y: f32 },
-    MouseInput { pressed: bool },
+    CursorMoved {
+        x: f32,
+        y: f32,
+        hit_nodes: Vec<Node>,
+    },
+    MouseInput {
+        pressed: bool,
+    },
     // Add more winit mapped events here
 }
 
@@ -37,6 +44,7 @@ pub trait ViewSequence<State> {
     fn build(&self, ctx: &mut Context, parent: Node) -> Self::Elements;
     fn rebuild(&self, prev: &Self, ctx: &mut Context, elements: &mut Self::Elements);
     fn teardown(&self, ctx: &mut Context, elements: &mut Self::Elements);
+    fn message(&self, elements: &mut Self::Elements, state: &mut State, event: Event);
 }
 
 macro_rules! impl_view_tuple {
@@ -63,6 +71,12 @@ macro_rules! impl_view_tuple {
             fn teardown(&self, ctx: &mut Context, elements: &mut Self::Elements) {
                 $(
                     self.$idx.teardown(ctx, &mut elements.$idx);
+                )*
+            }
+
+            fn message(&self, elements: &mut Self::Elements, state: &mut State, event: Event) {
+                $(
+                    self.$idx.message(&mut elements.$idx, state, event.clone());
                 )*
             }
         }
@@ -123,6 +137,12 @@ impl<State, V: View<State>> ViewSequence<State> for Vec<V> {
     fn teardown(&self, ctx: &mut Context, elements: &mut Self::Elements) {
         for (i, view) in self.iter().enumerate() {
             view.teardown(ctx, &mut elements[i]);
+        }
+    }
+
+    fn message(&self, elements: &mut Self::Elements, state: &mut State, event: Event) {
+        for (i, view) in self.iter().enumerate() {
+            view.message(&mut elements[i], state, event.clone());
         }
     }
 }

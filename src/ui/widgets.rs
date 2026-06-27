@@ -108,6 +108,6 @@ where
     }
 
     fn message(&self, element: &mut Self::Element, state: &mut State, event: Event) {
-        // Dispatch the event to children if they need it
+        self.children.message(&mut element.1, state, event);
     }
 }
