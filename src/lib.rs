@@ -27,6 +27,7 @@ pub struct Context {
     pub(crate) dirty_effects: HashSet<Node>,
     pub(crate) text_userdatas: HashMap<Node, *mut Box<dyn std::any::Any>>,
     pub(crate) text_context: SharedTextContext,
+    pub redraw_requested: bool,
 }
 
 impl Context {
@@ -39,12 +40,17 @@ impl Context {
             dirty_effects: HashSet::new(),
             text_userdatas: HashMap::new(),
             text_context: Arc::new(Mutex::new(TextContext::new())),
+            redraw_requested: false,
         }
     }
 
     /// Create a new valid node. It's not inserted in the tree but it exists.
     pub fn create_node(&mut self) -> Node {
         Node(unsafe { sys::muse_node_create(self.ctx) })
+    }
+
+    pub fn request_frame(&mut self) {
+        self.redraw_requested = true;
     }
 
     /// Destroy a node from the tree removing its children at the same time.
@@ -80,9 +86,11 @@ impl Context {
 
     /// Compute the final layout filling up the context with computed bounds.
     pub fn compute_layout(&mut self, viewport_width: f32, viewport_height: f32) {
+        crate::text::CURRENT_CONTEXT.with(|c| c.set(self as *mut Context));
         unsafe {
             sys::muse_compute_layout(self.ctx, viewport_width, viewport_height);
         }
+        crate::text::CURRENT_CONTEXT.with(|c| c.set(std::ptr::null_mut()));
     }
 
     /// Builds a flattened, Z-sorted array of commands to be consumed by the renderer.
@@ -107,7 +115,8 @@ impl Context {
     /// Sets the text sizing function used during layout computation.
     pub fn set_text_sizing_func<F>(&mut self, func: F)
     where
-        F: Fn(Node, &str, Option<&dyn std::any::Any>, f32, f32) -> TextComputedOutput + 'static,
+        F: Fn(&mut Context, Node, &str, Option<&dyn std::any::Any>, f32, f32) -> TextComputedOutput
+            + 'static,
     {
         crate::text::SIZING_FUNCS.with(|funcs| {
             funcs.borrow_mut().insert(self.ctx as usize, Box::new(func));

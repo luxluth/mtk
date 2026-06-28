@@ -63,6 +63,7 @@ pub struct Effects {
     pub shadow: Shadow,
     pub filters: Vec<Filter>,
     pub opacity: f32,
+    pub scale: f32,
 }
 
 impl Default for Effects {
@@ -70,6 +71,7 @@ impl Default for Effects {
         Self {
             background_color: Color::transparent,
             opacity: 1.,
+            scale: 1.,
             border: Border::default(),
             shadow: Shadow::default(),
             filters: Vec::new(),

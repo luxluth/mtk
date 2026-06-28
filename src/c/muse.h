@@ -410,6 +410,7 @@ typedef struct muContext {
 
   bool rooted; // Just to make it nicer to use
   bool render_list_dirty;
+  void *userdata;
 } muContext;
 
 // Deallocate the full context

@@ -8,12 +8,18 @@ use winit::{
     window::{Window as WWindow, WindowId},
 };
 
-use crate::{Context, ui::View};
+use crate::{
+    Context,
+    ui::{Event, View},
+    windowing::renderer::Renderer,
+};
 
-pub struct Window<S, V>
+pub struct Window<'r, S, V>
 where
     V: View<S>,
 {
+    renderer: Option<Renderer<'r>>,
+
     window: Option<Arc<WWindow>>,
     context: Context,
     state: S,
@@ -77,7 +83,7 @@ impl Default for WindowAttr {
     }
 }
 
-impl<S, V> Window<S, V>
+impl<'r, S, V> Window<'r, S, V>
 where
     V: View<S>,
 {
@@ -93,8 +99,7 @@ where
         let root_node = view.get_node(&element);
         ctx.root_attach(root_node);
 
-        let text_ctx = ctx.text_context.clone();
-        ctx.set_text_sizing_func(move |_node, text, userdata, avail_w, avail_h| {
+        ctx.set_text_sizing_func(move |ctx, _node, text, userdata, avail_w, avail_h| {
             use crate::ui::style::TextStyle;
 
             let default_style = TextStyle::default();
@@ -102,10 +107,12 @@ where
                 .and_then(|u| u.downcast_ref::<TextStyle>())
                 .unwrap_or(&default_style);
 
+            let text_ctx = ctx.text_context.clone();
             crate::text::measure_text(text, style, avail_w, avail_h, &text_ctx)
         });
 
         Self {
+            renderer: None,
             window: None,
             context: ctx,
             state,
@@ -145,7 +152,7 @@ where
     }
 }
 
-impl<S, V> ApplicationHandler for Window<S, V>
+impl<'r, S, V> ApplicationHandler for Window<'r, S, V>
 where
     V: View<S>,
 {
@@ -170,10 +177,16 @@ where
 
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
         self.window = Some(window.clone());
+
+        let renderer = pollster::block_on(Renderer::new(
+            event_loop.owned_display_handle(),
+            window.clone(),
+        ));
+        self.renderer = Some(renderer);
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
-        let window = self.window.as_ref().unwrap();
+        let window = self.window.as_ref().unwrap().clone();
         if id != window.id() {
             return;
         }
@@ -183,19 +196,30 @@ where
                 // NOTE: Maybe accept a before_close_hook
                 event_loop.exit();
             }
+            WindowEvent::Resized(new_size) => {
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.resize(new_size);
+                    self.window.as_ref().unwrap().request_redraw();
+                }
+            }
             WindowEvent::CursorMoved { position, .. } => {
                 let x = position.x as f32;
                 let y = position.y as f32;
                 let hit_nodes = self.context.pick(x, y);
-                let mtk_event = crate::ui::Event::CursorMoved { x, y, hit_nodes };
+                let mtk_event = Event::CursorMoved { x, y, hit_nodes };
                 self.dispatch_and_rebuild(mtk_event);
             }
             WindowEvent::MouseInput { state, .. } => {
                 let pressed = state == winit::event::ElementState::Pressed;
-                let mtk_event = crate::ui::Event::MouseInput { pressed };
+                let mtk_event = Event::MouseInput { pressed };
                 self.dispatch_and_rebuild(mtk_event);
             }
             WindowEvent::RedrawRequested => {
+                if self.context.redraw_requested {
+                    self.context.redraw_requested = false;
+                    self.dispatch_and_rebuild(Event::Tick);
+                }
+
                 let size = window.inner_size();
                 self.context
                     .compute_layout(size.width as f32, size.height as f32);
@@ -207,6 +231,10 @@ where
                     h: size.height as f32,
                 };
                 self.context.build_render_list(viewport);
+
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.render(&self.context);
+                }
             }
             _ => {}
         }

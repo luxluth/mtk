@@ -32,7 +32,7 @@ pub(crate) fn measure_text(
     text: &str,
     text_style: &crate::ui::style::TextStyle,
     avail_w: f32,
-    _avail_h: f32,
+    avail_h: f32,
     shared_ctx: &SharedTextContext,
 ) -> TextComputedOutput {
     use cosmic_text::{Buffer, Metrics, Shaping};
@@ -41,13 +41,17 @@ pub(crate) fn measure_text(
     let metrics = Metrics::new(text_style.font_size, text_style.line_height);
     let mut buffer = Buffer::new(&mut ctx.font_system, metrics);
 
-    let mut max_width = None;
-    if avail_w.is_finite() && avail_w > 0.0 {
-        buffer.set_size(Some(avail_w), None);
-        max_width = Some(avail_w);
+    let w = if avail_w.is_finite() && avail_w > 0.0 {
+        Some(avail_w)
     } else {
-        buffer.set_size(None, None);
-    }
+        None
+    };
+    let h = if avail_h.is_finite() && avail_h > 0.0 {
+        Some(avail_h)
+    } else {
+        None
+    };
+    buffer.set_size(w, h);
 
     let attrs = text_style.attrs.as_attrs();
     buffer.set_text(text, &attrs, Shaping::Advanced, Some(text_style.alignement));
@@ -62,13 +66,9 @@ pub(crate) fn measure_text(
     }
 
     let measured_width = measured_width.ceil();
-    let final_width = max_width.unwrap_or(measured_width);
+    let final_width = measured_width;
 
-    let measured_height = if let Some(last_run) = buffer.layout_runs().last() {
-        (last_run.line_y + text_style.line_height).ceil()
-    } else {
-        0.0
-    };
+    let measured_height = (buffer.layout_runs().count() as f32 * text_style.line_height).ceil();
 
     TextComputedOutput {
         computed_width: final_width,
@@ -104,11 +104,20 @@ impl Into<sys::muTextComputedOutput> for TextComputedOutput {
     }
 }
 
-type SizingFunc =
-    Box<dyn Fn(Node, &str, Option<&dyn std::any::Any>, f32, f32) -> TextComputedOutput>;
+type SizingFunc = Box<
+    dyn Fn(
+        &mut crate::Context,
+        Node,
+        &str,
+        Option<&dyn std::any::Any>,
+        f32,
+        f32,
+    ) -> TextComputedOutput,
+>;
 
 thread_local! {
     pub(crate) static SIZING_FUNCS: RefCell<HashMap<usize, SizingFunc>> = RefCell::new(HashMap::new());
+    pub(crate) static CURRENT_CONTEXT: std::cell::Cell<*mut crate::Context> = std::cell::Cell::new(std::ptr::null_mut());
 }
 
 pub(crate) extern "C" fn text_sizing_trampoline(
@@ -141,7 +150,21 @@ pub(crate) extern "C" fn text_sizing_trampoline(
 
     SIZING_FUNCS.with(|funcs| {
         if let Some(func) = funcs.borrow().get(&(ctx as usize)) {
-            func(Node(node), text_str, userdata_ref, avail_w, avail_h).into()
+            let ctx_ptr = CURRENT_CONTEXT.with(|c| c.get());
+            if !ctx_ptr.is_null() {
+                let rust_ctx = unsafe { &mut *ctx_ptr };
+                func(
+                    rust_ctx,
+                    Node(node),
+                    text_str,
+                    userdata_ref,
+                    avail_w,
+                    avail_h,
+                )
+                .into()
+            } else {
+                TextComputedOutput::default().into()
+            }
         } else {
             TextComputedOutput::default().into()
         }

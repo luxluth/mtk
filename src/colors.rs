@@ -222,12 +222,20 @@ impl Animatable for Color {
 
 impl From<Color> for [f32; 4] {
     fn from(color: Color) -> Self {
-        [
-            color.r as f32 / 255.0,
-            color.g as f32 / 255.0,
-            color.b as f32 / 255.0,
-            color.a as f32 / 255.0,
-        ]
+        color.to_linear_rgba_f32()
+    }
+}
+
+impl Into<cosmic_text::Color> for Color {
+    fn into(self) -> cosmic_text::Color {
+        cosmic_text::Color(self.as_u32())
+    }
+}
+
+impl From<cosmic_text::Color> for Color {
+    fn from(value: cosmic_text::Color) -> Self {
+        let [r, g, b, a] = value.as_rgba();
+        Color { r, g, b, a }
     }
 }
 

@@ -88,6 +88,11 @@ impl Node {
         ctxt.dirty_effects.insert(*self);
     }
 
+    /// Get the effects of a node if any are set.
+    pub fn get_effects(&self, ctxt: &Context) -> Option<Effects> {
+        ctxt.effects.get(self).cloned()
+    }
+
     /// Fetch, modify, and apply constraints in one go. Useful for making small adjustments.
     pub fn update_constraints<F>(&self, ctxt: &mut Context, update_fn: F)
     where

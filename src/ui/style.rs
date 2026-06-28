@@ -13,6 +13,7 @@ use crate::{Context, Node};
 pub enum AnimationTarget {
     Padding,
     BackgroundColor,
+    Scale,
 }
 
 #[derive(Clone, Debug)]
@@ -63,6 +64,11 @@ impl Style {
 
     pub fn bg_color(mut self, color: Color) -> Self {
         self.base_effects.background_color = color;
+        self
+    }
+
+    pub fn scale(mut self, s: f32) -> Self {
+        self.base_effects.scale = s;
         self
     }
 
@@ -130,11 +136,12 @@ impl<V> ViewStyleExt for V {
     }
 }
 
+#[derive(Default)]
 pub struct StyledViewState {
     pub is_hovered: bool,
     pub padding_anim: Option<AnimatedValue<f32>>,
     pub color_anim: Option<AnimatedValue<Color>>,
-    // TODO: Add more animations
+    pub scale_anim: Option<AnimatedValue<f32>>,
 }
 
 impl StyledViewState {
@@ -143,6 +150,7 @@ impl StyledViewState {
             is_hovered: false,
             padding_anim: None,
             color_anim: None,
+            scale_anim: None,
         }
     }
 }
@@ -181,6 +189,9 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
                 AnimationTarget::BackgroundColor => {
                     view_state.color_anim =
                         Some(AnimatedValue::new(self.style.base_effects.background_color));
+                }
+                AnimationTarget::Scale => {
+                    view_state.scale_anim = Some(AnimatedValue::new(self.style.base_effects.scale));
                 }
             }
         }
@@ -258,6 +269,30 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
             } else {
                 final_effects.background_color = target_effects.background_color;
             }
+        } else {
+            final_effects.background_color = target_effects.background_color;
+        }
+
+        if let Some(scale_anim) = &mut view_state.scale_anim {
+            let transition = self
+                .style
+                .transitions
+                .iter()
+                .find(|t| t.0 == AnimationTarget::Scale);
+
+            if let Some((_, duration, curve)) = transition {
+                let target_scale = target_effects.scale;
+                scale_anim.set_target(target_scale, now_ms(), *duration, *curve);
+            }
+
+            if scale_anim.tick(now_ms()) {
+                is_animating = true;
+                final_effects.scale = scale_anim.current;
+            } else {
+                final_effects.scale = target_effects.scale;
+            }
+        } else {
+            final_effects.scale = target_effects.scale;
         }
 
         node.set_effects(ctx, final_effects);
@@ -277,7 +312,7 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
         }
 
         if is_animating {
-            // TODO: REDRAW NEEDED `ctx.request_frame()`
+            ctx.request_frame();
         }
     }
 

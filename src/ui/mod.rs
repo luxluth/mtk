@@ -1,8 +1,10 @@
 use crate::{Context, Node};
 
+pub mod event;
 pub mod style;
 pub mod widgets;
 
+pub use event::{EventKind, ViewEventExt};
 pub use style::{AnimationTarget, Style, ViewStyleExt};
 
 #[derive(Clone)]
@@ -15,7 +17,8 @@ pub enum Event {
     MouseInput {
         pressed: bool,
     },
-    // Add more winit mapped events here
+    Tick,
+    // TODO: Add more winit mapped events here
 }
 
 pub trait View<State> {
