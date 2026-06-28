@@ -373,6 +373,7 @@ fn main() {
     let attr = WindowAttr::default()
         .with_title("MTK Calculator".to_string())
         .with_size((400, 600))
+        .with_app_id("dev.luxluth.calculator".to_string())
         .with_resizable(false);
 
     window.present_with(attr);

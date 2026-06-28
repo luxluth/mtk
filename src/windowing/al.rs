@@ -62,7 +62,13 @@ impl WindowAttr {
     attr_fn!(with_decorations, decorations, bool);
     attr_fn!(with_size, size, (u32, u32));
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    ))]
     attr_fn!(with_app_id, app_id, String);
 }
 
@@ -166,7 +172,13 @@ where
             .with_resizable(attr.resizable)
             .with_inner_size(PhysicalSize::new(attr.size.0, attr.size.1));
 
-        #[cfg(target_os = "linux")]
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd",
+            target_os = "dragonfly"
+        ))]
         {
             use winit::platform::wayland::WindowAttributesExtWayland;
             window_attributes = window_attributes.with_name(attr.app_id.clone(), "");
