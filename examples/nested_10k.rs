@@ -59,13 +59,13 @@ fn main() {
     let mut ctx = Context::new();
 
     // Simple text sizing
-    ctx.set_text_sizing_func(
-        |_node, text, _userdata, _avail_w, _avail_h| TextComputedOutput {
+    ctx.set_text_sizing_func(|_ctx, _node, text, _userdata, _avail_w, _avail_h| {
+        TextComputedOutput {
             computed_width: text.len() as f32 * 6.0,
             computed_height: 14.0,
             baseline_offset: 12.0,
-        },
-    );
+        }
+    });
 
     let state = AppState {};
 
