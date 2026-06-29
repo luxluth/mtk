@@ -1,10 +1,14 @@
-[package]
-name = "mtk"
-description = "Muse GUI Toolkit"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = ["crates/*"]
+resolver = "3"
 
-[dependencies]
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+authors = ["luxluth <delphin.blehoussi93@gmail.com>"]
+description = "Muse GUI Toolkit"
+
+[workspace.dependencies]
 bytemuck = "1.25.0"
 cosmic-text = "0.19.0"
 cpal = "0.18"
@@ -18,11 +22,3 @@ tiny-skia = "0.12.0"
 wgpu = "29.0.3"
 winit = "0.30.13"
 zune-image = "0.5.0"
-
-[build-dependencies]
-bindgen = "0.72.1"
-cc = "1.2.65"
-
-[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd", target_os = "dragonfly"))'.dependencies]
-cpal = { version = "0.18", features = ["pipewire"] }
-pipewire = "0.10.0"

@@ -84,6 +84,11 @@ impl Style {
         self
     }
 
+    pub fn corner_radius_precise(mut self, radius: Radius) -> Self {
+        self.base_effects.border.radius = radius;
+        self
+    }
+
     pub fn width(mut self, size: Size) -> Self {
         self.base_constraints.width = size;
         self

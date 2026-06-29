@@ -1,0 +1,29 @@
+[package]
+name = "mtk"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+
+[dependencies]
+bytemuck = { workspace = true }
+cosmic-text = { workspace = true }
+cpal = { workspace = true }
+env_logger = { workspace = true }
+log = { workspace = true }
+pollster = { workspace = true }
+resvg = { workspace = true }
+symphonia = { workspace = true }
+symphonia-bundle-mp3 = { workspace = true }
+tiny-skia = { workspace = true }
+wgpu = { workspace = true }
+winit = { workspace = true }
+zune-image = { workspace = true }
+mtk-macro = { path = "../mtk-macro" }
+
+[build-dependencies]
+bindgen = "0.72.1"
+cc = "1.2.65"
+
+[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd", target_os = "dragonfly"))'.dependencies]
+cpal = { version = "0.18", features = ["pipewire"] }
+pipewire = "0.10.0"

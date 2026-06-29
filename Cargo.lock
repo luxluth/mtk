@@ -1595,7 +1595,7 @@ dependencies = [
 
 [[package]]
 name = "mtk"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "bindgen",
  "bytemuck",
@@ -1604,6 +1604,7 @@ dependencies = [
  "cpal",
  "env_logger",
  "log",
+ "mtk-macro",
  "pipewire",
  "pollster",
  "resvg",
@@ -1613,6 +1614,15 @@ dependencies = [
  "wgpu",
  "winit",
  "zune-image",
+]
+
+[[package]]
+name = "mtk-macro"
+version = "0.0.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
