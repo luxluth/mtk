@@ -1,13 +1,13 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use cosmic_text::{Align, Attrs, AttrsOwned};
+use cosmic_text::{Align, Attrs, AttrsOwned, Family};
 
 use crate::animation::{AnimatedValue, Curve};
 use crate::colors::Color;
-use crate::effects::Effects;
+use crate::effects::{Effects, Radius};
 use crate::style::{Constraints, Edges};
 use crate::ui::{Event, View};
-use crate::{Context, Node};
+use crate::{AlignItems, Context, FlexDirection, JustifyContent, Node, Overflow, Size, rgb};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AnimationTarget {
@@ -31,8 +31,8 @@ impl Default for TextStyle {
             line_height: 20.0,
             attrs: AttrsOwned::new(
                 &Attrs::new()
-                    .color(cosmic_text::Color::rgb(0, 0, 0))
-                    .family(cosmic_text::Family::SansSerif),
+                    .color(rgb!(0, 0, 0).into())
+                    .family(Family::SansSerif),
             ),
             alignement: Align::Left,
         }
@@ -62,6 +62,58 @@ impl Style {
         self
     }
 
+    pub fn padding_edges(mut self, edges: Edges) -> Self {
+        self.base_constraints.padding = edges;
+        self
+    }
+
+    pub fn border(mut self, width: f32, color: Color) -> Self {
+        self.base_constraints.border = Edges::all(width);
+        self.base_effects.border.color = color;
+        self
+    }
+
+    pub fn border_edges(mut self, edges: Edges, color: Color) -> Self {
+        self.base_constraints.border = edges;
+        self.base_effects.border.color = color;
+        self
+    }
+
+    pub fn corner_radius(mut self, radius: f32) -> Self {
+        self.base_effects.border.radius = Radius::all(radius);
+        self
+    }
+
+    pub fn width(mut self, size: Size) -> Self {
+        self.base_constraints.width = size;
+        self
+    }
+
+    pub fn height(mut self, size: Size) -> Self {
+        self.base_constraints.height = size;
+        self
+    }
+
+    pub fn justify_content(mut self, j: JustifyContent) -> Self {
+        self.base_constraints.justify_content = j;
+        self
+    }
+
+    pub fn align_items(mut self, a: AlignItems) -> Self {
+        self.base_constraints.align_items = a;
+        self
+    }
+
+    pub fn gap(mut self, val: f32) -> Self {
+        self.base_constraints.gap = val;
+        self
+    }
+
+    pub fn overflow(mut self, overflow: Overflow) -> Self {
+        self.base_constraints.overflow = overflow;
+        self
+    }
+
     pub fn bg_color(mut self, color: Color) -> Self {
         self.base_effects.background_color = color;
         self
@@ -72,7 +124,7 @@ impl Style {
         self
     }
 
-    pub fn flex_direction(mut self, dir: crate::style::FlexDirection) -> Self {
+    pub fn flex_direction(mut self, dir: FlexDirection) -> Self {
         self.base_constraints.flex_direction = dir;
         self
     }

@@ -1,10 +1,9 @@
 use cosmic_text::Weight;
 use mtk::{
-    AlignItems, Edges, FlexDirection, JustifyContent, Overflow, Size,
+    AlignItems, FlexDirection, JustifyContent, Overflow, Size,
     animation::Curve,
     clr,
     colors::Color,
-    effects::{Border, Radius},
     rgb,
     ui::{
         EventKind, View, ViewEventExt,
@@ -91,14 +90,12 @@ fn calc_btn<F: Fn(&mut CalcState) + 'static + Clone>(
     text(label.to_string())
         .style(
             Style::new()
-                .update_constraints(|c| {
-                    c.padding = Edges::all(20.0);
-                    c.border = Edges::all(2.0);
-                    c.width = Size::Fill;
-                    c.height = Size::Fill;
-                    c.justify_content = JustifyContent::Center;
-                    c.align_items = AlignItems::Center;
-                })
+                .padding(20.0)
+                .border(2.0, border)
+                .width(Size::Fill)
+                .height(Size::Fill)
+                .justify_content(JustifyContent::Center)
+                .align_items(AlignItems::Center)
                 .set_text_style(TextStyle {
                     font_size: 24.0,
                     alignement: cosmic_text::Align::Center,
@@ -113,12 +110,7 @@ fn calc_btn<F: Fn(&mut CalcState) + 'static + Clone>(
                 .bg_color(bg)
                 .scale(if is_pressed { 0.95 } else { 1.0 })
                 .animate(AnimationTarget::Scale, 100.0, Curve::ease_out())
-                .update_effects(|e| {
-                    e.border = Border {
-                        color: border,
-                        radius: Radius::all(12.),
-                    };
-                })
+                .corner_radius(12.0)
                 .on_hover(move |s| {
                     s.bg_color(rgb!(
                         min(bg.r as u32 + 30, 255) as u8,
@@ -194,7 +186,7 @@ fn main() {
         operator: None,
         clear_on_next: false,
         pressed_btn: None,
-        theme: Theme::Light,
+        theme: Theme::Dark,
     };
 
     let mut window = Window::with(state, |state: &mut CalcState| {
@@ -203,11 +195,9 @@ fn main() {
             container(vec![
                 text(state.display.clone()).style(
                     Style::new()
-                        .update_constraints(|c| {
-                            c.padding = Edges::all(20.0);
-                            c.width = Size::Percent(1.0);
-                            c.overflow = Overflow::Hidden;
-                        })
+                        .padding(20.0)
+                        .width(Size::Percent(1.0))
+                        .overflow(Overflow::Hidden)
                         .set_text_style(TextStyle {
                             font_size: 48.0,
                             alignement: cosmic_text::Align::Right,
@@ -223,18 +213,11 @@ fn main() {
             ])
             .style(
                 Style::new()
-                    .update_constraints(|c| {
-                        c.width = Size::Percent(1.0);
-                        c.height = Size::Fixed(130);
-                        c.border = Edges::all(2.0);
-                    })
+                    .width(Size::Percent(1.0))
+                    .height(Size::Fixed(130))
+                    .border(2.0, state.theme.border())
                     .bg_color(state.theme.display())
-                    .update_effects(|e| {
-                        e.border = Border {
-                            color: state.theme.border(),
-                            radius: Radius::all(8.),
-                        };
-                    }),
+                    .corner_radius(8.0),
             ),
             // Row 1
             row((
@@ -277,12 +260,13 @@ fn main() {
                     state.theme,
                 ),
             ))
-            .style(Style::new().update_constraints(|c| {
-                c.width = Size::Percent(1.0);
-                c.height = Size::Fill;
-                c.gap = 10.0;
-                c.flex_direction = FlexDirection::Row;
-            })),
+            .style(
+                Style::new()
+                    .width(Size::Percent(1.0))
+                    .height(Size::Fill)
+                    .gap(10.0)
+                    .flex_direction(FlexDirection::Row),
+            ),
             // Row 2
             row((
                 std_btn(state.pressed_btn.as_deref() == Some("7"), "7", state.theme),
@@ -295,12 +279,13 @@ fn main() {
                     state.theme,
                 ),
             ))
-            .style(Style::new().update_constraints(|c| {
-                c.width = Size::Percent(1.0);
-                c.height = Size::Fill;
-                c.gap = 10.0;
-                c.flex_direction = FlexDirection::Row;
-            })),
+            .style(
+                Style::new()
+                    .width(Size::Percent(1.0))
+                    .height(Size::Fill)
+                    .gap(10.0)
+                    .flex_direction(FlexDirection::Row),
+            ),
             // Row 3
             row((
                 std_btn(state.pressed_btn.as_deref() == Some("4"), "4", state.theme),
@@ -313,12 +298,13 @@ fn main() {
                     state.theme,
                 ),
             ))
-            .style(Style::new().update_constraints(|c| {
-                c.width = Size::Percent(1.0);
-                c.height = Size::Fill;
-                c.gap = 10.0;
-                c.flex_direction = FlexDirection::Row;
-            })),
+            .style(
+                Style::new()
+                    .width(Size::Percent(1.0))
+                    .height(Size::Fill)
+                    .gap(10.0)
+                    .flex_direction(FlexDirection::Row),
+            ),
             // Row 4
             row((
                 std_btn(state.pressed_btn.as_deref() == Some("1"), "1", state.theme),
@@ -331,12 +317,13 @@ fn main() {
                     state.theme,
                 ),
             ))
-            .style(Style::new().update_constraints(|c| {
-                c.width = Size::Percent(1.0);
-                c.height = Size::Fill;
-                c.gap = 10.0;
-                c.flex_direction = FlexDirection::Row;
-            })),
+            .style(
+                Style::new()
+                    .width(Size::Percent(1.0))
+                    .height(Size::Fill)
+                    .gap(10.0)
+                    .flex_direction(FlexDirection::Row),
+            ),
             // Row 5
             row((
                 std_btn(state.pressed_btn.as_deref() == Some("0"), "0", state.theme),
@@ -350,31 +337,30 @@ fn main() {
                     |s| s.compute(),
                 ),
             ))
-            .style(Style::new().update_constraints(|c| {
-                c.width = Size::Percent(1.0);
-                c.height = Size::Fill;
-                c.gap = 10.0;
-                c.flex_direction = FlexDirection::Row;
-            })),
+            .style(
+                Style::new()
+                    .width(Size::Percent(1.0))
+                    .height(Size::Fill)
+                    .gap(10.0)
+                    .flex_direction(FlexDirection::Row),
+            ),
         ))
         .style(
             Style::new()
-                .update_constraints(|c| {
-                    c.width = Size::Percent(1.0);
-                    c.height = Size::Percent(1.0);
-                    c.padding = Edges::all(20.0);
-                    c.flex_direction = FlexDirection::Column;
-                    c.gap = 10.0;
-                })
+                .width(Size::Percent(1.0))
+                .height(Size::Percent(1.0))
+                .padding(20.0)
+                .flex_direction(FlexDirection::Column)
+                .gap(10.0)
                 .bg_color(state.theme.bg()),
         )
     });
 
-    let attr = WindowAttr::default()
-        .with_title("MTK Calculator".to_string())
-        .with_size((400, 600))
-        .with_app_id("dev.luxluth.calculator".to_string())
-        .with_resizable(false);
-
-    window.present_with(attr);
+    window.present_with(
+        WindowAttr::default()
+            .with_title("MTK Calculator".to_string())
+            .with_size((400, 600))
+            .with_app_id("dev.luxluth.calculator".to_string())
+            .with_resizable(false),
+    );
 }
