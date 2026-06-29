@@ -9,6 +9,8 @@ pub mod text;
 pub mod ui;
 pub mod windowing;
 
+pub use mtk_macro::Lens;
+
 use crate::effects::Effects;
 pub use crate::node::Node;
 use crate::render::RenderCommand;
@@ -172,4 +174,8 @@ impl Drop for Context {
             let _ = Box::from_raw(self.ctx);
         }
     }
+}
+
+pub mod text_property {
+    pub use cosmic_text::*;
 }

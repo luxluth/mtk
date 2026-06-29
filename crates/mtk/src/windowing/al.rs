@@ -26,16 +26,52 @@ where
     app_view_fn: Option<Box<dyn FnMut(&mut S) -> V>>,
     view: Option<V>,
     element: Option<V::Element>,
-    attr: WindowAttr,
+    attr: WindowAttributes,
 }
 
-#[derive(Clone)]
-pub struct WindowAttr {
+#[derive(Debug, Clone, Copy)]
+pub struct WindowDimension {
+    pub width: u32,
+    pub height: u32,
+}
+
+impl WindowDimension {
+    pub fn new(width: u32, height: u32) -> Self {
+        Self { width, height }
+    }
+
+    pub fn zero() -> Self {
+        Self {
+            width: 0,
+            height: 0,
+        }
+    }
+}
+
+impl From<(u32, u32)> for WindowDimension {
+    fn from((width, height): (u32, u32)) -> Self {
+        WindowDimension::new(width, height)
+    }
+}
+
+impl Into<winit::dpi::Size> for WindowDimension {
+    fn into(self) -> winit::dpi::Size {
+        winit::dpi::Size::Physical(PhysicalSize {
+            width: self.width,
+            height: self.height,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct WindowAttributes {
     pub resizable: bool,
     pub transparent: bool,
     pub blur: bool,
     pub decorations: bool,
-    size: (u32, u32),
+    pub size: WindowDimension,
+    pub min_size: Option<WindowDimension>,
+    pub max_size: Option<WindowDimension>,
     pub title: String,
     #[cfg(target_os = "linux")]
     pub app_id: String,
@@ -50,7 +86,7 @@ macro_rules! attr_fn {
     };
 }
 
-impl WindowAttr {
+impl WindowAttributes {
     pub fn new() -> Self {
         Self::default()
     }
@@ -60,7 +96,9 @@ impl WindowAttr {
     attr_fn!(with_transparency, transparent, bool);
     attr_fn!(with_blur, blur, bool);
     attr_fn!(with_decorations, decorations, bool);
-    attr_fn!(with_size, size, (u32, u32));
+    attr_fn!(with_size, size, WindowDimension);
+    attr_fn!(with_min_size, min_size, Option<WindowDimension>);
+    attr_fn!(with_max_size, max_size, Option<WindowDimension>);
 
     #[cfg(any(
         target_os = "linux",
@@ -72,18 +110,26 @@ impl WindowAttr {
     attr_fn!(with_app_id, app_id, String);
 }
 
-impl Default for WindowAttr {
+impl Default for WindowAttributes {
     fn default() -> Self {
         Self {
             resizable: true,
             title: "MTK".to_string(),
-            size: (800, 600),
+            size: WindowDimension::new(800, 600),
+            min_size: None,
+            max_size: None,
 
             transparent: true,
             blur: false,
             decorations: false,
 
-            #[cfg(target_os = "linux")]
+            #[cfg(any(
+                target_os = "linux",
+                target_os = "freebsd",
+                target_os = "netbsd",
+                target_os = "openbsd",
+                target_os = "dragonfly"
+            ))]
             app_id: "".to_string(),
         }
     }
@@ -124,7 +170,7 @@ where
             state,
             app_view_fn: Some(Box::new(view_fn)),
             view: Some(view),
-            attr: WindowAttr::default(),
+            attr: WindowAttributes::default(),
             element: Some(element),
         }
     }
@@ -135,7 +181,7 @@ where
         event_loop.run_app(self).unwrap();
     }
 
-    pub fn present_with(&mut self, attr: WindowAttr) {
+    pub fn present_with(&mut self, attr: WindowAttributes) {
         self.attr = attr;
         self.present();
     }
@@ -170,7 +216,7 @@ where
             .with_transparent(attr.transparent)
             .with_blur(attr.blur)
             .with_resizable(attr.resizable)
-            .with_inner_size(PhysicalSize::new(attr.size.0, attr.size.1));
+            .with_inner_size(attr.size);
 
         #[cfg(any(
             target_os = "linux",
@@ -184,8 +230,16 @@ where
             window_attributes = window_attributes.with_name(attr.app_id.clone(), "");
         }
 
+        if let Some(min_size) = attr.min_size {
+            window_attributes = window_attributes.with_min_inner_size(min_size);
+        }
+
+        if let Some(max_size) = attr.max_size {
+            window_attributes = window_attributes.with_max_inner_size(max_size);
+        }
+
         self.context
-            .compute_layout(attr.size.0 as f32, attr.size.1 as f32);
+            .compute_layout(attr.size.height as f32, attr.size.width as f32);
 
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
         self.window = Some(window.clone());

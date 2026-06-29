@@ -10,7 +10,7 @@ use mtk::{
         style::{AnimationTarget, Style, TextStyle, ViewStyleExt},
         widgets::{column, container, row, text},
     },
-    windowing::{Window, WindowAttr},
+    windowing::{Window, WindowAttributes},
 };
 use std::cmp::min;
 
@@ -357,9 +357,9 @@ fn main() {
     });
 
     window.present_with(
-        WindowAttr::default()
+        WindowAttributes::default()
             .with_title("MTK Calculator".to_string())
-            .with_size((400, 600))
+            .with_size((400, 600).into())
             .with_app_id("dev.luxluth.calculator".to_string())
             .with_resizable(false),
     );

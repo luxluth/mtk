@@ -1,10 +1,12 @@
 use crate::{Context, Node};
 
 pub mod event;
+pub mod lens;
 pub mod style;
 pub mod widgets;
 
 pub use event::{EventKind, ViewEventExt};
+pub use lens::{Lens, LensWrap};
 pub use style::{AnimationTarget, Style, ViewStyleExt};
 
 #[derive(Clone)]
