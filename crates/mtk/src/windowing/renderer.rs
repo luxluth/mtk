@@ -490,6 +490,36 @@ impl<'w> Renderer<'w> {
 
             let mut cmd_index = 0;
             for cmd in context.render_list() {
+                if cmd.has_clip() {
+                    let clip = cmd.clip();
+                    let x = clip.x.max(0.0) as u32;
+                    let y = clip.y.max(0.0) as u32;
+                    let w = clip.w.max(0.0) as u32;
+                    let h = clip.h.max(0.0) as u32;
+
+                    let max_w = self.size.width.max(1);
+                    let max_h = self.size.height.max(1);
+
+                    let cx = x.min(max_w);
+                    let cy = y.min(max_h);
+                    let cw = w.min(max_w.saturating_sub(cx));
+                    let ch = h.min(max_h.saturating_sub(cy));
+
+                    if cw == 0 || ch == 0 {
+                        cmd_index += 1;
+                        continue;
+                    }
+
+                    render_pass.set_scissor_rect(cx, cy, cw, ch);
+                } else {
+                    render_pass.set_scissor_rect(
+                        0,
+                        0,
+                        self.size.width.max(1),
+                        self.size.height.max(1),
+                    );
+                }
+
                 if cmd.kind() == crate::render::RenderCommandKind::DrawQuad {
                     render_pass.set_pipeline(&self.pipelines.solid);
                     let node = cmd.node();

@@ -1402,22 +1402,25 @@ static void muse__m_flatten_recursive(muContext *ctx, muNode node,
   bool new_has_clip = has_clip;
 
   if (cons != NULL && cons->overflow == MU_OVERFLOW_HIDDEN && comp != NULL) {
+    float cx = comp->x + cons->border.left;
+    float cy = comp->y + cons->border.top;
+    float cw = comp->w - cons->border.left - cons->border.right;
+    float ch = comp->h - cons->border.top - cons->border.bottom;
+
     if (has_clip) {
-      float x1 = (new_clip.x > comp->x) ? new_clip.x : comp->x;
-      float y1 = (new_clip.y > comp->y) ? new_clip.y : comp->y;
-      float x2 = (new_clip.x + new_clip.w < comp->x + comp->w)
-                     ? new_clip.x + new_clip.w
-                     : comp->x + comp->w;
-      float y2 = (new_clip.y + new_clip.h < comp->y + comp->h)
-                     ? new_clip.y + new_clip.h
-                     : comp->y + comp->h;
+      float x1 = (new_clip.x > cx) ? new_clip.x : cx;
+      float y1 = (new_clip.y > cy) ? new_clip.y : cy;
+      float x2 = (new_clip.x + new_clip.w < cx + cw) ? new_clip.x + new_clip.w
+                                                     : cx + cw;
+      float y2 = (new_clip.y + new_clip.h < cy + ch) ? new_clip.y + new_clip.h
+                                                     : cy + ch;
 
       new_clip.x = x1;
       new_clip.y = y1;
       new_clip.w = (x2 > x1) ? (x2 - x1) : 0.0f;
       new_clip.h = (y2 > y1) ? (y2 - y1) : 0.0f;
     } else {
-      new_clip = (muRect){comp->x, comp->y, comp->w, comp->h};
+      new_clip = (muRect){cx, cy, cw, ch};
       new_has_clip = true;
     }
   }
