@@ -30,7 +30,9 @@ pub struct Context {
     pub(crate) text_userdatas: HashMap<Node, *mut Box<dyn std::any::Any>>,
     pub(crate) text_context: SharedTextContext,
     pub(crate) focused_node: Option<Node>,
+    pub(crate) focusable_nodes: Vec<Node>,
     pub(crate) window: Option<Arc<winit::window::Window>>,
+    pub(crate) modifiers: winit::keyboard::ModifiersState,
 }
 
 impl Context {
@@ -44,7 +46,9 @@ impl Context {
             text_userdatas: HashMap::new(),
             text_context: Arc::new(Mutex::new(TextContext::new())),
             focused_node: None,
+            focusable_nodes: Vec::new(),
             window: None,
+            modifiers: winit::keyboard::ModifiersState::default(),
         }
     }
 
@@ -53,8 +57,67 @@ impl Context {
         self.request_frame();
     }
 
+    pub fn clear_focus(&mut self) {
+        self.focused_node = None;
+        self.request_frame();
+    }
+
+    pub fn register_focusable(&mut self, node: Node) {
+        if !self.focusable_nodes.contains(&node) {
+            self.focusable_nodes.push(node);
+        }
+    }
+
+    pub fn unregister_focusable(&mut self, node: Node) {
+        self.focusable_nodes.retain(|n| n != &node);
+        if self.focused_node == Some(node.clone()) {
+            self.clear_focus();
+        }
+    }
+
+    pub fn focus_next(&mut self) {
+        if self.focusable_nodes.is_empty() {
+            return;
+        }
+        if let Some(focused) = &self.focused_node {
+            if let Some(idx) = self.focusable_nodes.iter().position(|n| n == focused) {
+                let next_idx = (idx + 1) % self.focusable_nodes.len();
+                self.focused_node = Some(self.focusable_nodes[next_idx].clone());
+            } else {
+                self.focused_node = Some(self.focusable_nodes[0].clone());
+            }
+        } else {
+            self.focused_node = Some(self.focusable_nodes[0].clone());
+        }
+    }
+
+    pub fn focus_prev(&mut self) {
+        if self.focusable_nodes.is_empty() {
+            return;
+        }
+        if let Some(focused) = &self.focused_node {
+            if let Some(idx) = self.focusable_nodes.iter().position(|n| n == focused) {
+                let prev_idx = if idx == 0 {
+                    self.focusable_nodes.len() - 1
+                } else {
+                    idx - 1
+                };
+                self.focused_node = Some(self.focusable_nodes[prev_idx].clone());
+            } else {
+                self.focused_node =
+                    Some(self.focusable_nodes[self.focusable_nodes.len() - 1].clone());
+            }
+        } else {
+            self.focused_node = Some(self.focusable_nodes[self.focusable_nodes.len() - 1].clone());
+        }
+    }
+
     pub fn focused_node(&self) -> Option<Node> {
         self.focused_node
+    }
+
+    pub fn modifiers(&self) -> winit::keyboard::ModifiersState {
+        self.modifiers
     }
 
     /// Create a new valid node. It's not inserted in the tree but it exists.

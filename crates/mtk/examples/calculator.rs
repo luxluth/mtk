@@ -1,5 +1,5 @@
 use mtk::{
-    AlignItems, FlexDirection, JustifyContent, Overflow, Size,
+    AlignItems, AnimationTarget, FlexDirection, JustifyContent, Overflow, Size, Style, TextStyle,
     animation::Curve,
     clr,
     colors::Color,
@@ -7,7 +7,7 @@ use mtk::{
     text_property::{self, Alignment, OverflowWrap},
     ui::{
         EventKind, View, ViewEventExt,
-        style::{AnimationTarget, Style, TextStyle, ViewStyleExt},
+        style::ViewStyleExt,
         widgets::{column, container, row, text},
     },
     windowing::{Window, WindowAttributes},

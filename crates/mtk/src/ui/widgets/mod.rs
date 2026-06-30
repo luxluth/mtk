@@ -1,6 +1,6 @@
 use crate::{
     Context, FlexDirection, Node,
-    ui::{Event, View, ViewSequence},
+    ui::{Event, View, ViewSequence, event::EventResult},
 };
 
 pub use text_input::*;
@@ -49,7 +49,8 @@ impl<State> View<State> for Text {
         _state: &mut State,
         _event: Event,
         _ctx: &mut Context,
-    ) {
+    ) -> EventResult {
+        EventResult::Ignored
     }
 }
 
@@ -125,7 +126,7 @@ where
         state: &mut State,
         event: Event,
         ctx: &mut Context,
-    ) {
-        self.children.message(&mut element.1, state, event, ctx);
+    ) -> EventResult {
+        self.children.message(&mut element.1, state, event, ctx)
     }
 }

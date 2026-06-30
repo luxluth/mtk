@@ -35,6 +35,7 @@ pub struct GlyphInfo {
     pub offset_y: i32,
     pub physical_w: u32,
     pub physical_h: u32,
+    pub is_color: bool,
 }
 
 impl Atlas {
@@ -51,7 +52,7 @@ impl Atlas {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: TextureFormat::R8Unorm, // Or Rgba8UnormSrgb if color glyphs
+            format: TextureFormat::Rgba8UnormSrgb, // Support color glyphs
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
@@ -113,29 +114,35 @@ impl Atlas {
                 offset_y: -rendered_glyph.placement.top,
                 physical_w: 0,
                 physical_h: 0,
+                is_color: false,
             };
             self.glyphs.insert(cache_key, info);
             return Some(info);
         }
 
-        // Swash returns bytes according to the Format. Format::Alpha is 1 byte per pixel.
-        let data = match rendered_glyph.content {
-            Content::Mask => rendered_glyph.data.clone(),
-            Content::Color => {
-                // If it's a color emoji but we only have R8Unorm atlas, take alpha or luminance
-                let mut mask = Vec::with_capacity((width * height) as usize);
-                for chunk in rendered_glyph.data.chunks_exact(4) {
-                    mask.push(chunk[3]); // Take Alpha
+        // We need RGBA data for the atlas
+        let (data, is_color) = match rendered_glyph.content {
+            Content::Mask => {
+                let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+                for &alpha in rendered_glyph.data.iter() {
+                    rgba.push(255);
+                    rgba.push(255);
+                    rgba.push(255);
+                    rgba.push(alpha);
                 }
-                mask
+                (rgba, false)
             }
+            Content::Color => (rendered_glyph.data.clone(), true),
             Content::SubpixelMask => {
                 // Convert subpixel to alpha by taking green
-                let mut mask = Vec::with_capacity((width * height) as usize);
+                let mut rgba = Vec::with_capacity((width * height * 4) as usize);
                 for chunk in rendered_glyph.data.chunks_exact(3) {
-                    mask.push(chunk[1]);
+                    rgba.push(255);
+                    rgba.push(255);
+                    rgba.push(255);
+                    rgba.push(chunk[1]);
                 }
-                mask
+                (rgba, false)
             }
         };
 
@@ -165,7 +172,7 @@ impl Atlas {
             &data,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(width),
+                bytes_per_row: Some(width * 4),
                 rows_per_image: Some(height),
             },
             Extent3d {
@@ -184,6 +191,7 @@ impl Atlas {
             offset_y: -rendered_glyph.placement.top,
             physical_w: width,
             physical_h: height,
+            is_color,
         };
 
         self.glyphs.insert(cache_key, info);

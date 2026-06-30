@@ -1,4 +1,4 @@
-use crate::ui::{Context, Event, View};
+use crate::ui::{Context, Event, View, event::EventResult};
 
 /// A Lens allows focusing on a specific part (`Inner`) of a larger state (`Outer`).
 pub trait Lens<Outer, Inner> {
@@ -46,7 +46,14 @@ where
         self.view.get_node(element)
     }
 
-    fn message(&self, element: &mut Self::Element, state: &mut Outer, event: Event, ctx: &mut Context) {
-        self.view.message(element, self.lens.get_mut(state), event, ctx)
+    fn message(
+        &self,
+        element: &mut Self::Element,
+        state: &mut Outer,
+        event: Event,
+        ctx: &mut Context,
+    ) -> EventResult {
+        self.view
+            .message(element, self.lens.get_mut(state), event, ctx)
     }
 }

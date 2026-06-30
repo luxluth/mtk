@@ -1,9 +1,10 @@
-use crate::Node;
 use crate::colors::Color;
 use crate::sys;
-use crate::ui::style::TextStyle;
+use crate::{Node, TextStyle};
 use parley::style::{LineHeight, StyleProperty};
-use parley::{AlignmentOptions, FontContext, LayoutContext};
+use parley::{
+    AlignmentOptions, BreakReason, Cluster, ClusterSide, Cursor, FontContext, LayoutContext,
+};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -79,6 +80,65 @@ pub(crate) fn measure_text(
         computed_width: measured_width,
         computed_height: measured_height,
         baseline_offset: text_style.font_size, // Approximate baseline
+    }
+}
+
+pub(crate) fn hit_test_text(
+    text: &str,
+    text_style: &TextStyle,
+    avail_w: f32,
+    _avail_h: f32,
+    x: f32,
+    y: f32,
+    shared_ctx: &SharedTextContext,
+) -> usize {
+    let mut text_context = shared_ctx.lock().unwrap();
+    let TextContext {
+        font_cx, layout_cx, ..
+    } = &mut *text_context;
+
+    let mut builder = layout_cx.ranged_builder(font_cx, text, 1.0, true);
+
+    builder.push_default(StyleProperty::FontSize(text_style.font_size));
+    builder.push_default(parley::style::FontFamily::from(
+        text_style.font_family.as_str(),
+    ));
+    builder.push_default(StyleProperty::FontWeight(text_style.font_weight));
+    builder.push_default(StyleProperty::FontStyle(text_style.font_style));
+
+    if text_style.wrap {
+        builder.push_default(StyleProperty::OverflowWrap(text_style.overflow_wrap));
+    }
+
+    let mut layout = builder.build(text);
+    let max_advance = if text_style.wrap && avail_w.is_finite() && avail_w > 0.0 {
+        Some(avail_w)
+    } else {
+        None
+    };
+
+    layout.break_all_lines(max_advance);
+    layout.align(text_style.alignment, AlignmentOptions::default());
+
+    if let Some((cluster, side)) = Cluster::from_point(&layout, x, y) {
+        let is_leading = side == ClusterSide::Left;
+        if cluster.is_rtl() {
+            if is_leading {
+                cluster.text_range().end
+            } else {
+                cluster.text_range().start
+            }
+        } else {
+            if is_leading || cluster.is_line_break() == Some(BreakReason::Explicit) {
+                cluster.text_range().start
+            } else {
+                cluster.text_range().end
+            }
+        }
+    } else {
+        // If we didn't hit a cluster, let's just use from_point which gets closest
+        let cursor = Cursor::from_point(&layout, x, y);
+        cursor.index()
     }
 }
 
@@ -174,4 +234,12 @@ pub(crate) extern "C" fn text_sizing_trampoline(
             TextComputedOutput::default().into()
         }
     })
+}
+
+#[derive(Clone, Debug)]
+pub struct TextRenderInfo {
+    pub style: TextStyle,
+    pub cursor: Option<usize>,
+    pub selection: Option<(usize, usize)>,
+    pub preedit_range: Option<(usize, usize)>,
 }

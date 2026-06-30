@@ -11,6 +11,8 @@ pub struct Editor {
     /// The byte-index where a text selection began. If `None`, no text is currently selected.
     /// When selecting text (e.g. holding Shift), this remains fixed while the `cursor` moves.
     selection_anchor: Option<usize>,
+    /// Temporary text being composed by the OS Input Method Editor (IME).
+    ime_preedit: Option<(String, Option<(usize, usize)>)>,
 }
 
 impl Default for Editor {
@@ -26,12 +28,50 @@ impl Editor {
             text: String::new(),
             cursor: 0,
             selection_anchor: None,
+            ime_preedit: None,
         }
     }
 
-    /// Returns a reference to the current text buffer.
+    /// Returns the underlying text buffer without any temporary IME composition.
     pub fn text(&self) -> &str {
         &self.text
+    }
+
+    /// Returns the text to be displayed on screen, which includes any active IME preedit text
+    /// temporarily inserted at the cursor position.
+    pub fn display_text(&self) -> String {
+        if let Some((preedit_text, _)) = &self.ime_preedit {
+            let mut display = String::with_capacity(self.text.len() + preedit_text.len());
+            display.push_str(&self.text[..self.cursor]);
+            display.push_str(preedit_text);
+            display.push_str(&self.text[self.cursor..]);
+            display
+        } else {
+            self.text.clone()
+        }
+    }
+
+    /// Sets the active IME preedit state. If `text` is empty, the preedit state is cleared.
+    pub fn set_ime_preedit(&mut self, text: String, cursor_pos: Option<(usize, usize)>) {
+        if text.is_empty() {
+            self.ime_preedit = None;
+        } else {
+            self.ime_preedit = Some((text, cursor_pos));
+        }
+    }
+
+    /// Commits the given text from the IME, inserting it into the buffer and clearing preedit.
+    pub fn commit_ime(&mut self, text: &str) {
+        self.ime_preedit = None;
+        self.insert(text);
+    }
+
+    /// Returns the byte range `(start, end)` of the active IME preedit within the `display_text`.
+    /// Returns `None` if there is no active IME composition.
+    pub fn preedit_range(&self) -> Option<(usize, usize)> {
+        self.ime_preedit
+            .as_ref()
+            .map(|(text, _)| (self.cursor, self.cursor + text.len()))
     }
 
     /// Returns the current byte-index position of the cursor.
@@ -43,11 +83,13 @@ impl Editor {
     /// The `start` is guaranteed to be less than or equal to `end`.
     /// Returns `None` if no text is selected.
     pub fn selection(&self) -> Option<(usize, usize)> {
-        self.selection_anchor.map(|anchor| {
+        self.selection_anchor.and_then(|anchor| {
             if anchor < self.cursor {
-                (anchor, self.cursor)
+                Some((anchor, self.cursor))
+            } else if anchor > self.cursor {
+                Some((self.cursor, anchor))
             } else {
-                (self.cursor, anchor)
+                None
             }
         })
     }
@@ -63,6 +105,25 @@ impl Editor {
         self.text = text.to_string();
         self.cursor = self.text.len();
         self.selection_anchor = None;
+    }
+
+    /// Sets the cursor position directly.
+    pub fn set_cursor(&mut self, cursor: usize) {
+        self.cursor = cursor.min(self.text.len());
+    }
+
+    /// Gets the selection anchor directly.
+    pub fn selection_anchor(&self) -> Option<usize> {
+        self.selection_anchor
+    }
+
+    /// Sets the selection anchor directly.
+    pub fn set_selection_anchor(&mut self, anchor: Option<usize>) {
+        if let Some(a) = anchor {
+            self.selection_anchor = Some(a.min(self.text.len()));
+        } else {
+            self.selection_anchor = None;
+        }
     }
 
     /// Inserts a string at the current cursor position.
@@ -103,6 +164,35 @@ impl Editor {
         }
         if self.cursor < self.text.len() {
             self.text.remove(self.cursor);
+        }
+    }
+
+    /// Deletes the word immediately preceding the cursor (Ctrl+Backspace).
+    /// If there is an active selection, deletes the selection instead.
+    pub fn delete_word_backward(&mut self) {
+        if self.delete_selection() {
+            return;
+        }
+        let end = self.cursor;
+        self.step_word_left();
+        let start = self.cursor;
+        if start < end {
+            self.text.replace_range(start..end, "");
+        }
+    }
+
+    /// Deletes the word immediately following the cursor (Ctrl+Delete).
+    /// If there is an active selection, deletes the selection instead.
+    pub fn delete_word_forward(&mut self) {
+        if self.delete_selection() {
+            return;
+        }
+        let start = self.cursor;
+        self.step_word_right();
+        let end = self.cursor;
+        if start < end {
+            self.text.replace_range(start..end, "");
+            self.cursor = start; // Cursor stays at start, text shrinks
         }
     }
 
@@ -407,5 +497,26 @@ mod tests {
         editor.move_word_right(false);
         // jumps over "world", stops before "!"
         assert_eq!(editor.cursor(), 12);
+    }
+
+    #[test]
+    fn test_editor_ime() {
+        let mut editor = Editor::new();
+        editor.insert("hello ");
+        assert_eq!(editor.cursor(), 6);
+
+        // Start composing "world"
+        editor.set_ime_preedit("worl".to_string(), None);
+        assert_eq!(editor.display_text(), "hello worl");
+        assert_eq!(editor.preedit_range(), Some((6, 10)));
+        assert_eq!(editor.text(), "hello "); // Underlying text unchanged
+        assert_eq!(editor.cursor(), 6); // Cursor unchanged
+
+        // Commit the composition
+        editor.commit_ime("world");
+        assert_eq!(editor.display_text(), "hello world");
+        assert_eq!(editor.text(), "hello world");
+        assert_eq!(editor.preedit_range(), None);
+        assert_eq!(editor.cursor(), 11);
     }
 }

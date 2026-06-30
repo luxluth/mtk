@@ -50,8 +50,6 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let alpha = textureSample(t_atlas, s_atlas, in.uv).r;
-    var out_c = in.color;
-    out_c.a = out_c.a * alpha;
-    return out_c;
+    let sample = textureSample(t_atlas, s_atlas, in.uv);
+    return sample * in.color;
 }

@@ -11,6 +11,21 @@ pub enum EventKind {
     Release,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventResult {
+    Handled,
+    Ignored,
+}
+
+impl EventResult {
+    pub fn or(self, other: EventResult) -> EventResult {
+        match (self, other) {
+            (EventResult::Handled, _) | (_, EventResult::Handled) => EventResult::Handled,
+            _ => EventResult::Ignored,
+        }
+    }
+}
+
 pub struct EventHandler<State, V, F> {
     pub(crate) inner: V,
     pub(crate) kind: EventKind,
@@ -46,7 +61,14 @@ impl<State, V: View<State>, F: Fn(&mut State) + 'static> View<State> for EventHa
         self.inner.get_node(&element.inner_element)
     }
 
-    fn message(&self, element: &mut Self::Element, state: &mut State, event: Event, ctx: &mut Context) {
+    fn message(
+        &self,
+        element: &mut Self::Element,
+        state: &mut State,
+        event: Event,
+        ctx: &mut Context,
+    ) -> EventResult {
+        let mut handled = EventResult::Ignored;
         match &event {
             Event::CursorMoved { hit_nodes, .. } => {
                 let node = self.get_node(element);
@@ -56,30 +78,43 @@ impl<State, V: View<State>, F: Fn(&mut State) + 'static> View<State> for EventHa
                     element.is_hovered = newly_hovered;
                     if newly_hovered && self.kind == EventKind::HoverIn {
                         (self.handler)(state);
+                        handled = EventResult::Handled;
                     } else if !newly_hovered && self.kind == EventKind::HoverOut {
                         (self.handler)(state);
+                        handled = EventResult::Handled;
                     }
                 }
             }
-            Event::MouseInput { pressed } => {
+            Event::MouseInput {
+                pressed,
+                x: _,
+                y: _,
+                hit_nodes: _,
+            } => {
                 if element.is_hovered {
                     if *pressed {
                         if self.kind == EventKind::Press {
                             (self.handler)(state);
+                            handled = EventResult::Handled;
                         }
                     } else {
                         if self.kind == EventKind::Release {
                             (self.handler)(state);
+                            handled = EventResult::Handled;
                         }
                         if self.kind == EventKind::Click {
                             (self.handler)(state);
+                            handled = EventResult::Handled;
                         }
                     }
                 }
             }
             _ => {}
         }
-        self.inner.message(&mut element.inner_element, state, event, ctx);
+        let inner_res = self
+            .inner
+            .message(&mut element.inner_element, state, event, ctx);
+        handled.or(inner_res)
     }
 }
 

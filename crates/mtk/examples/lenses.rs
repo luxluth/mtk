@@ -1,8 +1,7 @@
 use mtk::{
-    AlignItems, JustifyContent, Lens, Size, clr, rgb, text_property,
+    AlignItems, JustifyContent, Lens, Size, Style, TextStyle, clr, rgb, text_property,
     ui::{
-        EventKind, LensWrap, Style, View, ViewEventExt, ViewStyleExt,
-        style::TextStyle,
+        EventKind, LensWrap, View, ViewEventExt, ViewStyleExt,
         widgets::{column, text},
     },
     windowing::{Window, WindowAttributes},
@@ -24,13 +23,10 @@ fn counter(count: i32) -> impl View<i32> {
                 .width(Size::Fit)
                 .set_text_style(TextStyle {
                     font_size: 48.0,
-                    alignement: text_property::Align::Center,
+                    alignment: text_property::Alignment::Center,
                     line_height: 48.,
-                    attrs: text_property::AttrsOwned::new(
-                        &text_property::Attrs::new()
-                            .color(clr!(ll_blue).into())
-                            .family(text_property::Family::Name("IosevkaTerm NF")),
-                    ),
+                    color: clr!(ll_blue),
+                    font_family: "IosevkaTerm NF".into(),
                     ..Default::default()
                 }),
         )
@@ -40,9 +36,9 @@ fn counter(count: i32) -> impl View<i32> {
 // Another generic component for toggling a boolean
 fn toggle(is_on: bool) -> impl View<bool> {
     text(if is_on {
-        "深色模式: ON".to_string()
+        "深色模式: ✅".to_string()
     } else {
-        "深色模式: OFF".to_string()
+        "深色模式: ⭕".to_string()
     })
     .style(
         Style::new()
@@ -56,17 +52,14 @@ fn toggle(is_on: bool) -> impl View<bool> {
             .width(Size::Fit)
             .set_text_style(TextStyle {
                 font_size: 24.0,
-                alignement: text_property::Align::Center,
-                attrs: text_property::AttrsOwned::new(
-                    &&text_property::Attrs::new()
-                        .color(if is_on {
-                            clr!(white).into()
-                        } else {
-                            clr!(black).into()
-                        })
-                        .weight(text_property::Weight::BOLD)
-                        .family(text_property::Family::Name("IosevkaTerm NF")),
-                ),
+                alignment: text_property::Alignment::Center,
+                color: if is_on {
+                    clr!(white).into()
+                } else {
+                    clr!(black).into()
+                },
+                font_weight: text_property::FontWeight::BOLD,
+                font_family: "IosevkaTerm NF".into(),
                 ..Default::default()
             }),
     )

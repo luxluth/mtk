@@ -2,14 +2,14 @@ use std::sync::Arc;
 
 use winit::{
     application::ApplicationHandler,
-    dpi::PhysicalSize,
+    dpi::{PhysicalPosition, PhysicalSize},
     event::WindowEvent,
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::{Window as WWindow, WindowId},
 };
 
 use crate::{
-    Context,
+    Context, TextStyle,
     ui::{Event, View},
     windowing::renderer::Renderer,
 };
@@ -27,6 +27,7 @@ where
     view: Option<V>,
     element: Option<V::Element>,
     attr: WindowAttributes,
+    cursor_pos: (f32, f32),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -161,8 +162,6 @@ where
         ctx.root_attach(root_node);
 
         ctx.set_text_sizing_func(move |ctx, _node, text, userdata, avail_w, avail_h| {
-            use crate::ui::style::TextStyle;
-
             let default_style = TextStyle::default();
             let style = userdata
                 .and_then(|u| u.downcast_ref::<TextStyle>())
@@ -181,6 +180,7 @@ where
             view: Some(view),
             attr: WindowAttributes::default(),
             element: Some(element),
+            cursor_pos: (0.0, 0.0),
         }
     }
 
@@ -274,6 +274,9 @@ where
                 // NOTE: Maybe accept a before_close_hook
                 event_loop.exit();
             }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                self.context.modifiers = modifiers.state();
+            }
             WindowEvent::KeyboardInput {
                 device_id: _,
                 event,
@@ -302,13 +305,20 @@ where
             WindowEvent::CursorMoved { position, .. } => {
                 let x = position.x as f32;
                 let y = position.y as f32;
+                self.cursor_pos = (x, y);
                 let hit_nodes = self.context.pick(x, y);
                 let mtk_event = Event::CursorMoved { x, y, hit_nodes };
                 self.dispatch_and_rebuild(mtk_event);
             }
             WindowEvent::MouseInput { state, .. } => {
                 let pressed = state == winit::event::ElementState::Pressed;
-                let mtk_event = Event::MouseInput { pressed };
+                let hit_nodes = self.context.pick(self.cursor_pos.0, self.cursor_pos.1);
+                let mtk_event = Event::MouseInput {
+                    pressed,
+                    x: self.cursor_pos.0,
+                    y: self.cursor_pos.1,
+                    hit_nodes,
+                };
                 self.dispatch_and_rebuild(mtk_event);
             }
             WindowEvent::RedrawRequested => {
@@ -327,7 +337,14 @@ where
                 self.context.build_render_list(viewport);
 
                 if let Some(renderer) = &mut self.renderer {
-                    renderer.render(&self.context);
+                    let focused_caret = renderer.render(&self.context);
+                    if let Some(window) = &self.window {
+                        if let Some(caret) = focused_caret {
+                            let position = PhysicalPosition::new(caret[0] as u32, caret[1] as u32);
+                            let size = PhysicalSize::new(caret[2] as u32, caret[3] as u32);
+                            window.set_ime_cursor_area(position, size);
+                        }
+                    }
                 }
             }
             _ => {}

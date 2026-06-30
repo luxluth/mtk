@@ -1,4 +1,4 @@
-use crate::{Context, Node, windowing::WindowDimension};
+use crate::{Context, Node, ui::event::EventResult, windowing::WindowDimension};
 
 pub mod event;
 pub mod lens;
@@ -7,7 +7,7 @@ pub mod widgets;
 
 pub use event::{EventKind, ViewEventExt};
 pub use lens::{Lens, LensWrap};
-pub use style::{AnimationTarget, Style, ViewStyleExt};
+pub use style::ViewStyleExt;
 
 #[derive(Clone)]
 pub enum Event {
@@ -18,6 +18,9 @@ pub enum Event {
     },
     MouseInput {
         pressed: bool,
+        x: f32,
+        y: f32,
+        hit_nodes: Vec<Node>,
     },
     KeyboardInput {
         event: winit::event::KeyEvent,
@@ -44,8 +47,13 @@ pub trait View<State> {
     /// Get the root node of this view (used by containers to attach it to the tree)
     fn get_node(&self, element: &Self::Element) -> Node;
 
-    /// Called to dispatch UI events
-    fn message(&self, element: &mut Self::Element, state: &mut State, event: Event, ctx: &mut Context);
+    fn message(
+        &self,
+        element: &mut Self::Element,
+        state: &mut State,
+        event: Event,
+        ctx: &mut Context,
+    ) -> EventResult;
 }
 
 pub trait ViewSequence<State> {
@@ -54,7 +62,13 @@ pub trait ViewSequence<State> {
     fn build(&self, ctx: &mut Context, parent: Node) -> Self::Elements;
     fn rebuild(&self, prev: &Self, ctx: &mut Context, elements: &mut Self::Elements);
     fn teardown(&self, ctx: &mut Context, elements: &mut Self::Elements);
-    fn message(&self, elements: &mut Self::Elements, state: &mut State, event: Event, ctx: &mut Context);
+    fn message(
+        &self,
+        elements: &mut Self::Elements,
+        state: &mut State,
+        event: Event,
+        ctx: &mut Context,
+    ) -> EventResult;
 }
 
 macro_rules! impl_view_tuple {
@@ -84,16 +98,26 @@ macro_rules! impl_view_tuple {
                 )*
             }
 
-            fn message(&self, elements: &mut Self::Elements, state: &mut State, event: Event, ctx: &mut Context) {
+            fn message(
+                &self,
+                elements: &mut Self::Elements,
+                state: &mut State,
+                event: Event,
+                ctx: &mut Context,
+            ) -> EventResult {
+                let mut handled = EventResult::Ignored;
                 $(
-                    self.$idx.message(&mut elements.$idx, state, event.clone(), ctx);
+                    if handled == EventResult::Ignored {
+                        handled = handled.or(self.$idx.message(&mut elements.$idx, state, event.clone(), ctx));
+                    }
                 )*
+                handled
             }
         }
     };
 }
 
-// Generate implementations for tuples up to 9 elements
+// Generate implementations for tuples up to 10 elements
 impl_view_tuple!(0 => A);
 impl_view_tuple!(0 => A, 1 => B);
 impl_view_tuple!(0 => A, 1 => B, 2 => C);
@@ -103,6 +127,7 @@ impl_view_tuple!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F);
 impl_view_tuple!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G);
 impl_view_tuple!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H);
 impl_view_tuple!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I);
+impl_view_tuple!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J);
 
 // Implement ViewSequence for Vec<V> to support dynamic lists
 impl<State, V: View<State>> ViewSequence<State> for Vec<V> {
@@ -150,9 +175,19 @@ impl<State, V: View<State>> ViewSequence<State> for Vec<V> {
         }
     }
 
-    fn message(&self, elements: &mut Self::Elements, state: &mut State, event: Event, ctx: &mut Context) {
-        for (i, view) in self.iter().enumerate() {
-            view.message(&mut elements[i], state, event.clone(), ctx);
+    fn message(
+        &self,
+        elements: &mut Self::Elements,
+        state: &mut State,
+        event: Event,
+        ctx: &mut Context,
+    ) -> EventResult {
+        let mut handled = EventResult::Ignored;
+        for (i, v) in self.iter().enumerate() {
+            if handled == EventResult::Ignored {
+                handled = handled.or(v.message(&mut elements[i], state, event.clone(), ctx));
+            }
         }
+        handled
     }
 }

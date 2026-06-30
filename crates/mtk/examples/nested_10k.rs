@@ -1,11 +1,11 @@
 use std::time::Instant;
 
 use mtk::{
-    Context, Edges, FlexDirection, Rect, Size, TextComputedOutput,
+    Context, Edges, FlexDirection, Rect, Size, Style, TextComputedOutput,
     colors::Color,
     ui::{
         View,
-        style::{Style, ViewStyleExt},
+        style::ViewStyleExt,
         widgets::{column, row, text},
     },
 };
