@@ -3,6 +3,11 @@ use crate::{
     ui::{Event, View, ViewSequence},
 };
 
+pub use text_input::*;
+
+mod editor;
+mod text_input;
+
 pub struct Text {
     pub(crate) label: String,
 }
@@ -38,7 +43,14 @@ impl<State> View<State> for Text {
         *element
     }
 
-    fn message(&self, _element: &mut Self::Element, _state: &mut State, _event: Event) {}
+    fn message(
+        &self,
+        _element: &mut Self::Element,
+        _state: &mut State,
+        _event: Event,
+        _ctx: &mut Context,
+    ) {
+    }
 }
 
 pub struct Container<Children> {
@@ -107,7 +119,13 @@ where
         element.0
     }
 
-    fn message(&self, element: &mut Self::Element, state: &mut State, event: Event) {
-        self.children.message(&mut element.1, state, event);
+    fn message(
+        &self,
+        element: &mut Self::Element,
+        state: &mut State,
+        event: Event,
+        ctx: &mut Context,
+    ) {
+        self.children.message(&mut element.1, state, event, ctx);
     }
 }

@@ -1,27 +1,28 @@
-use cosmic_text::FontSystem;
-use cosmic_text::SwashCache;
-
 use crate::Node;
+use crate::colors::Color;
 use crate::sys;
+use crate::ui::style::TextStyle;
+use parley::style::{LineHeight, StyleProperty};
+use parley::{AlignmentOptions, FontContext, LayoutContext};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
+use swash::scale::ScaleContext;
 
 /// Holds the shared text rendering state.
 pub(crate) struct TextContext {
-    pub font_system: FontSystem,
-    #[allow(unused)]
-    pub swash_cache: SwashCache,
+    pub font_cx: FontContext,
+    pub layout_cx: LayoutContext<Color>,
+    pub scale_cx: ScaleContext,
 }
 
 impl TextContext {
     pub fn new() -> Self {
-        let mut font_system = FontSystem::new();
-        font_system.db_mut().load_system_fonts();
         Self {
-            font_system,
-            swash_cache: SwashCache::new(),
+            font_cx: FontContext::new(),
+            layout_cx: LayoutContext::new(),
+            scale_cx: ScaleContext::new(),
         }
     }
 }
@@ -30,48 +31,52 @@ pub(crate) type SharedTextContext = Arc<Mutex<TextContext>>;
 
 pub(crate) fn measure_text(
     text: &str,
-    text_style: &crate::ui::style::TextStyle,
+    text_style: &TextStyle,
     avail_w: f32,
-    avail_h: f32,
+    _avail_h: f32,
     shared_ctx: &SharedTextContext,
 ) -> TextComputedOutput {
-    use cosmic_text::{Buffer, Metrics, Shaping};
-    let mut ctx = shared_ctx.lock().unwrap();
+    let mut ctx_guard = shared_ctx.lock().unwrap();
+    let ctx = &mut *ctx_guard;
 
-    let metrics = Metrics::new(text_style.font_size, text_style.line_height);
-    let mut buffer = Buffer::new(&mut ctx.font_system, metrics);
+    let display_scale = 1.0;
+    let quantize = true;
 
-    let w = if avail_w.is_finite() && avail_w > 0.0 {
+    let mut builder = ctx
+        .layout_cx
+        .ranged_builder(&mut ctx.font_cx, text, display_scale, quantize);
+
+    builder.push_default(StyleProperty::Brush(text_style.color));
+    builder.push_default(StyleProperty::FontSize(text_style.font_size));
+    builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
+        text_style.line_height / text_style.font_size,
+    )));
+    builder.push_default(StyleProperty::FontWeight(text_style.font_weight));
+    builder.push_default(StyleProperty::FontStyle(text_style.font_style));
+    builder.push_default(parley::style::FontFamily::from(
+        text_style.font_family.as_str(),
+    ));
+
+    if text_style.wrap {
+        builder.push_default(StyleProperty::OverflowWrap(text_style.overflow_wrap));
+    }
+
+    let mut layout = builder.build(text);
+
+    let max_advance = if text_style.wrap && avail_w.is_finite() && avail_w > 0.0 {
         Some(avail_w)
     } else {
         None
     };
-    let h = if avail_h.is_finite() && avail_h > 0.0 {
-        Some(avail_h)
-    } else {
-        None
-    };
-    buffer.set_size(w, h);
 
-    let attrs = text_style.attrs.as_attrs();
-    buffer.set_text(text, &attrs, Shaping::Advanced, Some(text_style.alignement));
+    layout.break_all_lines(max_advance);
+    layout.align(text_style.alignment, AlignmentOptions::default());
 
-    buffer.shape_until_scroll(&mut ctx.font_system, true);
-
-    let mut measured_width = 0.0f32;
-    for run in buffer.layout_runs() {
-        if run.line_w > measured_width {
-            measured_width = run.line_w;
-        }
-    }
-
-    let measured_width = measured_width.ceil();
-    let final_width = measured_width;
-
-    let measured_height = (buffer.layout_runs().count() as f32 * text_style.line_height).ceil();
+    let measured_width = layout.width().ceil();
+    let measured_height = layout.height().ceil();
 
     TextComputedOutput {
-        computed_width: final_width,
+        computed_width: measured_width,
         computed_height: measured_height,
         baseline_offset: text_style.font_size, // Approximate baseline
     }

@@ -86,12 +86,21 @@ macro_rules! attr_fn {
     };
 }
 
+macro_rules! attr_fn_string {
+    ($name:ident, $field:ident) => {
+        pub fn $name<S: ToString>(mut self: Self, value: S) -> Self {
+            self.$field = value.to_string();
+            self
+        }
+    };
+}
+
 impl WindowAttributes {
     pub fn new() -> Self {
         Self::default()
     }
 
-    attr_fn!(with_title, title, String);
+    attr_fn_string!(with_title, title);
     attr_fn!(with_resizable, resizable, bool);
     attr_fn!(with_transparency, transparent, bool);
     attr_fn!(with_blur, blur, bool);
@@ -107,7 +116,7 @@ impl WindowAttributes {
         target_os = "openbsd",
         target_os = "dragonfly"
     ))]
-    attr_fn!(with_app_id, app_id, String);
+    attr_fn_string!(with_app_id, app_id);
 }
 
 impl Default for WindowAttributes {
@@ -190,7 +199,7 @@ where
         if let (Some(view), Some(element), Some(app_view_fn)) =
             (&self.view, &mut self.element, &mut self.app_view_fn)
         {
-            view.message(element, &mut self.state, mtk_event);
+            view.message(element, &mut self.state, mtk_event, &mut self.context);
             let new_view = app_view_fn(&mut self.state);
 
             new_view.rebuild(view, &mut self.context, element);
@@ -242,7 +251,10 @@ where
             .compute_layout(attr.size.height as f32, attr.size.width as f32);
 
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
+        window.set_ime_allowed(true);
+
         self.window = Some(window.clone());
+        self.context.window = Some(window.clone());
 
         let renderer = pollster::block_on(Renderer::new(
             event_loop.owned_display_handle(),
@@ -262,11 +274,30 @@ where
                 // NOTE: Maybe accept a before_close_hook
                 event_loop.exit();
             }
+            WindowEvent::KeyboardInput {
+                device_id: _,
+                event,
+                is_synthetic,
+            } => {
+                let mtk_event = Event::KeyboardInput {
+                    event,
+                    is_synthetic,
+                };
+                self.dispatch_and_rebuild(mtk_event);
+            }
+            WindowEvent::Ime(ime) => {
+                let mtk_event = Event::Ime(ime);
+                self.dispatch_and_rebuild(mtk_event);
+            }
             WindowEvent::Resized(new_size) => {
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize(new_size);
                     self.window.as_ref().unwrap().request_redraw();
                 }
+
+                let mtk_event =
+                    Event::WindowResized(WindowDimension::new(new_size.width, new_size.height));
+                self.dispatch_and_rebuild(mtk_event);
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let x = position.x as f32;
@@ -281,10 +312,7 @@ where
                 self.dispatch_and_rebuild(mtk_event);
             }
             WindowEvent::RedrawRequested => {
-                if self.context.redraw_requested {
-                    self.context.redraw_requested = false;
-                    self.dispatch_and_rebuild(Event::Tick);
-                }
+                self.dispatch_and_rebuild(Event::Tick);
 
                 let size = window.inner_size();
                 self.context

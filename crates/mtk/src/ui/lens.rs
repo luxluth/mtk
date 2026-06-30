@@ -46,7 +46,7 @@ where
         self.view.get_node(element)
     }
 
-    fn message(&self, element: &mut Self::Element, state: &mut Outer, event: Event) {
-        self.view.message(element, self.lens.get_mut(state), event)
+    fn message(&self, element: &mut Self::Element, state: &mut Outer, event: Event, ctx: &mut Context) {
+        self.view.message(element, self.lens.get_mut(state), event, ctx)
     }
 }

@@ -29,7 +29,8 @@ pub struct Context {
     pub(crate) dirty_effects: HashSet<Node>,
     pub(crate) text_userdatas: HashMap<Node, *mut Box<dyn std::any::Any>>,
     pub(crate) text_context: SharedTextContext,
-    pub redraw_requested: bool,
+    pub(crate) focused_node: Option<Node>,
+    pub(crate) window: Option<Arc<winit::window::Window>>,
 }
 
 impl Context {
@@ -42,8 +43,18 @@ impl Context {
             dirty_effects: HashSet::new(),
             text_userdatas: HashMap::new(),
             text_context: Arc::new(Mutex::new(TextContext::new())),
-            redraw_requested: false,
+            focused_node: None,
+            window: None,
         }
+    }
+
+    pub fn request_focus(&mut self, node: Node) {
+        self.focused_node = Some(node);
+        self.request_frame();
+    }
+
+    pub fn focused_node(&self) -> Option<Node> {
+        self.focused_node
     }
 
     /// Create a new valid node. It's not inserted in the tree but it exists.
@@ -51,8 +62,10 @@ impl Context {
         Node(unsafe { sys::muse_node_create(self.ctx) })
     }
 
-    pub fn request_frame(&mut self) {
-        self.redraw_requested = true;
+    pub fn request_frame(&self) {
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
     }
 
     /// Destroy a node from the tree removing its children at the same time.
@@ -177,5 +190,6 @@ impl Drop for Context {
 }
 
 pub mod text_property {
-    pub use cosmic_text::*;
+    pub use parley::layout::Alignment;
+    pub use parley::style::*;
 }

@@ -1,13 +1,13 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use cosmic_text::{Align, Attrs, AttrsOwned, Family};
-
 use crate::animation::{AnimatedValue, Curve};
 use crate::colors::Color;
 use crate::effects::{Effects, Radius};
 use crate::style::{Constraints, Edges};
 use crate::ui::{Event, View};
-use crate::{AlignItems, Context, FlexDirection, JustifyContent, Node, Overflow, Size, rgb};
+use crate::{
+    AlignItems, Context, FlexDirection, JustifyContent, Node, Overflow, PositionStrategy, Size, clr,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AnimationTarget {
@@ -16,12 +16,20 @@ pub enum AnimationTarget {
     Scale,
 }
 
+use parley::layout::Alignment;
+use parley::style::{FontStyle, FontWeight, OverflowWrap};
+
 #[derive(Clone, Debug)]
 pub struct TextStyle {
     pub font_size: f32,
     pub line_height: f32,
-    pub attrs: AttrsOwned,
-    pub alignement: Align,
+    pub color: Color,
+    pub font_family: String,
+    pub font_weight: FontWeight,
+    pub font_style: FontStyle,
+    pub alignment: Alignment,
+    pub wrap: bool,
+    pub overflow_wrap: OverflowWrap,
 }
 
 impl Default for TextStyle {
@@ -29,12 +37,13 @@ impl Default for TextStyle {
         Self {
             font_size: 16.0,
             line_height: 20.0,
-            attrs: AttrsOwned::new(
-                &Attrs::new()
-                    .color(rgb!(0, 0, 0).into())
-                    .family(Family::SansSerif),
-            ),
-            alignement: Align::Left,
+            color: clr!(black),
+            font_family: "system-ui".to_string(),
+            font_weight: FontWeight::default(),
+            font_style: FontStyle::default(),
+            alignment: Alignment::Start,
+            wrap: false,
+            overflow_wrap: OverflowWrap::Normal,
         }
     }
 }
@@ -86,6 +95,26 @@ impl Style {
 
     pub fn corner_radius_precise(mut self, radius: Radius) -> Self {
         self.base_effects.border.radius = radius;
+        self
+    }
+
+    pub fn z_index(mut self, z_index: i32) -> Self {
+        self.base_constraints.z_index = z_index;
+        self
+    }
+
+    pub fn absolute(mut self, left: f32, top: f32) -> Self {
+        self.base_constraints.positioning = PositionStrategy::Absolute {
+            left,
+            top,
+            right: f32::NAN,
+            bottom: f32::NAN,
+        };
+        self
+    }
+
+    pub fn position(mut self, positioning: PositionStrategy) -> Self {
+        self.base_constraints.positioning = positioning;
         self
     }
 
@@ -381,12 +410,18 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
         self.inner.get_node(&element.0)
     }
 
-    fn message(&self, element: &mut Self::Element, state: &mut State, event: Event) {
+    fn message(
+        &self,
+        element: &mut Self::Element,
+        state: &mut State,
+        event: Event,
+        ctx: &mut Context,
+    ) {
         if let Event::CursorMoved { hit_nodes, .. } = &event {
             let node = self.inner.get_node(&element.0);
             element.1.is_hovered = hit_nodes.contains(&node);
         }
 
-        self.inner.message(&mut element.0, state, event);
+        self.inner.message(&mut element.0, state, event, ctx);
     }
 }

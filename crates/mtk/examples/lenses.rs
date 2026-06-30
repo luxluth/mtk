@@ -105,7 +105,7 @@ fn main() {
 
     window.present_with(
         WindowAttributes::default()
-            .with_title("Lenses Example".to_string())
+            .with_title("Lenses Example")
             .with_size((800, 600).into()),
     );
 }

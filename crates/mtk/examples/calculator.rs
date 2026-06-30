@@ -1,10 +1,10 @@
-use cosmic_text::Weight;
 use mtk::{
     AlignItems, FlexDirection, JustifyContent, Overflow, Size,
     animation::Curve,
     clr,
     colors::Color,
     rgb,
+    text_property::{self, Alignment, OverflowWrap},
     ui::{
         EventKind, View, ViewEventExt,
         style::{AnimationTarget, Style, TextStyle, ViewStyleExt},
@@ -98,13 +98,11 @@ fn calc_btn<F: Fn(&mut CalcState) + 'static + Clone>(
                 .align_items(AlignItems::Center)
                 .set_text_style(TextStyle {
                     font_size: 24.0,
-                    alignement: cosmic_text::Align::Center,
-                    attrs: cosmic_text::AttrsOwned::new(
-                        &cosmic_text::Attrs::new()
-                            .color(fg.into())
-                            .weight(Weight::BOLD)
-                            .family(cosmic_text::Family::Name("IosevkaTerm NF")),
-                    ),
+                    line_height: 24.0,
+                    alignment: Alignment::Center,
+                    font_weight: text_property::FontWeight::BOLD,
+                    font_family: "IosevkaTerm NF".to_string(),
+                    color: fg,
                     ..Default::default()
                 })
                 .bg_color(bg)
@@ -172,7 +170,7 @@ impl Theme {
     colored!(bg, clr!(0x181818FF), clr!(0xFFFFFFFF));
     colored!(fg, rgb!(255, 255, 255), rgb!(0, 0, 0));
     colored!(border, rgb!(0, 0, 0), rgb!(100, 100, 100));
-    colored!(op_btn, rgb!(255, 150, 50), rgb!(255, 150, 50));
+    colored!(op_btn, rgb!(255, 150, 50), clr!(ll_blue));
     colored!(std_btn, rgb!(40, 40, 40), clr!(0xF5F5F5FF));
     colored!(display, rgb!(30, 30, 30), clr!(0xF5F5F5FF));
 }
@@ -186,7 +184,7 @@ fn main() {
         operator: None,
         clear_on_next: false,
         pressed_btn: None,
-        theme: Theme::Dark,
+        theme: Theme::Light,
     };
 
     let mut window = Window::with(state, |state: &mut CalcState| {
@@ -197,16 +195,15 @@ fn main() {
                     Style::new()
                         .padding(20.0)
                         .width(Size::Percent(1.0))
-                        .overflow(Overflow::Hidden)
                         .set_text_style(TextStyle {
                             font_size: 48.0,
-                            alignement: cosmic_text::Align::Right,
-                            line_height: 48.,
-                            attrs: cosmic_text::AttrsOwned::new(
-                                &cosmic_text::Attrs::new()
-                                    .color(state.theme.fg().into())
-                                    .family(cosmic_text::Family::Name("IosevkaTerm NF")),
-                            ),
+                            line_height: 48.0,
+                            alignment: Alignment::End,
+                            font_family: "IosevkaTerm NF".to_string(),
+                            color: state.theme.fg(),
+                            wrap: true,
+                            overflow_wrap: OverflowWrap::Anywhere,
+
                             ..Default::default()
                         }),
                 ),
@@ -217,6 +214,7 @@ fn main() {
                     .height(Size::Fixed(130))
                     .border(2.0, state.theme.border())
                     .bg_color(state.theme.display())
+                    .overflow(Overflow::Hidden)
                     .corner_radius(8.0),
             ),
             // Row 1
@@ -358,9 +356,10 @@ fn main() {
 
     window.present_with(
         WindowAttributes::default()
-            .with_title("MTK Calculator".to_string())
+            .with_title("MTK Calculator")
             .with_size((400, 600).into())
-            .with_app_id("dev.luxluth.calculator".to_string())
-            .with_resizable(false),
+            .with_min_size(Some((400, 600).into()))
+            .with_app_id("dev.luxluth.calculator")
+            .with_resizable(true),
     );
 }

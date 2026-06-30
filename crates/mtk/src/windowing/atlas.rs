@@ -1,6 +1,15 @@
-use cosmic_text::CacheKey;
 use std::collections::HashMap;
+use swash::scale::image::Content;
+use swash::scale::{Render, Scaler, Source, StrikeWith};
+use swash::zeno::{Format, Vector};
 use wgpu::{Device, Extent3d, Queue, Texture, TextureDescriptor, TextureFormat};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct CacheKey {
+    pub font_ptr: usize,
+    pub font_size: u32,
+    pub glyph_id: u16,
+}
 
 pub struct Atlas {
     pub texture: Texture,
@@ -42,7 +51,7 @@ impl Atlas {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: TextureFormat::R8Unorm,
+            format: TextureFormat::R8Unorm, // Or Rgba8UnormSrgb if color glyphs
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
@@ -75,18 +84,24 @@ impl Atlas {
     pub fn get_or_insert(
         &mut self,
         queue: &Queue,
-        swash_cache: &mut cosmic_text::SwashCache,
-        font_system: &mut cosmic_text::FontSystem,
+        scaler: &mut Scaler<'_>,
         cache_key: CacheKey,
     ) -> Option<GlyphInfo> {
         if let Some(info) = self.glyphs.get(&cache_key) {
             return Some(*info);
         }
 
-        let image = swash_cache.get_image_uncached(font_system, cache_key)?;
+        let rendered_glyph = Render::new(&[
+            Source::ColorOutline(0),
+            Source::ColorBitmap(StrikeWith::BestFit),
+            Source::Outline,
+        ])
+        .format(Format::Alpha)
+        .offset(Vector::new(0.0, 0.0)) // Ignore subpixel offset for now
+        .render(scaler, cache_key.glyph_id)?;
 
-        let width = image.placement.width;
-        let height = image.placement.height;
+        let width = rendered_glyph.placement.width;
+        let height = rendered_glyph.placement.height;
 
         if width == 0 || height == 0 {
             let info = GlyphInfo {
@@ -94,8 +109,8 @@ impl Atlas {
                 uv_y: 0.0,
                 uv_w: 0.0,
                 uv_h: 0.0,
-                offset_x: image.placement.left,
-                offset_y: -image.placement.top,
+                offset_x: rendered_glyph.placement.left,
+                offset_y: -rendered_glyph.placement.top,
                 physical_w: 0,
                 physical_h: 0,
             };
@@ -103,23 +118,22 @@ impl Atlas {
             return Some(info);
         }
 
-        // NOTE: We convert data if necessary (we assume R8Unorm for simplicity, if color, we extract A or convert to grayscale)
-        let data = match image.content {
-            cosmic_text::SwashContent::Mask => image.data.clone(),
-            cosmic_text::SwashContent::Color => {
-                // If it's color (like emojis), we convert to just alpha or intensity for now.
-                // TODO: Normally we'd want an RGBA atlas, but for now we fallback to R8Unorm.
+        // Swash returns bytes according to the Format. Format::Alpha is 1 byte per pixel.
+        let data = match rendered_glyph.content {
+            Content::Mask => rendered_glyph.data.clone(),
+            Content::Color => {
+                // If it's a color emoji but we only have R8Unorm atlas, take alpha or luminance
                 let mut mask = Vec::with_capacity((width * height) as usize);
-                for chunk in image.data.chunks_exact(4) {
-                    mask.push(chunk[3]); // Take alpha
+                for chunk in rendered_glyph.data.chunks_exact(4) {
+                    mask.push(chunk[3]); // Take Alpha
                 }
                 mask
             }
-            cosmic_text::SwashContent::SubpixelMask => {
-                // NOTE: we ignore subpixels for simplicity
+            Content::SubpixelMask => {
+                // Convert subpixel to alpha by taking green
                 let mut mask = Vec::with_capacity((width * height) as usize);
-                for chunk in image.data.chunks_exact(3) {
-                    mask.push(chunk[1]); // take green
+                for chunk in rendered_glyph.data.chunks_exact(3) {
+                    mask.push(chunk[1]);
                 }
                 mask
             }
@@ -166,8 +180,8 @@ impl Atlas {
             uv_y: y as f32 / self.size as f32,
             uv_w: width as f32 / self.size as f32,
             uv_h: height as f32 / self.size as f32,
-            offset_x: image.placement.left,
-            offset_y: -image.placement.top,
+            offset_x: rendered_glyph.placement.left,
+            offset_y: -rendered_glyph.placement.top,
             physical_w: width,
             physical_h: height,
         };

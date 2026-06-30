@@ -1,10 +1,11 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use bytemuck::{Pod, Zeroable};
+use parley::AlignmentOptions;
 use wgpu::CompositeAlphaMode;
 use winit::{dpi::PhysicalSize, event_loop::OwnedDisplayHandle, window::Window};
 
-use crate::{colors::Color, effects::Filter};
+use crate::effects::Filter;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -326,8 +327,8 @@ impl<'w> Renderer<'w> {
             }
         };
 
-        let mut text_instances = Vec::new();
-        let mut text_ranges = std::collections::HashMap::new();
+        let mut text_instances: Vec<TextInstance> = Vec::new();
+        let mut text_ranges = HashMap::new();
 
         {
             let mut text_ctx = context.text_context.lock().unwrap();
@@ -354,22 +355,48 @@ impl<'w> Renderer<'w> {
                             .unwrap_or(&default_style);
 
                         let text_ctx_ref = &mut *text_ctx;
-                        use cosmic_text::{Buffer, Metrics, Shaping};
-                        let mut buffer = Buffer::new(
-                            &mut text_ctx_ref.font_system,
-                            Metrics::new(text_style.font_size, text_style.line_height),
-                        );
-                        buffer.set_size(Some(inner_w), Some(inner_h));
-                        buffer.set_text(
-                            text,
-                            &text_style.attrs.as_attrs(),
-                            Shaping::Advanced,
-                            Some(text_style.alignement),
-                        );
-                        buffer.shape_until_scroll(&mut text_ctx_ref.font_system, true);
 
-                        let actual_text_height =
-                            buffer.layout_runs().count() as f32 * text_style.line_height;
+                        use parley::style::{LineHeight, StyleProperty};
+
+                        let display_scale = 1.0;
+                        let quantize = true;
+
+                        let mut builder = text_ctx_ref.layout_cx.ranged_builder(
+                            &mut text_ctx_ref.font_cx,
+                            text,
+                            display_scale,
+                            quantize,
+                        );
+
+                        builder.push_default(StyleProperty::Brush(text_style.color));
+                        builder.push_default(StyleProperty::FontSize(text_style.font_size));
+                        builder.push_default(StyleProperty::LineHeight(
+                            LineHeight::FontSizeRelative(
+                                text_style.line_height / text_style.font_size,
+                            ),
+                        ));
+                        builder.push_default(StyleProperty::FontWeight(text_style.font_weight));
+                        builder.push_default(StyleProperty::FontStyle(text_style.font_style));
+                        builder.push_default(parley::style::FontFamily::from(
+                            text_style.font_family.as_str(),
+                        ));
+                        if text_style.wrap {
+                            builder.push_default(StyleProperty::OverflowWrap(
+                                text_style.overflow_wrap,
+                            ));
+                        }
+
+                        let mut layout = builder.build(text);
+
+                        let max_advance = if text_style.wrap && inner_w > 0.0 {
+                            Some(inner_w)
+                        } else {
+                            None
+                        };
+                        layout.break_all_lines(max_advance);
+                        layout.align(text_style.alignment, AlignmentOptions::default());
+
+                        let actual_text_height = layout.height();
                         let vertical_offset = ((inner_h - actual_text_height) / 2.0).max(0.0);
 
                         let text_x = computed.x + constraints.padding.left;
@@ -381,35 +408,65 @@ impl<'w> Renderer<'w> {
                         let cx = computed.x + computed.w / 2.0;
                         let cy = computed.y + computed.h / 2.0;
 
-                        let default_color: Color = text_style
-                            .attrs
-                            .as_attrs()
-                            .color_opt
-                            .map_or(Color::black, |c| Color::from(c));
+                        use parley::layout::PositionedLayoutItem;
 
-                        for run in buffer.layout_runs() {
-                            for glyph in run.glyphs.iter() {
-                                let physical_glyph =
-                                    glyph.physical((text_x, text_y + run.line_y), 1.0);
-                                if let Some(info) = self.atlas.get_or_insert(
-                                    &self.queue,
-                                    &mut text_ctx_ref.swash_cache,
-                                    &mut text_ctx_ref.font_system,
-                                    physical_glyph.cache_key,
-                                ) {
-                                    let dx = physical_glyph.x as f32 + info.offset_x as f32 - cx;
-                                    let dy = physical_glyph.y as f32 + info.offset_y as f32 - cy;
+                        for line in layout.lines() {
+                            for item in line.items() {
+                                let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
+                                    continue;
+                                };
 
-                                    text_instances.push(TextInstance {
-                                        pos: [(cx + dx * scale).round(), (cy + dy * scale).round()],
-                                        size: [
-                                            info.physical_w as f32 * scale,
-                                            info.physical_h as f32 * scale,
-                                        ],
-                                        uv_pos: [info.uv_x, info.uv_y],
-                                        uv_size: [info.uv_w, info.uv_h],
-                                        color: default_color.into(),
-                                    });
+                                let font_data = glyph_run.run().font();
+                                let swash_font = swash::FontRef::from_index(
+                                    font_data.data.as_ref(),
+                                    font_data.index as usize,
+                                )
+                                .unwrap();
+                                let font_size = glyph_run.run().font_size();
+                                let font_ptr = font_data.data.as_ref().as_ptr() as usize;
+                                let brush = glyph_run.style().brush;
+
+                                let mut scaler = text_ctx_ref
+                                    .scale_cx
+                                    .builder(swash_font)
+                                    .size(font_size)
+                                    .hint(true)
+                                    .normalized_coords(glyph_run.run().normalized_coords())
+                                    .build();
+
+                                for glyph in glyph_run.positioned_glyphs() {
+                                    let cache_key = crate::windowing::atlas::CacheKey {
+                                        font_ptr,
+                                        font_size: (font_size * 1000.0) as u32,
+                                        glyph_id: glyph.id as u16,
+                                    };
+
+                                    if let Some(info) = self.atlas.get_or_insert(
+                                        &self.queue,
+                                        &mut scaler,
+                                        cache_key,
+                                    ) {
+                                        let global_x = text_x + glyph.x + info.offset_x as f32;
+                                        // `glyph.y` is already positioned by `positioned_glyphs()`
+                                        let global_y = text_y + glyph.y + info.offset_y as f32;
+
+                                        let dx = global_x - cx;
+                                        let dy = global_y - cy;
+
+                                        text_instances.push(TextInstance {
+                                            pos: [
+                                                (cx + dx * scale).round(),
+                                                (cy + dy * scale).round(),
+                                            ],
+                                            size: [
+                                                info.physical_w as f32 * scale,
+                                                info.physical_h as f32 * scale,
+                                            ],
+                                            uv_pos: [info.uv_x, info.uv_y],
+                                            uv_size: [info.uv_w, info.uv_h],
+                                            color: brush.into(),
+                                        });
+                                    }
                                 }
                             }
                         }

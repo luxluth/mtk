@@ -1,4 +1,4 @@
-use crate::{Context, Node};
+use crate::{Context, Node, windowing::WindowDimension};
 
 pub mod event;
 pub mod lens;
@@ -19,8 +19,13 @@ pub enum Event {
     MouseInput {
         pressed: bool,
     },
+    KeyboardInput {
+        event: winit::event::KeyEvent,
+        is_synthetic: bool,
+    },
+    Ime(winit::event::Ime),
     Tick,
-    // TODO: Add more winit mapped events here
+    WindowResized(WindowDimension),
 }
 
 pub trait View<State> {
@@ -40,7 +45,7 @@ pub trait View<State> {
     fn get_node(&self, element: &Self::Element) -> Node;
 
     /// Called to dispatch UI events
-    fn message(&self, element: &mut Self::Element, state: &mut State, event: Event);
+    fn message(&self, element: &mut Self::Element, state: &mut State, event: Event, ctx: &mut Context);
 }
 
 pub trait ViewSequence<State> {
@@ -49,7 +54,7 @@ pub trait ViewSequence<State> {
     fn build(&self, ctx: &mut Context, parent: Node) -> Self::Elements;
     fn rebuild(&self, prev: &Self, ctx: &mut Context, elements: &mut Self::Elements);
     fn teardown(&self, ctx: &mut Context, elements: &mut Self::Elements);
-    fn message(&self, elements: &mut Self::Elements, state: &mut State, event: Event);
+    fn message(&self, elements: &mut Self::Elements, state: &mut State, event: Event, ctx: &mut Context);
 }
 
 macro_rules! impl_view_tuple {
@@ -79,9 +84,9 @@ macro_rules! impl_view_tuple {
                 )*
             }
 
-            fn message(&self, elements: &mut Self::Elements, state: &mut State, event: Event) {
+            fn message(&self, elements: &mut Self::Elements, state: &mut State, event: Event, ctx: &mut Context) {
                 $(
-                    self.$idx.message(&mut elements.$idx, state, event.clone());
+                    self.$idx.message(&mut elements.$idx, state, event.clone(), ctx);
                 )*
             }
         }
@@ -145,9 +150,9 @@ impl<State, V: View<State>> ViewSequence<State> for Vec<V> {
         }
     }
 
-    fn message(&self, elements: &mut Self::Elements, state: &mut State, event: Event) {
+    fn message(&self, elements: &mut Self::Elements, state: &mut State, event: Event, ctx: &mut Context) {
         for (i, view) in self.iter().enumerate() {
-            view.message(&mut elements[i], state, event.clone());
+            view.message(&mut elements[i], state, event.clone(), ctx);
         }
     }
 }

@@ -46,7 +46,7 @@ impl<State, V: View<State>, F: Fn(&mut State) + 'static> View<State> for EventHa
         self.inner.get_node(&element.inner_element)
     }
 
-    fn message(&self, element: &mut Self::Element, state: &mut State, event: Event) {
+    fn message(&self, element: &mut Self::Element, state: &mut State, event: Event, ctx: &mut Context) {
         match &event {
             Event::CursorMoved { hit_nodes, .. } => {
                 let node = self.get_node(element);
@@ -79,7 +79,7 @@ impl<State, V: View<State>, F: Fn(&mut State) + 'static> View<State> for EventHa
             }
             _ => {}
         }
-        self.inner.message(&mut element.inner_element, state, event);
+        self.inner.message(&mut element.inner_element, state, event, ctx);
     }
 }
 

@@ -226,16 +226,9 @@ impl From<Color> for [f32; 4] {
     }
 }
 
-impl Into<cosmic_text::Color> for Color {
-    fn into(self) -> cosmic_text::Color {
-        cosmic_text::Color(self.as_u32())
-    }
-}
-
-impl From<cosmic_text::Color> for Color {
-    fn from(value: cosmic_text::Color) -> Self {
-        let [r, g, b, a] = value.as_rgba();
-        Color { r, g, b, a }
+impl From<Color> for [u8; 4] {
+    fn from(color: Color) -> Self {
+        [color.r, color.g, color.b, color.a]
     }
 }
 

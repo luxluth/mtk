@@ -6,12 +6,13 @@ authors.workspace = true
 
 [dependencies]
 bytemuck = { workspace = true }
-cosmic-text = { workspace = true }
 cpal = { workspace = true }
 env_logger = { workspace = true }
 log = { workspace = true }
+parley = { workspace = true }
 pollster = { workspace = true }
 resvg = { workspace = true }
+swash = { workspace = true }
 symphonia = { workspace = true }
 symphonia-bundle-mp3 = { workspace = true }
 tiny-skia = { workspace = true }
