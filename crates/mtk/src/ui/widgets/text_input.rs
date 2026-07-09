@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use crate::ui::event::EventResult;
 use crate::ui::widgets::editor::Editor;
 use crate::ui::{Event, View};
@@ -23,6 +25,7 @@ impl TextInput {
 
 impl View<String> for TextInput {
     type Element = (Node, Editor, Node, bool, Option<std::time::Instant>, u8); // Node, Editor, Caret, Hover, LastClick, ClickCount
+    type Message = String;
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let node = ctx.create_node();
@@ -75,24 +78,25 @@ impl View<String> for TextInput {
         element.0.clone()
     }
 
-    fn message(
+    fn handle_event(
         &self,
         element: &mut Self::Element,
-        state: &mut String,
+        state: &String,
         event: Event,
         ctx: &mut Context,
-    ) -> EventResult {
+    ) -> (EventResult, Option<Self::Message>) {
         let (node, editor, _caret, _, _, _) = element;
+
+        let mut handled = EventResult::Ignored;
+        let mut emitted_msg = None;
 
         // Initialize editor state if this is the first tick and the text is not empty
         if editor.display_text() != *state {
-            if let Event::Tick = event {
+            if let Event::Tick { dt: _ } = event {
                 editor.set_text(&state);
                 ctx.request_frame();
             }
         }
-
-        let mut handled = EventResult::Ignored;
 
         match event {
             Event::MouseInput {
@@ -139,7 +143,7 @@ impl View<String> for TextInput {
                                 &ctx.text_context,
                             );
 
-                            let now = std::time::Instant::now();
+                            let now = Instant::now();
                             let mut click_count = 1;
                             if let Some(last_click) = element.4 {
                                 if now.duration_since(last_click).as_millis() < 500 {
@@ -263,7 +267,7 @@ impl View<String> for TextInput {
                     }
 
                     if text_changed {
-                        *state = editor.display_text().to_string();
+                        emitted_msg = Some(editor.display_text().to_string());
                         ctx.request_frame();
                     }
                 }
@@ -280,7 +284,7 @@ impl View<String> for TextInput {
                         }
                         Ime::Commit(text) => {
                             editor.commit_ime(&text);
-                            *state = editor.display_text().to_string();
+                            emitted_msg = Some(editor.display_text().to_string());
                             ctx.request_frame();
                             handled = EventResult::Handled;
                         }
@@ -315,6 +319,6 @@ impl View<String> for TextInput {
         };
         node.set_text_with_userdata(ctx, &editor.display_text(), render_info);
 
-        handled
+        (handled, emitted_msg)
     }
 }

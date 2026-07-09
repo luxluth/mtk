@@ -1,12 +1,13 @@
 use crate::{Context, Node, ui::event::EventResult, windowing::WindowDimension};
 
+pub mod adapter;
 pub mod event;
 pub mod lens;
 pub mod style;
 pub mod widgets;
 
 pub use event::{EventKind, ViewEventExt};
-pub use lens::{Lens, LensWrap};
+pub use lens::Lens;
 pub use style::ViewStyleExt;
 
 #[derive(Clone)]
@@ -22,18 +23,28 @@ pub enum Event {
         y: f32,
         hit_nodes: Vec<Node>,
     },
+    MouseWheel {
+        delta_x: f32,
+        delta_y: f32,
+        is_touchpad: bool,
+        phase: winit::event::TouchPhase,
+        hit_nodes: Vec<Node>,
+    },
     KeyboardInput {
         event: winit::event::KeyEvent,
         is_synthetic: bool,
     },
     Ime(winit::event::Ime),
-    Tick,
+    Tick {
+        dt: f32,
+    },
     WindowResized(WindowDimension),
 }
 
 pub trait View<State> {
     /// The persistent state we keep around between frames
     type Element;
+    type Message;
 
     /// Called once when the widget is first created
     fn build(&self, ctx: &mut Context) -> Self::Element;
@@ -47,34 +58,40 @@ pub trait View<State> {
     /// Get the root node of this view (used by containers to attach it to the tree)
     fn get_node(&self, element: &Self::Element) -> Node;
 
-    fn message(
+    fn handle_event(
         &self,
         element: &mut Self::Element,
-        state: &mut State,
+        state: &State,
         event: Event,
         ctx: &mut Context,
-    ) -> EventResult;
+    ) -> (EventResult, Option<Self::Message>);
 }
 
 pub trait ViewSequence<State> {
     type Elements;
+    type Message;
 
     fn build(&self, ctx: &mut Context, parent: Node) -> Self::Elements;
-    fn rebuild(&self, prev: &Self, ctx: &mut Context, elements: &mut Self::Elements);
+    fn rebuild(&self, prev: &Self, ctx: &mut Context, elements: &mut Self::Elements, parent: Node);
     fn teardown(&self, ctx: &mut Context, elements: &mut Self::Elements);
-    fn message(
+
+    fn handle_event(
         &self,
         elements: &mut Self::Elements,
-        state: &mut State,
+        state: &State,
         event: Event,
         ctx: &mut Context,
-    ) -> EventResult;
+    ) -> (EventResult, Option<Self::Message>);
 }
 
 macro_rules! impl_view_tuple {
     ( $($idx:tt => $t:ident),* ) => {
-        impl<State, $($t: View<State>),*> ViewSequence<State> for ($($t,)*) {
+        impl<State, Msg, $($t),*> ViewSequence<State> for ($($t,)*)
+        where
+            $($t: View<State, Message = Msg>),*
+        {
             type Elements = ($($t::Element,)*);
+            type Message = Msg;
 
             fn build(&self, ctx: &mut Context, parent: Node) -> Self::Elements {
                 (
@@ -86,7 +103,7 @@ macro_rules! impl_view_tuple {
                 )
             }
 
-            fn rebuild(&self, prev: &Self, ctx: &mut Context, elements: &mut Self::Elements) {
+            fn rebuild(&self, prev: &Self, ctx: &mut Context, elements: &mut Self::Elements, _parent: Node) {
                 $(
                     self.$idx.rebuild(&prev.$idx, ctx, &mut elements.$idx);
                 )*
@@ -98,20 +115,30 @@ macro_rules! impl_view_tuple {
                 )*
             }
 
-            fn message(
+            fn handle_event(
                 &self,
                 elements: &mut Self::Elements,
-                state: &mut State,
+                state: &State,
                 event: Event,
                 ctx: &mut Context,
-            ) -> EventResult {
+            ) -> (EventResult, Option<Self::Message>) {
                 let mut handled = EventResult::Ignored;
+                let mut emitted_msg = None;
+
                 $(
-                    if handled == EventResult::Ignored {
-                        handled = handled.or(self.$idx.message(&mut elements.$idx, state, event.clone(), ctx));
+                    if handled == EventResult::Ignored && emitted_msg.is_none() {
+                        let (res, msg) = self.$idx.handle_event(
+                            &mut elements.$idx,
+                            state,
+                            event.clone(),
+                            ctx
+                        );
+                        handled = handled.or(res);
+                        emitted_msg = msg;
                     }
                 )*
-                handled
+
+                (handled, emitted_msg)
             }
         }
     };
@@ -130,8 +157,12 @@ impl_view_tuple!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H,
 impl_view_tuple!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J);
 
 // Implement ViewSequence for Vec<V> to support dynamic lists
-impl<State, V: View<State>> ViewSequence<State> for Vec<V> {
+impl<State, Msg, V> ViewSequence<State> for Vec<V>
+where
+    V: View<State, Message = Msg>,
+{
     type Elements = Vec<V::Element>;
+    type Message = Msg;
 
     fn build(&self, ctx: &mut Context, parent: Node) -> Self::Elements {
         let mut elements = Vec::with_capacity(self.len());
@@ -143,24 +174,19 @@ impl<State, V: View<State>> ViewSequence<State> for Vec<V> {
         elements
     }
 
-    fn rebuild(&self, prev: &Self, ctx: &mut Context, elements: &mut Self::Elements) {
+    fn rebuild(&self, prev: &Self, ctx: &mut Context, elements: &mut Self::Elements, parent: Node) {
         let min_len = self.len().min(prev.len());
 
-        // Rebuild existing items
         for i in 0..min_len {
             self[i].rebuild(&prev[i], ctx, &mut elements[i]);
         }
 
-        // Add new items
-        // NOTE: For Vec rebuilds, we actually need the parent node to append.
-        // Since we don't pass `parent` to rebuild, we'll need to fetch the parent
-        // from one of the existing sibling elements. But for now, we'll assume
-        // static-sized lists, and we can add the parent to `rebuild` args if needed!
-        if self.len() > prev.len() {
-            panic!("Dynamic growth in Vec requires parent node in rebuild. This is a WIP!");
+        for i in min_len..self.len() {
+            let el = self[i].build(ctx);
+            parent.append(ctx, self[i].get_node(&el));
+            elements.push(el);
         }
 
-        // Remove old items
         if self.len() < prev.len() {
             for i in min_len..prev.len() {
                 prev[i].teardown(ctx, &mut elements[i]);
@@ -175,19 +201,24 @@ impl<State, V: View<State>> ViewSequence<State> for Vec<V> {
         }
     }
 
-    fn message(
+    fn handle_event(
         &self,
         elements: &mut Self::Elements,
-        state: &mut State,
+        state: &State,
         event: Event,
         ctx: &mut Context,
-    ) -> EventResult {
+    ) -> (EventResult, Option<Self::Message>) {
         let mut handled = EventResult::Ignored;
+        let mut emitted_msg = None;
+
         for (i, v) in self.iter().enumerate() {
-            if handled == EventResult::Ignored {
-                handled = handled.or(v.message(&mut elements[i], state, event.clone(), ctx));
+            if handled == EventResult::Ignored && emitted_msg.is_none() {
+                let (res, msg) = v.handle_event(&mut elements[i], state, event.clone(), ctx);
+                handled = handled.or(res);
+                emitted_msg = msg;
             }
         }
-        handled
+
+        (handled, emitted_msg)
     }
 }

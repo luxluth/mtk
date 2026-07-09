@@ -1,7 +1,8 @@
 use mtk::{
     AlignItems, JustifyContent, Lens, Size, Style, TextStyle, clr, rgb,
     ui::{
-        LensWrap, View, ViewStyleExt,
+        View, ViewStyleExt,
+        adapter::Adapt,
         widgets::{column, text, text_input},
     },
     windowing::{Window, WindowAttributes},
@@ -12,7 +13,19 @@ struct AppState {
     pub username: String,
 }
 
-fn app(state: &mut AppState) -> impl View<AppState> + use<> {
+enum AppMsg {
+    UpdateUsername(String),
+}
+
+fn update(state: &mut AppState, msg: AppMsg) {
+    match msg {
+        AppMsg::UpdateUsername(username) => {
+            state.username = username;
+        }
+    }
+}
+
+fn app(state: &AppState) -> impl View<AppState, Message = AppMsg> + use<> {
     column((
         text("Enter your username:").style(Style::new().width(Size::Fit).set_text_style(
             TextStyle {
@@ -20,7 +33,7 @@ fn app(state: &mut AppState) -> impl View<AppState> + use<> {
                 ..Default::default()
             },
         )),
-        LensWrap::new(
+        Adapt::new(
             text_input().style(
                 Style::new()
                     .width(Size::Fixed(300))
@@ -31,8 +44,9 @@ fn app(state: &mut AppState) -> impl View<AppState> + use<> {
                     .overflow(mtk::Overflow::Hidden),
             ),
             AppState::username,
+            AppMsg::UpdateUsername,
         ),
-        LensWrap::new(
+        Adapt::new(
             text_input().style(
                 Style::new()
                     .width(Size::Fixed(300))
@@ -43,6 +57,7 @@ fn app(state: &mut AppState) -> impl View<AppState> + use<> {
                     .overflow(mtk::Overflow::Hidden),
             ),
             AppState::username,
+            AppMsg::UpdateUsername,
         ),
         text(format!("Hello, {}!", state.username)).style(
             Style::new()
@@ -71,7 +86,7 @@ fn main() {
         username: "Luthor".to_string(),
     };
 
-    let mut window = Window::with(state, app);
+    let mut window = Window::with(state, update, app);
 
     window.present_with(
         WindowAttributes::default()

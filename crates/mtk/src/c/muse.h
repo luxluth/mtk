@@ -1401,7 +1401,7 @@ static void muse__m_flatten_recursive(muContext *ctx, muNode node,
   muRect new_clip = current_clip;
   bool new_has_clip = has_clip;
 
-  if (cons != NULL && cons->overflow == MU_OVERFLOW_HIDDEN && comp != NULL) {
+  if (cons != NULL && (cons->overflow == MU_OVERFLOW_HIDDEN || cons->overflow == MU_OVERFLOW_SCROLL) && comp != NULL) {
     float cx = comp->x + cons->border.left;
     float cy = comp->y + cons->border.top;
     float cw = comp->w - cons->border.left - cons->border.right;
@@ -1549,7 +1549,7 @@ MUSEDEF muNodeList muse_node_pick(muContext *ctx, float x, float y) {
       muComputed *p_comp = muse_sparse_get(&ctx->computed, curr_parent);
 
       if (p_cons != NULL && p_comp != NULL &&
-          p_cons->overflow == MU_OVERFLOW_HIDDEN) {
+          (p_cons->overflow == MU_OVERFLOW_HIDDEN || p_cons->overflow == MU_OVERFLOW_SCROLL)) {
         if (x < p_comp->x || x > p_comp->x + p_comp->w || y < p_comp->y ||
             y > p_comp->y + p_comp->h) {
           clipped = true;

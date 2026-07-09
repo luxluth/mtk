@@ -1,16 +1,16 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use winit::{
     application::ApplicationHandler,
     dpi::{PhysicalPosition, PhysicalSize},
-    event::WindowEvent,
+    event::{MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::{Window as WWindow, WindowId},
 };
 
 use crate::{
     Context, TextStyle,
-    ui::{Event, View},
+    ui::{Event, View, event::EventResult},
     windowing::renderer::Renderer,
 };
 
@@ -23,11 +23,15 @@ where
     window: Option<Arc<WWindow>>,
     context: Context,
     state: S,
-    app_view_fn: Option<Box<dyn FnMut(&mut S) -> V>>,
+
+    app_view_fn: Option<Box<dyn FnMut(&S) -> V>>,
+    update_fn: Option<Box<dyn FnMut(&mut S, V::Message)>>,
+
     view: Option<V>,
     element: Option<V::Element>,
     attr: WindowAttributes,
     cursor_pos: (f32, f32),
+    last_frame_time: Instant,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -149,13 +153,14 @@ impl<'r, S, V> Window<'r, S, V>
 where
     V: View<S>,
 {
-    pub fn with<F>(mut state: S, mut view_fn: F) -> Self
+    pub fn with<U, F>(state: S, update_fn: U, mut view_fn: F) -> Self
     where
-        F: FnMut(&mut S) -> V + 'static,
+        U: FnMut(&mut S, V::Message) + 'static,
+        F: FnMut(&S) -> V + 'static,
     {
         let mut ctx = Context::new();
 
-        let view = view_fn(&mut state);
+        let view = view_fn(&state);
         let element = view.build(&mut ctx);
 
         let root_node = view.get_node(&element);
@@ -177,10 +182,12 @@ where
             context: ctx,
             state,
             app_view_fn: Some(Box::new(view_fn)),
+            update_fn: Some(Box::new(update_fn)),
             view: Some(view),
             attr: WindowAttributes::default(),
             element: Some(element),
             cursor_pos: (0.0, 0.0),
+            last_frame_time: Instant::now(),
         }
     }
 
@@ -195,19 +202,38 @@ where
         self.present();
     }
 
-    fn dispatch_and_rebuild(&mut self, mtk_event: crate::ui::Event) {
-        if let (Some(view), Some(element), Some(app_view_fn)) =
-            (&self.view, &mut self.element, &mut self.app_view_fn)
-        {
-            view.message(element, &mut self.state, mtk_event, &mut self.context);
-            let new_view = app_view_fn(&mut self.state);
+    fn dispatch_and_rebuild(&mut self, mtk_event: Event) {
+        if let (Some(view), Some(element), Some(app_view_fn), Some(update_fn)) = (
+            &self.view,
+            &mut self.element,
+            &mut self.app_view_fn,
+            &mut self.update_fn,
+        ) {
+            let is_tick = matches!(mtk_event, Event::Tick { .. });
 
-            new_view.rebuild(view, &mut self.context, element);
+            // Pass 1 - READONLY state down
+            let (result, optional_msg) =
+                view.handle_event(element, &self.state, mtk_event, &mut self.context);
 
-            self.view = Some(new_view);
+            let mut state_changed = false;
+
+            // Pass 2 - we check if a logical message bubbled up to the root
+            if let Some(msg) = optional_msg {
+                update_fn(&mut self.state, msg);
+                state_changed = true;
+            }
+
+            // Pass 3 - we rebuild only when state has been updated
+            if state_changed {
+                let new_view = app_view_fn(&self.state);
+                new_view.rebuild(view, &mut self.context, element);
+                self.view = Some(new_view);
+            }
 
             if let Some(window) = &self.window {
-                window.request_redraw();
+                if state_changed || (!is_tick && result == EventResult::Handled) {
+                    window.request_redraw();
+                }
             }
         }
     }
@@ -292,15 +318,20 @@ where
                 let mtk_event = Event::Ime(ime);
                 self.dispatch_and_rebuild(mtk_event);
             }
-            WindowEvent::Resized(new_size) => {
+            WindowEvent::Resized(size) => {
                 if let Some(renderer) = &mut self.renderer {
-                    renderer.resize(new_size);
-                    self.window.as_ref().unwrap().request_redraw();
+                    renderer.resize(size);
                 }
 
-                let mtk_event =
-                    Event::WindowResized(WindowDimension::new(new_size.width, new_size.height));
-                self.dispatch_and_rebuild(mtk_event);
+                if let (Some(view), Some(element)) = (&self.view, &self.element) {
+                    let root = view.get_node(element);
+                    root.set_dirty(&mut self.context);
+                }
+
+                self.dispatch_and_rebuild(Event::WindowResized(WindowDimension {
+                    width: size.width,
+                    height: size.height,
+                }));
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let x = position.x as f32;
@@ -321,8 +352,26 @@ where
                 };
                 self.dispatch_and_rebuild(mtk_event);
             }
+            WindowEvent::MouseWheel { delta, phase, .. } => {
+                let (dx, dy, is_touchpad) = match delta {
+                    MouseScrollDelta::LineDelta(x, y) => (x * 20.0, y * 20.0, false),
+                    MouseScrollDelta::PixelDelta(pos) => (pos.x as f32, pos.y as f32, true),
+                };
+                let hit_nodes = self.context.pick(self.cursor_pos.0, self.cursor_pos.1);
+                let mtk_event = Event::MouseWheel {
+                    delta_x: dx,
+                    delta_y: dy,
+                    is_touchpad,
+                    phase,
+                    hit_nodes,
+                };
+                self.dispatch_and_rebuild(mtk_event);
+            }
             WindowEvent::RedrawRequested => {
-                self.dispatch_and_rebuild(Event::Tick);
+                let now = Instant::now();
+                let dt = now.duration_since(self.last_frame_time).as_secs_f32();
+                self.last_frame_time = now;
+                self.dispatch_and_rebuild(Event::Tick { dt });
 
                 let size = window.inner_size();
                 self.context

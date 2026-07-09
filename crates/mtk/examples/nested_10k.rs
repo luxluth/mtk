@@ -14,7 +14,7 @@ use mtk::{
 // but we'll include it to keep the standard signature.
 pub struct AppState {}
 
-fn app_view(_state: &AppState) -> impl View<AppState> {
+fn app_view(_state: &AppState) -> impl View<AppState, Message = ()> {
     // Generate a 100 x 100 grid of text nodes = 10,000 nested nodes.
     // This tests the efficiency of `Vec<V>` ViewSequence implementation.
     let grid_rows: Vec<_> = (0..100)

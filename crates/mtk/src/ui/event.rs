@@ -38,8 +38,12 @@ pub struct EventElement<VEl> {
     pub(crate) is_hovered: bool,
 }
 
-impl<State, V: View<State>, F: Fn(&mut State) + 'static> View<State> for EventHandler<State, V, F> {
+impl<State, V: View<State>, F> View<State> for EventHandler<State, V, F>
+where
+    F: Fn(&State) -> Option<V::Message> + 'static,
+{
     type Element = EventElement<V::Element>;
+    type Message = V::Message;
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         EventElement {
@@ -61,14 +65,16 @@ impl<State, V: View<State>, F: Fn(&mut State) + 'static> View<State> for EventHa
         self.inner.get_node(&element.inner_element)
     }
 
-    fn message(
+    fn handle_event(
         &self,
         element: &mut Self::Element,
-        state: &mut State,
+        state: &State,
         event: Event,
         ctx: &mut Context,
-    ) -> EventResult {
+    ) -> (EventResult, Option<Self::Message>) {
         let mut handled = EventResult::Ignored;
+        let mut emitted_msg = None;
+
         match &event {
             Event::CursorMoved { hit_nodes, .. } => {
                 let node = self.get_node(element);
@@ -77,33 +83,24 @@ impl<State, V: View<State>, F: Fn(&mut State) + 'static> View<State> for EventHa
                 if newly_hovered != element.is_hovered {
                     element.is_hovered = newly_hovered;
                     if newly_hovered && self.kind == EventKind::HoverIn {
-                        (self.handler)(state);
+                        emitted_msg = (self.handler)(state);
                         handled = EventResult::Handled;
                     } else if !newly_hovered && self.kind == EventKind::HoverOut {
-                        (self.handler)(state);
+                        emitted_msg = (self.handler)(state);
                         handled = EventResult::Handled;
                     }
                 }
             }
-            Event::MouseInput {
-                pressed,
-                x: _,
-                y: _,
-                hit_nodes: _,
-            } => {
+            Event::MouseInput { pressed, .. } => {
                 if element.is_hovered {
                     if *pressed {
                         if self.kind == EventKind::Press {
-                            (self.handler)(state);
+                            emitted_msg = (self.handler)(state);
                             handled = EventResult::Handled;
                         }
                     } else {
-                        if self.kind == EventKind::Release {
-                            (self.handler)(state);
-                            handled = EventResult::Handled;
-                        }
-                        if self.kind == EventKind::Click {
-                            (self.handler)(state);
+                        if self.kind == EventKind::Release || self.kind == EventKind::Click {
+                            emitted_msg = (self.handler)(state);
                             handled = EventResult::Handled;
                         }
                     }
@@ -111,27 +108,26 @@ impl<State, V: View<State>, F: Fn(&mut State) + 'static> View<State> for EventHa
             }
             _ => {}
         }
-        let inner_res = self
-            .inner
-            .message(&mut element.inner_element, state, event, ctx);
-        handled.or(inner_res)
+
+        let (inner_res, inner_msg) =
+            self.inner
+                .handle_event(&mut element.inner_element, state, event, ctx);
+
+        (handled.or(inner_res), emitted_msg.or(inner_msg))
     }
 }
 
 pub trait ViewEventExt<State>: View<State> + Sized {
-    fn on_event<F: Fn(&mut State) + 'static>(
-        self,
-        event: EventKind,
-        handler: F,
-    ) -> EventHandler<State, Self, F>;
+    fn on_event<F>(self, event: EventKind, handler: F) -> EventHandler<State, Self, F>
+    where
+        F: Fn(&State) -> Option<Self::Message> + 'static;
 }
 
 impl<State, V: View<State>> ViewEventExt<State> for V {
-    fn on_event<F: Fn(&mut State) + 'static>(
-        self,
-        event: EventKind,
-        handler: F,
-    ) -> EventHandler<State, Self, F> {
+    fn on_event<F>(self, event: EventKind, handler: F) -> EventHandler<State, Self, F>
+    where
+        F: Fn(&State) -> Option<Self::Message> + 'static,
+    {
         EventHandler {
             inner: self,
             kind: event,

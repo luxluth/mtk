@@ -34,6 +34,11 @@ impl Node {
         unsafe { sys::muse_node_prepend(ctxt.ctx, self.0, child.0) }
     }
 
+    /// Mark this node as dirty, forcing a layout recomputation for it and its ancestors.
+    pub fn set_dirty(&self, ctxt: &mut Context) {
+        unsafe { sys::muse_node_set_dirty(ctxt.ctx, self.0) }
+    }
+
     /// Detach a node from its parent but don't destroy it,
     /// ideal for moving elements and appending them elsewhere.
     /// If you want to completely remove the node and its subsequent children,

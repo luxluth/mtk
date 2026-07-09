@@ -5,7 +5,7 @@ use crate::colors::Color;
 use crate::style::Edges;
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
-use crate::{AnimationTarget, Context, Node, Style, TextRenderInfo};
+use crate::{AnimationTarget, Context, Node, Overflow, Style, TextRenderInfo};
 
 pub struct StyledView<V> {
     pub(crate) inner: V,
@@ -51,12 +51,26 @@ fn now_ms() -> f64 {
 
 impl<State, V: View<State>> View<State> for StyledView<V> {
     type Element = (V::Element, StyledViewState);
+    type Message = V::Message;
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let child_el = self.inner.build(ctx);
         let node = self.inner.get_node(&child_el);
 
-        node.set_constraints(ctx, self.style.base_constraints);
+        node.update_constraints(ctx, |c| {
+            let overflow = c.overflow;
+            let scroll = c.scroll;
+            *c = self.style.base_constraints;
+
+            // ScrollView sets Overflow::Scroll before StyledView runs, preserve it if we didn't explicitly override it (assuming default Visible means no override for ScrollView)
+            if self.style.base_constraints.overflow == Overflow::Visible
+                && overflow == Overflow::Scroll
+            {
+                c.overflow = overflow;
+            }
+            c.scroll = scroll;
+        });
+
         node.set_effects(ctx, self.style.base_effects.clone());
 
         if let Some(text) = node.get_text(ctx) {
@@ -93,10 +107,53 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
     fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
         // Rebuild child
         self.inner.rebuild(&prev.inner, ctx, &mut element.0);
-
-        let view_state = &mut element.1;
         let node = self.inner.get_node(&element.0);
+        self.apply_style(ctx, &mut element.1, node);
+    }
 
+    fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
+        self.inner.teardown(ctx, &mut element.0);
+    }
+
+    fn get_node(&self, element: &Self::Element) -> Node {
+        self.inner.get_node(&element.0)
+    }
+
+    fn handle_event(
+        &self,
+        element: &mut Self::Element,
+        state: &State,
+        event: Event,
+        ctx: &mut Context,
+    ) -> (EventResult, Option<Self::Message>) {
+        let mut hover_changed = false;
+
+        if let Event::CursorMoved { hit_nodes, .. } = &event {
+            let node = self.inner.get_node(&element.0);
+            let newly_hovered = hit_nodes.contains(&node);
+            if element.1.is_hovered != newly_hovered {
+                element.1.is_hovered = newly_hovered;
+                hover_changed = true;
+            }
+        }
+
+        let is_tick = matches!(event, Event::Tick { .. });
+
+        if hover_changed || is_tick {
+            let node = self.inner.get_node(&element.0);
+            self.apply_style(ctx, &mut element.1, node);
+
+            if hover_changed {
+                ctx.request_frame();
+            }
+        }
+
+        self.inner.handle_event(&mut element.0, state, event, ctx)
+    }
+}
+
+impl<V> StyledView<V> {
+    fn apply_style(&self, ctx: &mut Context, view_state: &mut StyledViewState, node: Node) {
         let target_constraints = if view_state.is_hovered {
             self.style
                 .hover_constraints
@@ -137,7 +194,18 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
                 });
             }
         } else {
-            node.set_constraints(ctx, target_constraints);
+            node.update_constraints(ctx, |c| {
+                let overflow = c.overflow;
+                let scroll = c.scroll;
+                *c = target_constraints;
+
+                if target_constraints.overflow == crate::style::Overflow::Visible
+                    && overflow == crate::style::Overflow::Scroll
+                {
+                    c.overflow = overflow;
+                }
+                c.scroll = scroll;
+            });
         }
 
         let mut final_effects = target_effects.clone();
@@ -160,8 +228,6 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
             } else {
                 final_effects.background_color = target_effects.background_color;
             }
-        } else {
-            final_effects.background_color = target_effects.background_color;
         }
 
         if let Some(scale_anim) = &mut view_state.scale_anim {
@@ -182,8 +248,6 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
             } else {
                 final_effects.scale = target_effects.scale;
             }
-        } else {
-            final_effects.scale = target_effects.scale;
         }
 
         node.set_effects(ctx, final_effects);
@@ -210,28 +274,5 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
         if is_animating {
             ctx.request_frame();
         }
-    }
-
-    fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
-        self.inner.teardown(ctx, &mut element.0);
-    }
-
-    fn get_node(&self, element: &Self::Element) -> Node {
-        self.inner.get_node(&element.0)
-    }
-
-    fn message(
-        &self,
-        element: &mut Self::Element,
-        state: &mut State,
-        event: Event,
-        ctx: &mut Context,
-    ) -> EventResult {
-        if let Event::CursorMoved { hit_nodes, .. } = &event {
-            let node = self.inner.get_node(&element.0);
-            element.1.is_hovered = hit_nodes.contains(&node);
-        }
-
-        self.inner.message(&mut element.0, state, event, ctx)
     }
 }

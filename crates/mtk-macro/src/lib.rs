@@ -26,10 +26,6 @@ pub fn derive_lens(input: TokenStream) -> TokenStream {
                         fn get<'a>(&self, outer: &'a #name) -> &'a #field_type {
                             &outer.#field_name
                         }
-
-                        fn get_mut<'a>(&self, outer: &'a mut #name) -> &'a mut #field_type {
-                            &mut outer.#field_name
-                        }
                     }
 
                     impl #name {

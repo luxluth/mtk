@@ -1,19 +1,19 @@
 use mtk::{
     AlignItems, JustifyContent, Lens, Size, Style, TextStyle, clr, rgb, text_property,
     ui::{
-        EventKind, LensWrap, View, ViewEventExt, ViewStyleExt,
+        EventKind, View, ViewEventExt, ViewStyleExt,
+        adapter::Adapt,
         widgets::{column, text},
     },
     windowing::{Window, WindowAttributes},
 };
 
-#[derive(Lens)]
-struct AppState {
-    pub click_count: i32,
-    pub dark_mode: bool,
+#[derive(Clone)]
+pub enum CounterMsg {
+    Increment,
 }
 
-fn counter(count: i32) -> impl View<i32> {
+fn counter(count: i32) -> impl View<i32, Message = CounterMsg> {
     text(format!("总数 {}", count))
         .style(
             Style::new()
@@ -30,11 +30,16 @@ fn counter(count: i32) -> impl View<i32> {
                     ..Default::default()
                 }),
         )
-        .on_event(EventKind::Click, |s: &mut i32| *s += 1)
+        .on_event(EventKind::Click, |_| Some(CounterMsg::Increment))
+}
+
+#[derive(Clone)]
+pub enum ToggleMsg {
+    Toggle,
 }
 
 // Another generic component for toggling a boolean
-fn toggle(is_on: bool) -> impl View<bool> {
+fn toggle(is_on: bool) -> impl View<bool, Message = ToggleMsg> {
     text(if is_on {
         "深色模式: ✅".to_string()
     } else {
@@ -63,7 +68,30 @@ fn toggle(is_on: bool) -> impl View<bool> {
                 ..Default::default()
             }),
     )
-    .on_event(EventKind::Click, |s: &mut bool| *s = !*s)
+    .on_event(EventKind::Click, |_| Some(ToggleMsg::Toggle))
+}
+
+#[derive(Clone)]
+enum AppMsg {
+    CounterEvent(CounterMsg),
+    ToggleEvent(ToggleMsg),
+}
+
+#[derive(Lens)]
+struct AppState {
+    pub click_count: i32,
+    pub dark_mode: bool,
+}
+
+fn update(state: &mut AppState, msg: AppMsg) {
+    match msg {
+        AppMsg::CounterEvent(CounterMsg::Increment) => {
+            state.click_count += 1;
+        }
+        AppMsg::ToggleEvent(ToggleMsg::Toggle) => {
+            state.dark_mode = !state.dark_mode;
+        }
+    }
 }
 
 fn main() {
@@ -74,7 +102,7 @@ fn main() {
         dark_mode: false,
     };
 
-    let mut window = Window::with(state, |state: &mut AppState| {
+    let mut window = Window::with(state, update, |state: &AppState| {
         let bg = if state.dark_mode {
             rgb!(20, 20, 20)
         } else {
@@ -82,8 +110,16 @@ fn main() {
         };
 
         column((
-            LensWrap::new(counter(state.click_count), AppState::click_count),
-            LensWrap::new(toggle(state.dark_mode), AppState::dark_mode),
+            Adapt::new(
+                counter(state.click_count),
+                AppState::click_count,
+                AppMsg::CounterEvent, // Maps CounterMsg -> AppMsg
+            ),
+            Adapt::new(
+                toggle(state.dark_mode),
+                AppState::dark_mode,
+                AppMsg::ToggleEvent, // Maps ToggleMsg -> AppMsg
+            ),
         ))
         .style(
             Style::new()

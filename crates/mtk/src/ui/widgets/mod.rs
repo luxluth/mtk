@@ -1,25 +1,32 @@
+use std::marker::PhantomData;
+
 use crate::{
     Context, FlexDirection, Node,
     ui::{Event, View, ViewSequence, event::EventResult},
 };
 
+pub use scroll_view::*;
 pub use text_input::*;
 
 mod editor;
+mod scroll_view;
 mod text_input;
 
-pub struct Text {
+pub struct Text<Msg> {
     pub(crate) label: String,
+    _marker: PhantomData<Msg>,
 }
 
-pub fn text<S: ToString>(label: S) -> Text {
+pub fn text<S: ToString, Msg>(label: S) -> Text<Msg> {
     Text {
         label: label.to_string(),
+        _marker: PhantomData,
     }
 }
 
-impl<State> View<State> for Text {
+impl<State, Msg> View<State> for Text<Msg> {
     type Element = Node;
+    type Message = Msg;
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let node = ctx.create_node();
@@ -43,14 +50,14 @@ impl<State> View<State> for Text {
         *element
     }
 
-    fn message(
+    fn handle_event(
         &self,
         _element: &mut Self::Element,
-        _state: &mut State,
+        _state: &State,
         _event: Event,
         _ctx: &mut Context,
-    ) -> EventResult {
-        EventResult::Ignored
+    ) -> (EventResult, Option<Self::Message>) {
+        (EventResult::Ignored, None)
     }
 }
 
@@ -86,6 +93,7 @@ where
 {
     // The Element is a tuple: (The Parent Node, The Elements of the Children)
     type Element = (Node, Children::Elements);
+    type Message = Children::Message;
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let parent = ctx.create_node();
@@ -104,7 +112,8 @@ where
 
     fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
         // Rebuild children
-        self.children.rebuild(&prev.children, ctx, &mut element.1);
+        self.children
+            .rebuild(&prev.children, ctx, &mut element.1, element.0);
     }
 
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
@@ -120,13 +129,14 @@ where
         element.0
     }
 
-    fn message(
+    fn handle_event(
         &self,
         element: &mut Self::Element,
-        state: &mut State,
+        state: &State,
         event: Event,
         ctx: &mut Context,
-    ) -> EventResult {
-        self.children.message(&mut element.1, state, event, ctx)
+    ) -> (EventResult, Option<Self::Message>) {
+        self.children
+            .handle_event(&mut element.1, state, event, ctx)
     }
 }
