@@ -81,6 +81,7 @@ impl<'w> Renderer<'w> {
                 power_preference: wgpu::PowerPreference::default(),
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
+                apply_limit_buckets: false,
             })
             .await
             .unwrap();
@@ -119,6 +120,7 @@ impl<'w> Renderer<'w> {
                 .unwrap_or(&CompositeAlphaMode::Auto),
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
+            color_space: wgpu::SurfaceColorSpace::Auto,
         };
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("solid.wgsl"));
@@ -894,7 +896,7 @@ impl<'w> Renderer<'w> {
 
         self.queue.submit(std::iter::once(encoder.finish()));
         self.window.pre_present_notify();
-        surface_texture.present();
+        self.queue.present(surface_texture);
 
         focused_caret
     }
