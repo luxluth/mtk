@@ -110,7 +110,11 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
         // Rebuild child
         self.inner.rebuild(&prev.inner, ctx, &mut element.0);
         let node = self.inner.get_node(&element.0);
-        self.apply_style(ctx, &mut element.1, node);
+        element.1.is_animating = self.apply_style(ctx, &mut element.1, node);
+
+        if element.1.is_animating {
+            ctx.request_frame();
+        }
     }
 
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {

@@ -383,7 +383,7 @@ fn main() {
         operator: None,
         clear_on_next: false,
         pressed_btn: None,
-        theme: Theme::Light,
+        theme: Theme::Dark,
     };
 
     // Note the new signature: state, update_fn, view_builder(&State)
