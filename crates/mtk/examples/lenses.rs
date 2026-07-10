@@ -2,7 +2,7 @@ use mtk::{
     AlignItems, JustifyContent, Lens, Size, Style, TextStyle, clr, rgb, text_property,
     ui::{
         EventKind, View, ViewEventExt, ViewStyleExt,
-        adapter::Adapt,
+        adapter::adapt,
         widgets::{column, text},
     },
     windowing::{Window, WindowAttributes},
@@ -110,12 +110,12 @@ fn main() {
         };
 
         column((
-            Adapt::new(
+            adapt(
                 counter(state.click_count),
                 AppState::click_count,
                 AppMsg::CounterEvent, // Maps CounterMsg -> AppMsg
             ),
-            Adapt::new(
+            adapt(
                 toggle(state.dark_mode),
                 AppState::dark_mode,
                 AppMsg::ToggleEvent, // Maps ToggleMsg -> AppMsg

@@ -25,6 +25,7 @@ impl<V> ViewStyleExt for V {
 #[derive(Default)]
 pub struct StyledViewState {
     pub is_hovered: bool,
+    pub is_animating: bool,
     pub padding_anim: Option<AnimatedValue<f32>>,
     pub color_anim: Option<AnimatedValue<Color>>,
     pub scale_anim: Option<AnimatedValue<f32>>,
@@ -34,6 +35,7 @@ impl StyledViewState {
     pub fn new() -> Self {
         Self {
             is_hovered: false,
+            is_animating: false,
             padding_anim: None,
             color_anim: None,
             scale_anim: None,
@@ -134,14 +136,16 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
             if element.1.is_hovered != newly_hovered {
                 element.1.is_hovered = newly_hovered;
                 hover_changed = true;
+
+                element.1.is_animating = true;
             }
         }
 
         let is_tick = matches!(event, Event::Tick { .. });
 
-        if hover_changed || is_tick {
+        if hover_changed || (is_tick && element.1.is_animating) {
             let node = self.inner.get_node(&element.0);
-            self.apply_style(ctx, &mut element.1, node);
+            element.1.is_animating = self.apply_style(ctx, &mut element.1, node);
 
             if hover_changed {
                 ctx.request_frame();
@@ -153,7 +157,7 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
 }
 
 impl<V> StyledView<V> {
-    fn apply_style(&self, ctx: &mut Context, view_state: &mut StyledViewState, node: Node) {
+    fn apply_style(&self, ctx: &mut Context, view_state: &mut StyledViewState, node: Node) -> bool {
         let target_constraints = if view_state.is_hovered {
             self.style
                 .hover_constraints
@@ -274,5 +278,7 @@ impl<V> StyledView<V> {
         if is_animating {
             ctx.request_frame();
         }
+
+        return is_animating;
     }
 }

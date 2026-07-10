@@ -19,19 +19,21 @@ where
     _marker: PhantomData<(Outer, Inner, OuterMsg)>,
 }
 
-impl<Outer, Inner, OuterMsg, L, M, V> Adapt<Outer, Inner, OuterMsg, L, M, V>
+pub fn adapt<Outer, Inner, OuterMsg, L, M, V>(
+    view: V,
+    lens: L,
+    mapper: M,
+) -> Adapt<Outer, Inner, OuterMsg, L, M, V>
 where
     L: Lens<Outer, Inner>,
     V: View<Inner>,
     M: Fn(V::Message) -> OuterMsg,
 {
-    pub fn new(view: V, lens: L, mapper: M) -> Self {
-        Self {
-            lens,
-            mapper,
-            view,
-            _marker: PhantomData,
-        }
+    Adapt {
+        lens,
+        mapper,
+        view,
+        _marker: PhantomData,
     }
 }
 

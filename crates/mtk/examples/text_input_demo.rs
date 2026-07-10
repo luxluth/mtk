@@ -2,7 +2,7 @@ use mtk::{
     AlignItems, JustifyContent, Lens, Size, Style, TextStyle, clr, rgb,
     ui::{
         View, ViewStyleExt,
-        adapter::Adapt,
+        adapter::adapt,
         widgets::{column, text, text_input},
     },
     windowing::{Window, WindowAttributes},
@@ -33,7 +33,7 @@ fn app(state: &AppState) -> impl View<AppState, Message = AppMsg> + use<> {
                 ..Default::default()
             },
         )),
-        Adapt::new(
+        adapt(
             text_input().style(
                 Style::new()
                     .width(Size::Fixed(300))
@@ -46,7 +46,7 @@ fn app(state: &AppState) -> impl View<AppState, Message = AppMsg> + use<> {
             AppState::username,
             AppMsg::UpdateUsername,
         ),
-        Adapt::new(
+        adapt(
             text_input().style(
                 Style::new()
                     .width(Size::Fixed(300))

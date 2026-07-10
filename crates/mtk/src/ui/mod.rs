@@ -3,6 +3,7 @@ use crate::{Context, Node, ui::event::EventResult, windowing::WindowDimension};
 pub mod adapter;
 pub mod event;
 pub mod lens;
+pub mod memoize;
 pub mod style;
 pub mod widgets;
 

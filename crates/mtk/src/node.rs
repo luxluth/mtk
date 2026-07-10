@@ -103,9 +103,13 @@ impl Node {
     where
         F: FnOnce(&mut Constraints),
     {
-        let mut constraints = self.get_constraints(ctxt).unwrap_or_default();
-        update_fn(&mut constraints);
-        self.set_constraints(ctxt, constraints);
+        let old_constraints = self.get_constraints(ctxt).unwrap_or_default();
+        let mut new_constraints = old_constraints.clone();
+
+        update_fn(&mut new_constraints);
+        if old_constraints != new_constraints {
+            self.set_constraints(ctxt, new_constraints);
+        }
     }
 
     /// Fetch, modify, and apply effects in one go.
