@@ -1,5 +1,5 @@
+use mtk::clr;
 use mtk::colors::Color;
-use mtk::rgb;
 use mtk::style::{Size, Style};
 use mtk::ui::ViewStyleExt;
 use mtk::ui::memoize::memoize;
@@ -23,7 +23,7 @@ fn main() {
     let mut initial_rows = Vec::new();
     let colors = [Color::blue, Color::red, Color::green, Color::ll_blue];
 
-    for i in 1..=10_000 {
+    for i in 1..=100 {
         let color = colors[(i % colors.len()) as usize];
 
         initial_rows.push(Rc::new(RowData {
@@ -46,11 +46,12 @@ fn main() {
         scroll_view(column(items).style(Style::new().gap(10.0).padding(10.0)))
             .axis(ScrollAxis::Vertical)
             .start_offset_y(ScrollOffset::Percent(1.))
+            // .no_scrollbar()
             .style(
                 Style::new()
                     .width(Size::Percent(1.))
                     .height(Size::Percent(1.))
-                    .bg_color(rgb!(50, 50, 50)),
+                    .bg_color(clr!(white)),
             )
     });
 

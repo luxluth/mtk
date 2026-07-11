@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use crate::{
     Context, Node, PositionStrategy, Size,
     colors::Color,
@@ -8,97 +6,304 @@ use crate::{
     ui::{Event, View, event::EventResult},
 };
 
+/// Defines which axes a `ScrollView` is allowed to scroll on.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ScrollAxis {
+    /// Only allow horizontal scrolling.
     Horizontal,
+    /// Only allow vertical scrolling.
     Vertical,
+    /// Allow scrolling on both the horizontal and vertical axes.
     Both,
 }
 
+/// Represents an explicit initial scroll position or a programmatic jump offset.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ScrollOffset {
+    /// A percentage-based offset, where `0.0` is the start and `1.0` is the very end of the scrollable content.
     Percent(f32),
+    /// An absolute pixel offset.
     Pixel(f32),
 }
 
+/// Data provided to a scrollbar to calculate its dimensions and position.
+/// This includes the current scroll offset, maximum scroll offset, and the dimensions
+/// of both the visible viewport and the entire scrollable content.
 #[derive(Clone, Copy, Debug)]
 pub struct ScrollMetrics {
+    /// The current vertical scroll offset in pixels (0.0 is the top).
     pub current_y: f32,
+    /// The maximum possible vertical scroll offset (content height - viewport height).
     pub max_y: f32,
+    /// The height of the visible area.
     pub viewport_h: f32,
+    /// The total height of the scrollable content.
     pub content_h: f32,
+
+    /// The current horizontal scroll offset in pixels (0.0 is the left edge).
     pub current_x: f32,
+    /// The maximum possible horizontal scroll offset.
     pub max_x: f32,
+    /// The width of the visible area.
     pub viewport_w: f32,
+    /// The total width of the scrollable content.
     pub content_w: f32,
 }
 
-pub trait ScrollBar<State>: View<State> {
+/// Messages emitted by a `ScrollBar` to instruct the parent `ScrollView` to change its scroll position.
+/// For example, when a user clicks and drags the scrollbar thumb, the scrollbar emits `SetY`
+/// to immediately sync the `ScrollView` to the new calculated offset.
+pub enum ScrollBarMessage {
+    /// Request the `ScrollView` to instantly snap to this absolute vertical pixel offset.
+    SetY(f32),
+    /// Request the `ScrollView` to instantly snap to this absolute horizontal pixel offset.
+    SetX(f32),
+}
+
+/// A specialized `View` trait for implementing custom scrollbars.
+///
+/// Custom scrollbars must implement this trait in addition to the standard `View` trait.
+/// The `View` implementation should emit `ScrollBarMessage` when the user interacts
+/// with the scrollbar (e.g. dragging the thumb), which the parent `ScrollView` will intercept.
+pub trait ScrollBar<State>: View<State, Message = ScrollBarMessage> {
+    /// Called by the parent `ScrollView` whenever the layout changes, the user scrolls,
+    /// or an overscroll physics animation occurs.
+    ///
+    /// Use this method to update the size, position, and constraints of your scrollbar's `Node`
+    /// based on the provided `metrics`.
     fn update_metrics(
         &self,
         element: &mut Self::Element,
         ctx: &mut Context,
         metrics: ScrollMetrics,
     );
+
+    /// Called by the parent `ScrollView` when user activity is detected nearby
+    /// (e.g. when the user's cursor moves inside the `ScrollView`).
+    ///
+    /// This is typically used to wake up the scrollbar from an idle state and trigger
+    /// fade-in animations or reset inactivity timers. Be sure to call `ctx.request_frame()`
+    /// if you need to start an animation.
+    fn wake_up(&self, element: &mut Self::Element, ctx: &mut Context);
 }
 
-pub struct DefaultScrollBar<Msg> {
-    _marker: PhantomData<Msg>,
+pub struct DefaultScrollBar;
+
+pub struct DefaultScrollBarElement {
+    track_node: Node,
+    thumb_node: Node,
+    thumb_opacity: f32,
+    thumb_width: f32,
+    idle_time: f32,
+    is_hovering: bool,
+    is_dragging: bool,
+    drag_start_y: f32,
+    drag_start_scroll_y: f32,
+    metrics: Option<ScrollMetrics>,
 }
 
-impl<State, Msg> View<State> for DefaultScrollBar<Msg> {
-    type Element = Node;
-    type Message = Msg;
+impl<State> View<State> for DefaultScrollBar {
+    type Element = DefaultScrollBarElement;
+    type Message = ScrollBarMessage;
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
-        let node = ctx.create_node();
-        node.update_constraints(ctx, |c| {
+        let track_node = ctx.create_node();
+        let thumb_node = ctx.create_node();
+        track_node.append(ctx, thumb_node);
+
+        track_node.update_constraints(ctx, |c| {
+            c.positioning = PositionStrategy::Absolute {
+                top: 0.0,
+                bottom: 0.0,
+                right: 0.0,
+                left: f32::NAN,
+            };
+            c.width = Size::Fixed(14);
+            c.height = Size::Fill;
+            c.z_index = 100;
+        });
+
+        track_node.update_effects(ctx, |e| {
+            e.background_color = Color::new(100, 100, 100, 0); // Transparent initially
+        });
+
+        thumb_node.update_constraints(ctx, |c| {
             c.positioning = PositionStrategy::Absolute {
                 top: 0.0,
                 left: f32::NAN,
                 bottom: f32::NAN,
-                right: 4.0,
+                right: 4.0, // padded a bit from right edge
             };
-            c.width = Size::Fixed(6);
+            c.width = Size::Fixed(4);
             c.height = Size::Fixed(0);
-            c.z_index = 100;
         });
-        node.update_effects(ctx, |e| {
-            e.background_color = Color::new(100, 100, 100, 150);
-            e.border.radius = Radius::all(3.0);
+
+        thumb_node.update_effects(ctx, |e| {
+            // Pill shape
+            e.background_color = Color::new(100, 100, 100, 180);
+            e.border.radius = Radius::all(6.0);
+            e.opacity = 0.0;
         });
-        node
+
+        DefaultScrollBarElement {
+            track_node,
+            thumb_node,
+            thumb_opacity: 0.0,
+            thumb_width: 4.0,
+            idle_time: 0.0,
+            is_hovering: false,
+            is_dragging: false,
+            drag_start_y: 0.0,
+            drag_start_scroll_y: 0.0,
+            metrics: None,
+        }
     }
 
     fn rebuild(&self, _prev: &Self, _ctx: &mut Context, _element: &mut Self::Element) {}
 
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
-        element.remove(ctx);
-        ctx.destroy_node(*element);
+        element.thumb_node.remove(ctx);
+        ctx.destroy_node(element.thumb_node);
+        element.track_node.remove(ctx);
+        ctx.destroy_node(element.track_node);
     }
 
     fn handle_event(
         &self,
-        _element: &mut Self::Element,
+        element: &mut Self::Element,
         _state: &State,
-        _event: Event,
-        _ctx: &mut Context,
+        event: Event,
+        ctx: &mut Context,
     ) -> (EventResult, Option<Self::Message>) {
-        (EventResult::Ignored, None)
+        let mut msg = None;
+
+        match event {
+            Event::MouseInput {
+                pressed,
+                x: _,
+                y,
+                hit_nodes,
+            } => {
+                if pressed {
+                    if hit_nodes.contains(&element.thumb_node) {
+                        element.is_dragging = true;
+                        element.drag_start_y = y;
+                        if let Some(metrics) = &element.metrics {
+                            element.drag_start_scroll_y = metrics.current_y;
+                        }
+                        element.idle_time = 0.0;
+                    }
+                } else {
+                    element.is_dragging = false;
+                }
+            }
+            Event::CursorMoved { x: _, y, hit_nodes } => {
+                let is_hovering = hit_nodes.contains(&element.track_node)
+                    || hit_nodes.contains(&element.thumb_node);
+                if is_hovering != element.is_hovering {
+                    element.is_hovering = is_hovering;
+                    ctx.request_frame();
+                }
+
+                if is_hovering || element.is_dragging {
+                    element.idle_time = 0.0;
+                }
+
+                if element.is_dragging {
+                    if let Some(metrics) = &element.metrics {
+                        if metrics.max_y > 0.0 {
+                            let scrollbar_height = ((metrics.viewport_h / metrics.content_h)
+                                * metrics.viewport_h)
+                                .max(20.0)
+                                .min(metrics.viewport_h);
+                            let max_scrollbar_y = metrics.viewport_h - scrollbar_height;
+
+                            if max_scrollbar_y > 0.0 {
+                                let dy = y - element.drag_start_y;
+                                let scroll_ratio = dy / max_scrollbar_y;
+                                let new_scroll_y = (element.drag_start_scroll_y
+                                    + scroll_ratio * metrics.max_y)
+                                    .clamp(0.0, metrics.max_y);
+                                msg = Some(ScrollBarMessage::SetY(new_scroll_y));
+                            }
+                        }
+                    }
+                }
+            }
+            Event::Tick { dt } => {
+                element.idle_time += dt;
+
+                let target_thumb_opacity = if element.idle_time < 1.0 || element.is_dragging {
+                    1.0
+                } else {
+                    0.0
+                };
+                let target_width = if element.is_hovering || element.is_dragging {
+                    8.0
+                } else {
+                    4.0
+                };
+
+                let mut changed = false;
+
+                let new_thumb_opacity = if target_thumb_opacity > 0.0 {
+                    (element.thumb_opacity + dt * 8.0).min(1.0)
+                } else {
+                    (element.thumb_opacity - dt * 4.0).max(0.0)
+                };
+                if new_thumb_opacity != element.thumb_opacity {
+                    element.thumb_opacity = new_thumb_opacity;
+                    changed = true;
+                }
+
+                let smoothing = 1.0 - f32::exp(-15.0 * dt);
+
+                let w_diff = target_width - element.thumb_width;
+                if w_diff.abs() > 0.1 {
+                    element.thumb_width += w_diff * smoothing;
+                    changed = true;
+                } else if w_diff != 0.0 {
+                    element.thumb_width = target_width;
+                    changed = true;
+                }
+
+                if changed {
+                    element.thumb_node.update_effects(ctx, |e| {
+                        e.opacity = element.thumb_opacity;
+                    });
+                    element.thumb_node.update_constraints(ctx, |c| {
+                        c.width = Size::Fixed(element.thumb_width as u32);
+                    });
+
+                    if let Some(w) = &ctx.window {
+                        w.request_redraw();
+                    }
+                }
+
+                if element.idle_time < 1.0 || element.thumb_opacity > 0.0 || w_diff.abs() > 0.1 {
+                    ctx.request_frame();
+                }
+            }
+            _ => {}
+        }
+
+        (EventResult::Ignored, msg)
     }
 
     fn get_node(&self, element: &Self::Element) -> Node {
-        *element
+        element.track_node
     }
 }
 
-impl<State, Msg> ScrollBar<State> for DefaultScrollBar<Msg> {
+impl<State> ScrollBar<State> for DefaultScrollBar {
     fn update_metrics(
         &self,
         element: &mut Self::Element,
         ctx: &mut Context,
         metrics: ScrollMetrics,
     ) {
+        element.metrics = Some(metrics);
+
         if metrics.max_y > 0.0 {
             let scrollbar_height = ((metrics.viewport_h / metrics.content_h) * metrics.viewport_h)
                 .max(20.0)
@@ -117,7 +322,7 @@ impl<State, Msg> ScrollBar<State> for DefaultScrollBar<Msg> {
                 top_pos = metrics.viewport_h - final_h;
             }
 
-            element.update_constraints(ctx, |c| {
+            element.thumb_node.update_constraints(ctx, |c| {
                 c.height = crate::style::Size::Fixed(final_h as u32);
                 c.positioning = crate::style::PositionStrategy::Absolute {
                     top: top_pos,
@@ -127,20 +332,23 @@ impl<State, Msg> ScrollBar<State> for DefaultScrollBar<Msg> {
                 };
             });
         } else {
-            element.update_constraints(ctx, |c| {
+            element.thumb_node.update_constraints(ctx, |c| {
                 c.height = crate::style::Size::Fixed(0);
             });
         }
     }
+
+    fn wake_up(&self, element: &mut Self::Element, ctx: &mut Context) {
+        element.idle_time = 0.0;
+        ctx.request_frame();
+    }
 }
 
-pub struct NoScrollBar<Msg> {
-    _marker: PhantomData<Msg>,
-}
+pub struct NoScrollBar;
 
-impl<State, Msg> View<State> for NoScrollBar<Msg> {
+impl<State> View<State> for NoScrollBar {
     type Element = Node;
-    type Message = Msg;
+    type Message = ScrollBarMessage;
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let node = ctx.create_node();
@@ -179,7 +387,7 @@ impl<State, Msg> View<State> for NoScrollBar<Msg> {
     }
 }
 
-impl<State, Msg> ScrollBar<State> for NoScrollBar<Msg> {
+impl<State> ScrollBar<State> for NoScrollBar {
     fn update_metrics(
         &self,
         _element: &mut Self::Element,
@@ -187,6 +395,8 @@ impl<State, Msg> ScrollBar<State> for NoScrollBar<Msg> {
         _metrics: ScrollMetrics,
     ) {
     }
+
+    fn wake_up(&self, _element: &mut Self::Element, _ctx: &mut Context) {}
 }
 
 pub struct ScrollView<V, S> {
@@ -197,15 +407,13 @@ pub struct ScrollView<V, S> {
     pub(crate) scrollbar: S,
 }
 
-pub fn scroll_view<V, Msg>(inner: V) -> ScrollView<V, DefaultScrollBar<Msg>> {
+pub fn scroll_view<V>(inner: V) -> ScrollView<V, DefaultScrollBar> {
     ScrollView {
         inner,
         axis: ScrollAxis::Both,
         initial_x: None,
         initial_y: None,
-        scrollbar: DefaultScrollBar {
-            _marker: PhantomData,
-        },
+        scrollbar: DefaultScrollBar,
     }
 }
 
@@ -235,35 +443,33 @@ impl<V, S> ScrollView<V, S> {
         }
     }
 
-    pub fn no_scrollbar<Msg>(self) -> ScrollView<V, NoScrollBar<Msg>> {
+    pub fn no_scrollbar(self) -> ScrollView<V, NoScrollBar> {
         ScrollView {
             inner: self.inner,
             axis: self.axis,
             initial_x: self.initial_x,
             initial_y: self.initial_y,
-            scrollbar: NoScrollBar {
-                _marker: PhantomData,
-            },
+            scrollbar: NoScrollBar,
         }
     }
 }
 
 pub struct ScrollState {
-    pub current_y: f32,
     pub target_y: f32,
-    pub current_x: f32,
     pub target_x: f32,
-    pub active_timer: f32,
+    pub current_y: f32,
+    pub current_x: f32,
     pub is_touching: bool,
     pub velocity_y: f32,
     pub velocity_x: f32,
     pub is_initialized: bool,
+    pub needs_sync: bool,
 }
 
 impl<State, Msg, V, S> View<State> for ScrollView<V, S>
 where
     V: View<State, Message = Msg>,
-    S: ScrollBar<State> + View<State, Message = Msg>,
+    S: ScrollBar<State>,
 {
     // Element = (Wrapper Node, ScrollContainer Node, S::Element, Inner Element, ScrollState)
     type Element = (Node, Node, S::Element, V::Element, ScrollState);
@@ -303,6 +509,8 @@ where
         wrapper.append(ctx, scroll_container);
         wrapper.append(ctx, self.scrollbar.get_node(&scrollbar_y));
 
+        ctx.request_frame();
+
         (
             wrapper,
             scroll_container,
@@ -313,11 +521,11 @@ where
                 current_y: target_y,
                 target_x,
                 target_y,
-                active_timer: 0.0,
                 is_touching: false,
                 velocity_y: 0.0,
                 velocity_x: 0.0,
                 is_initialized: false,
+                needs_sync: false,
             },
         )
     }
@@ -356,15 +564,36 @@ where
         event: Event,
         ctx: &mut Context,
     ) -> (EventResult, Option<Self::Message>) {
-        let (mut result, mut emitted_msg) =
+        let (mut result, mut emitted_msg) = (EventResult::Ignored, None);
+
+        let (sb_result, sb_msg) =
             self.scrollbar
                 .handle_event(&mut element.2, state, event.clone(), ctx);
+
+        result = result.or(sb_result);
+
+        if let Some(msg) = sb_msg {
+            match msg {
+                ScrollBarMessage::SetY(y) => {
+                    element.4.target_y = y;
+                    element.4.current_y = y;
+                    element.4.needs_sync = true;
+                    ctx.request_frame();
+                }
+                ScrollBarMessage::SetX(x) => {
+                    element.4.target_x = x;
+                    element.4.current_x = x;
+                    element.4.needs_sync = true;
+                    ctx.request_frame();
+                }
+            }
+        }
 
         if result == EventResult::Ignored {
             let (inner_res, inner_msg) =
                 self.inner
                     .handle_event(&mut element.3, state, event.clone(), ctx);
-            result = inner_res;
+            result = result.or(inner_res);
             emitted_msg = emitted_msg.or(inner_msg);
         }
 
@@ -395,14 +624,23 @@ where
         let max_x = (inner_comp.w - parent_comp.w).max(0.0);
 
         match event {
+            Event::CursorMoved { ref hit_nodes, .. } => {
+                let sb_node = self.scrollbar.get_node(&element.2);
+                if hit_nodes.contains(&element.1) || hit_nodes.contains(&sb_node) {
+                    self.scrollbar.wake_up(&mut element.2, ctx);
+                }
+            }
             Event::MouseWheel {
                 delta_x,
                 delta_y,
                 is_touchpad,
                 phase,
-                hit_nodes,
+                ref hit_nodes,
             } => {
-                if hit_nodes.contains(&element.1) {
+                let sb_node = self.scrollbar.get_node(&element.2);
+                if hit_nodes.contains(&element.1) || hit_nodes.contains(&sb_node) {
+                    self.scrollbar.wake_up(&mut element.2, ctx);
+
                     if is_touchpad {
                         use winit::event::TouchPhase;
                         element.4.is_touching =
@@ -569,7 +807,9 @@ where
                     || diff_x.abs() > 0.1
                     || element.4.velocity_y.abs() > 0.1
                     || element.4.velocity_x.abs() > 0.1
+                    || element.4.needs_sync
                 {
+                    element.4.needs_sync = false;
                     // Frame-rate independent exponential smoothing (logarithmic decay of distance)
                     let smoothing = 1.0 - f32::exp(-12.0 * dt);
                     element.4.current_y += diff_y * smoothing;
