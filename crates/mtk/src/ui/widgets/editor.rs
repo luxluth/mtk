@@ -74,9 +74,23 @@ impl Editor {
             .map(|(text, _)| (self.cursor, self.cursor + text.len()))
     }
 
-    /// Returns the current byte-index position of the cursor.
+    /// Returns the current byte-index position of the cursor relative to the underlying text buffer.
     pub fn cursor(&self) -> usize {
         self.cursor
+    }
+
+    /// Returns the cursor index mapped to the `display_text` string, accounting for
+    /// any active IME preedit and its internal cursor position.
+    pub fn display_cursor(&self) -> usize {
+        if let Some((text, cursor_pos)) = &self.ime_preedit {
+            if let Some((start, _)) = cursor_pos {
+                self.cursor + start
+            } else {
+                self.cursor + text.len()
+            }
+        } else {
+            self.cursor
+        }
     }
 
     /// Returns the active text selection as a tuple of `(start, end)` byte indices.

@@ -55,7 +55,7 @@ impl View<String> for TextInput {
         let render_info = TextRenderInfo {
             style: text_style,
             cursor: if is_focused {
-                Some(editor.cursor())
+                Some(editor.display_cursor())
             } else {
                 None
             },
@@ -91,7 +91,7 @@ impl View<String> for TextInput {
         let mut emitted_msg = None;
 
         // Initialize editor state if this is the first tick and the text is not empty
-        if editor.display_text() != *state {
+        if editor.text() != *state {
             if let Event::Tick { dt: _ } = event {
                 editor.set_text(&state);
                 ctx.request_frame();
@@ -310,7 +310,7 @@ impl View<String> for TextInput {
         let render_info = TextRenderInfo {
             style: text_style,
             cursor: if is_focused {
-                Some(editor.cursor())
+                Some(editor.display_cursor())
             } else {
                 None
             },
