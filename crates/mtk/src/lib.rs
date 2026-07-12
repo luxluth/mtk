@@ -33,6 +33,7 @@ pub struct Context {
     pub(crate) focusable_nodes: Vec<Node>,
     pub(crate) window: Option<Arc<winit::window::Window>>,
     pub(crate) modifiers: winit::keyboard::ModifiersState,
+    pub(crate) ensure_visible_requests: HashMap<Node, crate::style::Rect>,
 }
 
 impl Context {
@@ -49,6 +50,7 @@ impl Context {
             focusable_nodes: Vec::new(),
             window: None,
             modifiers: winit::keyboard::ModifiersState::default(),
+            ensure_visible_requests: HashMap::new(),
         }
     }
 
@@ -59,6 +61,11 @@ impl Context {
 
     pub fn clear_focus(&mut self) {
         self.focused_node = None;
+        self.request_frame();
+    }
+
+    pub fn request_ensure_visible(&mut self, node: Node, rect: crate::style::Rect) {
+        self.ensure_visible_requests.insert(node, rect);
         self.request_frame();
     }
 

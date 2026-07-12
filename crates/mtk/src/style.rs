@@ -595,15 +595,39 @@ impl From<sys::muRect> for Rect {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub enum LineHeight {
+    Relative(f32),
+    #[default]
+    Auto,
+}
+
+impl LineHeight {
+    pub fn resolve(&self) -> f32 {
+        match self {
+            LineHeight::Relative(f) => *f,
+            LineHeight::Auto => 1.2, // I think this was 1.2
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum VerticalAlignment {
+    Top,
+    Center,
+    Bottom,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct TextStyle {
     pub font_size: f32,
-    pub line_height: f32,
+    pub line_height: LineHeight,
     pub color: Color,
     pub font_family: String,
     pub font_weight: FontWeight,
     pub font_style: FontStyle,
     pub alignment: Alignment,
+    pub vertical_alignment: VerticalAlignment,
     pub wrap: bool,
     pub overflow_wrap: OverflowWrap,
     pub selection_color: Color,
@@ -615,14 +639,15 @@ impl Default for TextStyle {
     fn default() -> Self {
         Self {
             font_size: 16.0,
-            line_height: 20.0,
+            line_height: LineHeight::Auto,
             color: clr!(black),
             font_family: "system-ui".to_string(),
             font_weight: FontWeight::default(),
             font_style: FontStyle::default(),
             alignment: Alignment::Start,
+            vertical_alignment: VerticalAlignment::Center,
             wrap: false,
-            overflow_wrap: OverflowWrap::Normal,
+            overflow_wrap: OverflowWrap::default(),
             selection_color: clr!(white),
             selection_bg: clr!(ll_blue),
             caret_color: clr!(black),

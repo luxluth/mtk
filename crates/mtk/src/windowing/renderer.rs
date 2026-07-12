@@ -391,9 +391,7 @@ impl<'w> Renderer<'w> {
                         builder.push_default(StyleProperty::Brush(text_style.color));
                         builder.push_default(StyleProperty::FontSize(text_style.font_size));
                         builder.push_default(StyleProperty::LineHeight(
-                            LineHeight::FontSizeRelative(
-                                text_style.line_height / text_style.font_size,
-                            ),
+                            LineHeight::FontSizeRelative(text_style.line_height.resolve()),
                         ));
                         builder.push_default(StyleProperty::FontWeight(text_style.font_weight));
                         builder.push_default(StyleProperty::FontStyle(text_style.font_style));
@@ -427,10 +425,19 @@ impl<'w> Renderer<'w> {
                         layout.align(text_style.alignment, AlignmentOptions::default());
 
                         let actual_text_height = layout.height();
-                        let vertical_offset = ((inner_h - actual_text_height) / 2.0).max(0.0);
+                        let vertical_offset = match text_style.vertical_alignment {
+                            crate::style::VerticalAlignment::Top => 0.0,
+                            crate::style::VerticalAlignment::Center => {
+                                ((inner_h - actual_text_height) / 2.0).max(0.0)
+                            }
+                            crate::style::VerticalAlignment::Bottom => {
+                                (inner_h - actual_text_height).max(0.0)
+                            }
+                        };
 
-                        let text_x = computed.x + constraints.padding.left;
-                        let text_y = computed.y + constraints.padding.top + vertical_offset;
+                        let text_x = computed.x + constraints.padding.left - constraints.scroll.x;
+                        let text_y = computed.y + constraints.padding.top + vertical_offset
+                            - constraints.scroll.y;
 
                         let effects = node.get_effects(context).unwrap_or_default();
                         let scale = effects.scale;

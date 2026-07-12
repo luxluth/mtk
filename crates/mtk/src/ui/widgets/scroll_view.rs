@@ -1,9 +1,9 @@
 use crate::{
-    Context, Node, PositionStrategy, Size,
     colors::Color,
     effects::Radius,
     style::{Overflow, Vector2},
-    ui::{Event, View, event::EventResult},
+    ui::{event::EventResult, Event, View},
+    Context, Node, PositionStrategy, Size,
 };
 
 /// Defines which axes a `ScrollView` is allowed to scroll on.
@@ -716,6 +716,38 @@ where
                 }
             }
             Event::Tick { dt } => {
+                let inner_node = self.inner.get_node(&element.3);
+                if let Some(rect) = ctx.ensure_visible_requests.remove(&inner_node) {
+                    if let (Some(parent_comp), Some(inner_comp)) =
+                        (element.0.get_computed(ctx), inner_node.get_computed(ctx))
+                    {
+                        let constraints = element.0.get_constraints(ctx).unwrap_or_default();
+                        let max_y = (inner_comp.h - parent_comp.h
+                            + constraints.padding.top
+                            + constraints.padding.bottom)
+                            .max(0.0);
+                        let max_x = (inner_comp.w - parent_comp.w
+                            + constraints.padding.left
+                            + constraints.padding.right)
+                            .max(0.0);
+
+                        let current_y = element.4.target_y;
+                        if rect.y < current_y {
+                            element.4.target_y = rect.y.clamp(0.0, max_y);
+                        } else if rect.y + rect.h > current_y + parent_comp.h {
+                            element.4.target_y =
+                                (rect.y + rect.h - parent_comp.h).clamp(0.0, max_y);
+                        }
+
+                        let current_x = element.4.target_x;
+                        if rect.x < current_x {
+                            element.4.target_x = rect.x.clamp(0.0, max_x);
+                        } else if rect.x + rect.w > current_x + parent_comp.w {
+                            element.4.target_x =
+                                (rect.x + rect.w - parent_comp.w).clamp(0.0, max_x);
+                        }
+                    }
+                }
                 if !element.4.is_initialized {
                     if let (Some(computed), Some(inner_computed)) = (
                         element.1.get_computed(ctx),

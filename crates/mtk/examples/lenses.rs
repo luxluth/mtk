@@ -24,7 +24,6 @@ fn counter(count: i32) -> impl View<i32, Message = CounterMsg> {
                 .set_text_style(TextStyle {
                     font_size: 48.0,
                     alignment: text_property::Alignment::Center,
-                    line_height: 48.,
                     color: clr!(ll_blue),
                     font_family: "IosevkaTerm NF".into(),
                     ..Default::default()

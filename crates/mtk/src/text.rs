@@ -50,7 +50,7 @@ pub(crate) fn measure_text(
     builder.push_default(StyleProperty::Brush(text_style.color));
     builder.push_default(StyleProperty::FontSize(text_style.font_size));
     builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
-        text_style.line_height / text_style.font_size,
+        text_style.line_height.resolve(),
     )));
     builder.push_default(StyleProperty::FontWeight(text_style.font_weight));
     builder.push_default(StyleProperty::FontStyle(text_style.font_style));
@@ -140,6 +140,48 @@ pub(crate) fn hit_test_text(
         let cursor = Cursor::from_point(&layout, x, y);
         cursor.index()
     }
+}
+
+pub(crate) fn get_cursor_geometry(
+    text: &str,
+    text_style: &TextStyle,
+    avail_w: f32,
+    cursor_index: usize,
+    shared_ctx: &SharedTextContext,
+) -> (f32, f32, f32) {
+    let mut text_context = shared_ctx.lock().unwrap();
+    let TextContext {
+        font_cx, layout_cx, ..
+    } = &mut *text_context;
+
+    let mut builder = layout_cx.ranged_builder(font_cx, text, 1.0, true);
+
+    builder.push_default(StyleProperty::FontSize(text_style.font_size));
+    builder.push_default(parley::style::FontFamily::from(
+        text_style.font_family.as_str(),
+    ));
+    builder.push_default(StyleProperty::FontWeight(text_style.font_weight));
+    builder.push_default(StyleProperty::FontStyle(text_style.font_style));
+
+    if text_style.wrap {
+        builder.push_default(StyleProperty::OverflowWrap(text_style.overflow_wrap));
+    }
+
+    let mut layout = builder.build(text);
+    let max_advance = if text_style.wrap && avail_w.is_finite() && avail_w > 0.0 {
+        Some(avail_w)
+    } else {
+        None
+    };
+
+    layout.break_all_lines(max_advance);
+    layout.align(text_style.alignment, AlignmentOptions::default());
+
+    let cursor_layout =
+        Cursor::from_byte_index(&layout, cursor_index, parley::layout::Affinity::Downstream);
+    let geom = cursor_layout.geometry(&layout, 2.0);
+    let h = (geom.y1 - geom.y0) as f32;
+    (geom.x0 as f32, geom.y0 as f32, h)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
