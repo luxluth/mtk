@@ -23,16 +23,30 @@ impl InputText {
     }
 }
 
+pub struct InputInner {
+    node: Node,
+    editor: Editor,
+    caret: Node,
+    is_dragging: bool,
+    last_click: Option<Instant>,
+    click_count: u8,
+}
+
+impl InputInner {
+    pub fn new(node: Node, editor: Editor, caret: Node) -> Self {
+        Self {
+            node,
+            editor,
+            caret,
+            is_dragging: false,
+            last_click: None,
+            click_count: 0,
+        }
+    }
+}
+
 impl View<String> for InputText {
-    type Element = (
-        Node,
-        Editor,
-        Node,
-        bool,
-        Option<std::time::Instant>,
-        u8,
-        usize,
-    ); // Node, Editor, Caret, Hover, LastClick, ClickCount, LastCursor
+    type Element = InputInner; // Node, Editor, Caret, IsDragging, LastClick, ClickCount
     type Message = String;
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
@@ -47,46 +61,50 @@ impl View<String> for InputText {
         node.update_constraints(ctx, |c| {
             c.overflow = crate::style::Overflow::Hidden;
         });
-        (node, editor, caret, false, None, 0, 0)
+
+        InputInner::new(node, editor, caret)
     }
 
     fn rebuild(&self, _prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
-        let (node, editor, _caret, _hover, _, _, _) = element;
-
         // Preserve the user's TextStyle if they set one via StyleWrap
         let mut text_style = TextStyle::default();
-        if let Some(info) = node.get_text_userdata::<TextRenderInfo>(ctx) {
+        if let Some(info) = element.node.get_text_userdata::<TextRenderInfo>(ctx) {
             text_style = info.style.clone();
-        } else if let Some(style) = node.get_text_userdata::<TextStyle>(ctx) {
+        } else if let Some(style) = element.node.get_text_userdata::<TextStyle>(ctx) {
             text_style = style.clone();
         }
 
-        let is_focused = Some(node.clone()) == ctx.focused_node();
+        let is_focused = Some(element.node.clone()) == ctx.focused_node();
 
         let render_info = TextRenderInfo {
             style: text_style,
             cursor: if is_focused {
-                Some(editor.display_cursor())
+                Some(element.editor.display_cursor())
             } else {
                 None
             },
-            selection: if is_focused { editor.selection() } else { None },
-            preedit_range: editor.preedit_range(),
+            selection: if is_focused {
+                element.editor.selection()
+            } else {
+                None
+            },
+            preedit_range: element.editor.preedit_range(),
         };
-        node.set_text_with_userdata(ctx, &editor.display_text(), render_info);
+        element
+            .node
+            .set_text_with_userdata(ctx, &element.editor.display_text(), render_info);
     }
 
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
-        let (node, _, caret, _, _, _, _) = element;
-        ctx.unregister_focusable(*node);
-        caret.remove(ctx);
-        ctx.destroy_node(*caret);
-        node.remove(ctx);
-        ctx.destroy_node(*node);
+        ctx.unregister_focusable(element.node);
+        element.caret.remove(ctx);
+        ctx.destroy_node(element.caret);
+        element.node.remove(ctx);
+        ctx.destroy_node(element.node);
     }
 
     fn get_node(&self, element: &Self::Element) -> Node {
-        element.0.clone()
+        element.node.clone()
     }
 
     fn handle_event(
@@ -96,17 +114,15 @@ impl View<String> for InputText {
         event: Event,
         ctx: &mut Context,
     ) -> (EventResult, Option<Self::Message>) {
-        let (node, editor, _caret, _, _, _, _) = element;
-
-        let cursor_before = editor.cursor();
+        let cursor_before = element.editor.cursor();
 
         let mut handled = EventResult::Ignored;
         let mut emitted_msg = None;
 
         // Initialize editor state if this is the first tick and the text is not empty
-        if editor.text() != *state {
+        if element.editor.text() != *state {
             if let Event::Tick { dt: _ } = event {
-                editor.set_text(&state);
+                element.editor.set_text(&state);
                 ctx.request_frame();
             }
         }
@@ -118,18 +134,20 @@ impl View<String> for InputText {
                 y,
                 hit_nodes,
             } => {
-                let is_hit = hit_nodes.iter().any(|n| n == node);
-                let is_focused = Some(node.clone()) == ctx.focused_node();
+                let is_hit = hit_nodes.iter().any(|n| *n == element.node);
+                let is_focused = Some(element.node.clone()) == ctx.focused_node();
 
                 if pressed {
                     if is_hit {
-                        ctx.request_focus(node.clone());
+                        ctx.request_focus(element.node.clone());
                         handled = EventResult::Handled;
 
-                        if let Some(computed) = node.get_computed(ctx) {
-                            let constraints = node.get_constraints(ctx).unwrap_or_default();
-                            let rel_x = x - computed.x - constraints.padding.left;
-                            let rel_y = y - computed.y - constraints.padding.top;
+                        if let Some(computed) = element.node.get_computed(ctx) {
+                            let constraints = element.node.get_constraints(ctx).unwrap_or_default();
+                            let rel_x =
+                                x - computed.x - constraints.padding.left + constraints.scroll.x;
+                            let rel_y =
+                                y - computed.y - constraints.padding.top + constraints.scroll.y;
                             let shift = ctx.modifiers().shift_key();
 
                             let inner_w =
@@ -140,14 +158,18 @@ impl View<String> for InputText {
                                     .max(0.0);
 
                             let mut text_style = TextStyle::default();
-                            if let Some(info) = node.get_text_userdata::<TextRenderInfo>(ctx) {
+                            if let Some(info) =
+                                element.node.get_text_userdata::<TextRenderInfo>(ctx)
+                            {
                                 text_style = info.style.clone();
-                            } else if let Some(style) = node.get_text_userdata::<TextStyle>(ctx) {
+                            } else if let Some(style) =
+                                element.node.get_text_userdata::<TextStyle>(ctx)
+                            {
                                 text_style = style.clone();
                             }
 
                             let index = crate::text::hit_test_text(
-                                &editor.display_text(),
+                                &element.editor.display_text(),
                                 &text_style,
                                 inner_w,
                                 inner_h,
@@ -158,34 +180,36 @@ impl View<String> for InputText {
 
                             let now = Instant::now();
                             let mut click_count = 1;
-                            if let Some(last_click) = element.4 {
+                            if let Some(last_click) = element.last_click {
                                 if now.duration_since(last_click).as_millis() < 500 {
-                                    click_count = element.5 + 1;
+                                    click_count = element.click_count + 1;
                                 }
                             }
-                            element.4 = Some(now);
-                            element.5 = click_count;
+                            element.last_click = Some(now);
+                            element.click_count = click_count;
 
                             if click_count == 2 {
-                                editor.set_cursor(index);
-                                editor.set_selection_anchor(Some(index));
-                                editor.move_word_left(false);
-                                let start = editor.cursor();
-                                editor.move_word_right(true);
-                                let end = editor.cursor();
-                                editor.set_selection_anchor(Some(start));
-                                editor.set_cursor(end);
+                                element.editor.set_cursor(index);
+                                element.editor.set_selection_anchor(Some(index));
+                                element.editor.move_word_left(false);
+                                let start = element.editor.cursor();
+                                element.editor.move_word_right(true);
+                                let end = element.editor.cursor();
+                                element.editor.set_selection_anchor(Some(start));
+                                element.editor.set_cursor(end);
                             } else if click_count >= 3 {
-                                editor.select_all(); // For single line text input, select all is fine
+                                element.editor.select_all(); // For single line text input, select all is fine
                             } else {
                                 if shift {
-                                    if editor.selection_anchor().is_none() {
-                                        editor.set_selection_anchor(Some(editor.cursor()));
+                                    if element.editor.selection_anchor().is_none() {
+                                        element
+                                            .editor
+                                            .set_selection_anchor(Some(element.editor.cursor()));
                                     }
-                                    editor.set_cursor(index);
+                                    element.editor.set_cursor(index);
                                 } else {
-                                    editor.set_selection_anchor(None);
-                                    editor.set_cursor(index);
+                                    element.editor.set_selection_anchor(None);
+                                    element.editor.set_cursor(index);
                                 }
                             }
                             ctx.request_frame();
@@ -193,13 +217,62 @@ impl View<String> for InputText {
                     } else if is_focused {
                         ctx.clear_focus();
                     }
+                    if is_hit {
+                        element.is_dragging = true;
+                    }
+                } else {
+                    element.is_dragging = false;
+                }
+            }
+            Event::CursorMoved { x, y, hit_nodes: _ } => {
+                if element.is_dragging {
+                    if let Some(computed) = element.node.get_computed(ctx) {
+                        let constraints = element.node.get_constraints(ctx).unwrap_or_default();
+                        let rel_x =
+                            x - computed.x - constraints.padding.left + constraints.scroll.x;
+                        let rel_y = y - computed.y - constraints.padding.top + constraints.scroll.y;
+
+                        let inner_w =
+                            (computed.w - constraints.padding.left - constraints.padding.right)
+                                .max(0.0);
+                        let inner_h =
+                            (computed.h - constraints.padding.top - constraints.padding.bottom)
+                                .max(0.0);
+
+                        let mut text_style = TextStyle::default();
+                        if let Some(info) = element.node.get_text_userdata::<TextRenderInfo>(ctx) {
+                            text_style = info.style.clone();
+                        } else if let Some(style) = element.node.get_text_userdata::<TextStyle>(ctx)
+                        {
+                            text_style = style.clone();
+                        }
+
+                        let index = crate::text::hit_test_text(
+                            &element.editor.display_text(),
+                            &text_style,
+                            inner_w,
+                            inner_h,
+                            rel_x,
+                            rel_y,
+                            &ctx.text_context,
+                        );
+
+                        if element.editor.selection_anchor().is_none() {
+                            element
+                                .editor
+                                .set_selection_anchor(Some(element.editor.cursor()));
+                        }
+                        element.editor.set_cursor(index);
+                        ctx.request_frame();
+                    }
                 }
             }
             Event::KeyboardInput {
                 event: key_event,
                 is_synthetic: _,
             } => {
-                if ctx.focused_node() == Some(node.clone()) && key_event.state.is_pressed() {
+                if ctx.focused_node() == Some(element.node.clone()) && key_event.state.is_pressed()
+                {
                     handled = EventResult::Handled;
                     let shift = ctx.modifiers().shift_key();
                     let ctrl_alt = ctx.modifiers().control_key() || ctx.modifiers().alt_key();
@@ -209,42 +282,42 @@ impl View<String> for InputText {
                     match key_event.logical_key.as_ref() {
                         Key::Named(NamedKey::ArrowLeft) => {
                             if ctrl_alt {
-                                editor.move_word_left(shift);
+                                element.editor.move_word_left(shift);
                             } else {
-                                editor.move_left(shift);
+                                element.editor.move_left(shift);
                             }
                             ctx.request_frame();
                         }
                         Key::Named(NamedKey::ArrowRight) => {
                             if ctrl_alt {
-                                editor.move_word_right(shift);
+                                element.editor.move_word_right(shift);
                             } else {
-                                editor.move_right(shift);
+                                element.editor.move_right(shift);
                             }
                             ctx.request_frame();
                         }
                         Key::Named(NamedKey::Backspace) => {
                             if ctrl_alt {
-                                editor.delete_word_backward();
+                                element.editor.delete_word_backward();
                             } else {
-                                editor.delete_backward();
+                                element.editor.delete_backward();
                             }
                             text_changed = true;
                         }
                         Key::Named(NamedKey::Delete) => {
                             if ctrl_alt {
-                                editor.delete_word_forward();
+                                element.editor.delete_word_forward();
                             } else {
-                                editor.delete_forward();
+                                element.editor.delete_forward();
                             }
                             text_changed = true;
                         }
                         Key::Named(NamedKey::Home) => {
-                            editor.move_to_start(shift);
+                            element.editor.move_to_start(shift);
                             ctx.request_frame();
                         }
                         Key::Named(NamedKey::End) => {
-                            editor.move_to_end(shift);
+                            element.editor.move_to_end(shift);
                             ctx.request_frame();
                         }
                         Key::Named(NamedKey::Tab) => {
@@ -252,7 +325,7 @@ impl View<String> for InputText {
                                 // Ignore Ctrl+Tab so it bubbles (or just do nothing here)
                                 handled = EventResult::Ignored;
                             } else if self.captures_tab {
-                                editor.insert("\t");
+                                element.editor.insert("\t");
                                 text_changed = true;
                             } else {
                                 if shift {
@@ -263,7 +336,7 @@ impl View<String> for InputText {
                             }
                         }
                         Key::Character(s) if ctrl_alt && (s == "a" || s == "A") => {
-                            editor.select_all();
+                            element.editor.select_all();
                             ctx.request_frame();
                         }
                         _ => {
@@ -271,7 +344,7 @@ impl View<String> for InputText {
                                 if !text.is_empty() && !ctrl_alt {
                                     // NOTE: we avoid inserting control chars
                                     if text.chars().all(|c| !c.is_control()) {
-                                        editor.insert(text.as_str());
+                                        element.editor.insert(text.as_str());
                                         text_changed = true;
                                     }
                                 }
@@ -280,29 +353,29 @@ impl View<String> for InputText {
                     }
 
                     if text_changed {
-                        emitted_msg = Some(editor.display_text().to_string());
+                        emitted_msg = Some(element.editor.display_text().to_string());
                         ctx.request_frame();
                     }
                 }
             }
             Event::Ime(ime) => {
-                if ctx.focused_node() == Some(node.clone()) {
+                if ctx.focused_node() == Some(element.node.clone()) {
                     use winit::event::Ime;
                     match ime {
                         Ime::Enabled => {}
                         Ime::Preedit(text, cursor_pos) => {
-                            editor.set_ime_preedit(text, cursor_pos);
+                            element.editor.set_ime_preedit(text, cursor_pos);
                             ctx.request_frame();
                             handled = EventResult::Handled;
                         }
                         Ime::Commit(text) => {
-                            editor.commit_ime(&text);
-                            emitted_msg = Some(editor.display_text().to_string());
+                            element.editor.commit_ime(&text);
+                            emitted_msg = Some(element.editor.display_text().to_string());
                             ctx.request_frame();
                             handled = EventResult::Handled;
                         }
                         Ime::Disabled => {
-                            editor.set_ime_preedit(String::new(), None);
+                            element.editor.set_ime_preedit(String::new(), None);
                             ctx.request_frame();
                         }
                     }
@@ -312,31 +385,37 @@ impl View<String> for InputText {
         }
 
         let mut text_style = TextStyle::default();
-        if let Some(info) = node.get_text_userdata::<TextRenderInfo>(ctx) {
+        if let Some(info) = element.node.get_text_userdata::<TextRenderInfo>(ctx) {
             text_style = info.style.clone();
-        } else if let Some(style) = node.get_text_userdata::<TextStyle>(ctx) {
+        } else if let Some(style) = element.node.get_text_userdata::<TextStyle>(ctx) {
             text_style = style.clone();
         }
 
-        let is_focused = Some(node.clone()) == ctx.focused_node();
+        let is_focused = Some(element.node.clone()) == ctx.focused_node();
 
         let render_info = TextRenderInfo {
             style: text_style,
             cursor: if is_focused {
-                Some(editor.display_cursor())
+                Some(element.editor.display_cursor())
             } else {
                 None
             },
-            selection: if is_focused { editor.selection() } else { None },
-            preedit_range: editor.preedit_range(),
+            selection: if is_focused {
+                element.editor.selection()
+            } else {
+                None
+            },
+            preedit_range: element.editor.preedit_range(),
         };
-        node.set_text_with_userdata(ctx, &editor.display_text(), render_info);
+        element
+            .node
+            .set_text_with_userdata(ctx, &element.editor.display_text(), render_info);
 
-        let cursor_after = editor.cursor();
+        let cursor_after = element.editor.cursor();
         if cursor_before != cursor_after || emitted_msg.is_some() {
-            if let Some(computed) = node.get_computed(ctx) {
+            if let Some(computed) = element.node.get_computed(ctx) {
                 if computed.w > 0.0 {
-                    let constraints = node.get_constraints(ctx).unwrap_or_default();
+                    let constraints = element.node.get_constraints(ctx).unwrap_or_default();
                     let inner_w =
                         (computed.w - constraints.padding.left - constraints.padding.right)
                             .max(0.0);
@@ -346,14 +425,14 @@ impl View<String> for InputText {
 
                     // We need to fetch text_style again since it was moved above.
                     let mut text_style_for_scroll = TextStyle::default();
-                    if let Some(info) = node.get_text_userdata::<TextRenderInfo>(ctx) {
+                    if let Some(info) = element.node.get_text_userdata::<TextRenderInfo>(ctx) {
                         text_style_for_scroll = info.style.clone();
-                    } else if let Some(style) = node.get_text_userdata::<TextStyle>(ctx) {
+                    } else if let Some(style) = element.node.get_text_userdata::<TextStyle>(ctx) {
                         text_style_for_scroll = style.clone();
                     }
 
                     let (cx, cy, ch) = crate::text::get_cursor_geometry(
-                        &editor.display_text(),
+                        &element.editor.display_text(),
                         &text_style_for_scroll,
                         inner_w,
                         cursor_after,
@@ -361,7 +440,7 @@ impl View<String> for InputText {
                     );
 
                     let measured = crate::text::measure_text(
-                        &editor.display_text(),
+                        &element.editor.display_text(),
                         &text_style_for_scroll,
                         inner_w,
                         inner_h,
@@ -393,7 +472,7 @@ impl View<String> for InputText {
                     scroll_y = scroll_y.clamp(0.0, max_scroll_y);
 
                     if scroll_x != constraints.scroll.x || scroll_y != constraints.scroll.y {
-                        node.update_constraints(ctx, |c| {
+                        element.node.update_constraints(ctx, |c| {
                             c.scroll.x = scroll_x;
                             c.scroll.y = scroll_y;
                         });
