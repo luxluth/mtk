@@ -24,7 +24,15 @@ impl InputText {
 }
 
 impl View<String> for InputText {
-    type Element = (Node, Editor, Node, bool, Option<std::time::Instant>, u8, usize); // Node, Editor, Caret, Hover, LastClick, ClickCount, LastCursor
+    type Element = (
+        Node,
+        Editor,
+        Node,
+        bool,
+        Option<std::time::Instant>,
+        u8,
+        usize,
+    ); // Node, Editor, Caret, Hover, LastClick, ClickCount, LastCursor
     type Message = String;
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
@@ -329,10 +337,14 @@ impl View<String> for InputText {
             if let Some(computed) = node.get_computed(ctx) {
                 if computed.w > 0.0 {
                     let constraints = node.get_constraints(ctx).unwrap_or_default();
-                    let inner_w = (computed.w - constraints.padding.left - constraints.padding.right).max(0.0);
-                    let inner_h = (computed.h - constraints.padding.top - constraints.padding.bottom).max(0.0);
+                    let inner_w =
+                        (computed.w - constraints.padding.left - constraints.padding.right)
+                            .max(0.0);
+                    let inner_h =
+                        (computed.h - constraints.padding.top - constraints.padding.bottom)
+                            .max(0.0);
 
-                    // We need to fetch text_style again since it was moved above. 
+                    // We need to fetch text_style again since it was moved above.
                     let mut text_style_for_scroll = TextStyle::default();
                     if let Some(info) = node.get_text_userdata::<TextRenderInfo>(ctx) {
                         text_style_for_scroll = info.style.clone();
@@ -358,7 +370,7 @@ impl View<String> for InputText {
 
                     let mut scroll_x = constraints.scroll.x;
                     let mut scroll_y = constraints.scroll.y;
-                    
+
                     let cursor_w = 1.0;
 
                     if cx < scroll_x {
