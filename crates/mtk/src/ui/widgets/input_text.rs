@@ -24,7 +24,7 @@ impl InputText {
 }
 
 impl View<String> for InputText {
-    type Element = (Node, Editor, Node, bool, Option<std::time::Instant>, u8); // Node, Editor, Caret, Hover, LastClick, ClickCount
+    type Element = (Node, Editor, Node, bool, Option<std::time::Instant>, u8, usize); // Node, Editor, Caret, Hover, LastClick, ClickCount, LastCursor
     type Message = String;
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
@@ -36,11 +36,14 @@ impl View<String> for InputText {
 
         let caret = ctx.create_node();
         node.append(ctx, caret.clone());
-        (node, editor, caret, false, None, 0)
+        node.update_constraints(ctx, |c| {
+            c.overflow = crate::style::Overflow::Hidden;
+        });
+        (node, editor, caret, false, None, 0, 0)
     }
 
     fn rebuild(&self, _prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
-        let (node, editor, _caret, _hover, _, _) = element;
+        let (node, editor, _caret, _hover, _, _, _) = element;
 
         // Preserve the user's TextStyle if they set one via StyleWrap
         let mut text_style = TextStyle::default();
@@ -66,7 +69,7 @@ impl View<String> for InputText {
     }
 
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
-        let (node, _, caret, _, _, _) = element;
+        let (node, _, caret, _, _, _, _) = element;
         ctx.unregister_focusable(*node);
         caret.remove(ctx);
         ctx.destroy_node(*caret);
@@ -85,7 +88,9 @@ impl View<String> for InputText {
         event: Event,
         ctx: &mut Context,
     ) -> (EventResult, Option<Self::Message>) {
-        let (node, editor, _caret, _, _, _) = element;
+        let (node, editor, _caret, _, _, _, _) = element;
+
+        let cursor_before = editor.cursor();
 
         let mut handled = EventResult::Ignored;
         let mut emitted_msg = None;
@@ -318,6 +323,73 @@ impl View<String> for InputText {
             preedit_range: editor.preedit_range(),
         };
         node.set_text_with_userdata(ctx, &editor.display_text(), render_info);
+
+        let cursor_after = editor.cursor();
+        if cursor_before != cursor_after || emitted_msg.is_some() {
+            if let Some(computed) = node.get_computed(ctx) {
+                if computed.w > 0.0 {
+                    let constraints = node.get_constraints(ctx).unwrap_or_default();
+                    let inner_w = (computed.w - constraints.padding.left - constraints.padding.right).max(0.0);
+                    let inner_h = (computed.h - constraints.padding.top - constraints.padding.bottom).max(0.0);
+
+                    // We need to fetch text_style again since it was moved above. 
+                    let mut text_style_for_scroll = TextStyle::default();
+                    if let Some(info) = node.get_text_userdata::<TextRenderInfo>(ctx) {
+                        text_style_for_scroll = info.style.clone();
+                    } else if let Some(style) = node.get_text_userdata::<TextStyle>(ctx) {
+                        text_style_for_scroll = style.clone();
+                    }
+
+                    let (cx, cy, ch) = crate::text::get_cursor_geometry(
+                        &editor.display_text(),
+                        &text_style_for_scroll,
+                        inner_w,
+                        cursor_after,
+                        &ctx.text_context,
+                    );
+
+                    let measured = crate::text::measure_text(
+                        &editor.display_text(),
+                        &text_style_for_scroll,
+                        inner_w,
+                        inner_h,
+                        &ctx.text_context,
+                    );
+
+                    let mut scroll_x = constraints.scroll.x;
+                    let mut scroll_y = constraints.scroll.y;
+                    
+                    let cursor_w = 1.0;
+
+                    if cx < scroll_x {
+                        scroll_x = cx;
+                    } else if cx + cursor_w > scroll_x + inner_w {
+                        scroll_x = cx + cursor_w - inner_w;
+                    }
+
+                    if cy < scroll_y {
+                        scroll_y = cy;
+                    } else if cy + ch > scroll_y + inner_h {
+                        scroll_y = cy + ch - inner_h;
+                    }
+
+                    // Clamp to max bounds to prevent empty space when deleting text
+                    let max_scroll_x = (measured.computed_width + cursor_w - inner_w).max(0.0);
+                    let max_scroll_y = (measured.computed_height - inner_h).max(0.0);
+
+                    scroll_x = scroll_x.clamp(0.0, max_scroll_x);
+                    scroll_y = scroll_y.clamp(0.0, max_scroll_y);
+
+                    if scroll_x != constraints.scroll.x || scroll_y != constraints.scroll.y {
+                        node.update_constraints(ctx, |c| {
+                            c.scroll.x = scroll_x;
+                            c.scroll.y = scroll_y;
+                        });
+                        ctx.request_frame();
+                    }
+                }
+            }
+        }
 
         (handled, emitted_msg)
     }

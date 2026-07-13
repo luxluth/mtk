@@ -179,7 +179,7 @@ pub(crate) fn get_cursor_geometry(
 
     let cursor_layout =
         Cursor::from_byte_index(&layout, cursor_index, parley::layout::Affinity::Downstream);
-    let geom = cursor_layout.geometry(&layout, 2.0);
+    let geom = cursor_layout.geometry(&layout, 1.0);
     let h = (geom.y1 - geom.y0) as f32;
     (geom.x0 as f32, geom.y0 as f32, h)
 }

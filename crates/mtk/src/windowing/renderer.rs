@@ -518,7 +518,7 @@ impl<'w> Renderer<'w> {
                         if let Some(c) = cursor {
                             let cursor_layout =
                                 Cursor::from_byte_index(&layout, c, Affinity::Downstream);
-                            let geom = cursor_layout.geometry(&layout, 2.0); // 2.0 width caret
+                            let geom = cursor_layout.geometry(&layout, 1.0); // 1.0 width caret
                             let mut ch = (geom.y1 - geom.y0) as f32;
                             if ch <= 0.0 {
                                 ch = layout.height(); // Fallback to line height
