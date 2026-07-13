@@ -8,7 +8,7 @@ pub struct Editor {
     text: String,
     /// The current byte-index of the cursor within the text buffer.
     cursor: usize,
-    /// The byte-index where a text selection began. If `None`, no text is currently selected.
+    /// The byte-index where a text selection began. If [None], no text is currently selected.
     /// When selecting text (e.g. holding Shift), this remains fixed while the `cursor` moves.
     selection_anchor: Option<usize>,
     /// Temporary text being composed by the OS Input Method Editor (IME).

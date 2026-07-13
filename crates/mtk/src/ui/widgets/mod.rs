@@ -5,12 +5,14 @@ use crate::{
     ui::{Event, View, ViewSequence, event::EventResult},
 };
 
+pub use input_text::*;
 pub use scroll_view::*;
-pub use text_input::*;
+pub use textarea::*;
 
 mod editor;
+mod input_text;
 mod scroll_view;
-mod text_input;
+mod textarea;
 
 pub struct Text<Msg> {
     pub(crate) label: String,

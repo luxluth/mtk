@@ -1,12 +1,12 @@
 use crate::{
+    Context, Node, PositionStrategy, Size,
     colors::Color,
     effects::Radius,
     style::{Overflow, Vector2},
-    ui::{event::EventResult, Event, View},
-    Context, Node, PositionStrategy, Size,
+    ui::{Event, View, event::EventResult},
 };
 
-/// Defines which axes a `ScrollView` is allowed to scroll on.
+/// Defines which axes a [ScrollView] is allowed to scroll on.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ScrollAxis {
     /// Only allow horizontal scrolling.
@@ -50,26 +50,26 @@ pub struct ScrollMetrics {
     pub content_w: f32,
 }
 
-/// Messages emitted by a `ScrollBar` to instruct the parent `ScrollView` to change its scroll position.
-/// For example, when a user clicks and drags the scrollbar thumb, the scrollbar emits `SetY`
-/// to immediately sync the `ScrollView` to the new calculated offset.
+/// Messages emitted by a [ScrollBar] to instruct the parent [ScrollView] to change its scroll position.
+/// For example, when a user clicks and drags the scrollbar thumb, the scrollbar emits [ScrollBarMessage::SetY]
+/// to immediately sync the [ScrollView] to the new calculated offset.
 pub enum ScrollBarMessage {
-    /// Request the `ScrollView` to instantly snap to this absolute vertical pixel offset.
+    /// Request the [ScrollView] to instantly snap to this absolute vertical pixel offset.
     SetY(f32),
-    /// Request the `ScrollView` to instantly snap to this absolute horizontal pixel offset.
+    /// Request the [ScrollView] to instantly snap to this absolute horizontal pixel offset.
     SetX(f32),
 }
 
-/// A specialized `View` trait for implementing custom scrollbars.
+/// A specialized [View] trait for implementing custom scrollbars.
 ///
 /// Custom scrollbars must implement this trait in addition to the standard `View` trait.
-/// The `View` implementation should emit `ScrollBarMessage` when the user interacts
-/// with the scrollbar (e.g. dragging the thumb), which the parent `ScrollView` will intercept.
+/// The [View] implementation should emit [ScrollBarMessage] when the user interacts
+/// with the scrollbar (e.g. dragging the thumb), which the parent [ScrollView] will intercept.
 pub trait ScrollBar<State>: View<State, Message = ScrollBarMessage> {
-    /// Called by the parent `ScrollView` whenever the layout changes, the user scrolls,
+    /// Called by the parent [ScrollView] whenever the layout changes, the user scrolls,
     /// or an overscroll physics animation occurs.
     ///
-    /// Use this method to update the size, position, and constraints of your scrollbar's `Node`
+    /// Use this method to update the size, position, and constraints of your scrollbar's [Node]
     /// based on the provided `metrics`.
     fn update_metrics(
         &self,
@@ -78,11 +78,11 @@ pub trait ScrollBar<State>: View<State, Message = ScrollBarMessage> {
         metrics: ScrollMetrics,
     );
 
-    /// Called by the parent `ScrollView` when user activity is detected nearby
-    /// (e.g. when the user's cursor moves inside the `ScrollView`).
+    /// Called by the parent [ScrollView] when user activity is detected nearby
+    /// (e.g. when the user's cursor moves inside the [ScrollView]).
     ///
     /// This is typically used to wake up the scrollbar from an idle state and trigger
-    /// fade-in animations or reset inactivity timers. Be sure to call `ctx.request_frame()`
+    /// fade-in animations or reset inactivity timers. Be sure to call [Context::request_frame]
     /// if you need to start an animation.
     fn wake_up(&self, element: &mut Self::Element, ctx: &mut Context);
 }

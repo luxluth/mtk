@@ -3,7 +3,7 @@ use mtk::{
     ui::{
         View, ViewStyleExt,
         adapter::adapt,
-        widgets::{column, text, text_input},
+        widgets::{column, input_text, text},
     },
     windowing::{Window, WindowAttributes},
 };
@@ -34,7 +34,7 @@ fn app(state: &AppState) -> impl View<AppState, Message = AppMsg> + use<> {
             },
         )),
         adapt(
-            text_input().style(
+            input_text().style(
                 Style::new()
                     .width(Size::Fixed(300))
                     .height(Size::Fixed(40))
@@ -47,7 +47,7 @@ fn app(state: &AppState) -> impl View<AppState, Message = AppMsg> + use<> {
             AppMsg::UpdateUsername,
         ),
         adapt(
-            text_input().style(
+            input_text().style(
                 Style::new()
                     .width(Size::Fixed(300))
                     .height(Size::Fixed(40))

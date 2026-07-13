@@ -69,13 +69,13 @@ where
         event: Event,
         ctx: &mut Context,
     ) -> (EventResult, Option<Self::Message>) {
-        // 1. Map the state DOWN using the Lens
+        // 1 - Map the state down using the Lens
         let inner_state = self.lens.get(state);
 
-        // 2. Pass the event to the child view
+        // 2 - Pass the event to the child view
         let (result, inner_msg) = self.view.handle_event(element, inner_state, event, ctx);
 
-        // 3. Map the message UP using the closure (if the child emitted one)
+        // 3 - Map the message up using the closure (if the child emitted one)
         let outer_msg = inner_msg.map(&self.mapper);
 
         (result, outer_msg)

@@ -6,24 +6,24 @@ use crate::ui::{Event, View};
 use crate::{Context, Node, TextRenderInfo, TextStyle};
 use winit::keyboard::{Key, NamedKey};
 
-pub struct TextInput {
+pub struct InputText {
     pub(crate) captures_tab: bool,
 }
 
-pub fn text_input() -> TextInput {
-    TextInput {
+pub fn input_text() -> InputText {
+    InputText {
         captures_tab: false,
     }
 }
 
-impl TextInput {
+impl InputText {
     pub fn captures_tab(mut self, captures: bool) -> Self {
         self.captures_tab = captures;
         self
     }
 }
 
-impl View<String> for TextInput {
+impl View<String> for InputText {
     type Element = (Node, Editor, Node, bool, Option<std::time::Instant>, u8); // Node, Editor, Caret, Hover, LastClick, ClickCount
     type Message = String;
 

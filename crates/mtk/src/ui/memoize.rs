@@ -9,7 +9,7 @@ pub struct Memoize<T, F> {
 }
 
 /// Memoizes a view. The view will only be rebuilt if `data` changes.
-/// `T` must implement `PartialEq` and `Clone`.
+/// `T` must implement [PartialEq] and [Clone].
 pub fn memoize<T, V, F>(data: T, builder: F) -> Memoize<T, F>
 where
     T: PartialEq + Clone,
