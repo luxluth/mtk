@@ -90,6 +90,7 @@ fn main() {
 
     window.present_with(
         WindowAttributes::default()
+            .with_decorations(true)
             .with_title("MTK Text Input Demo")
             .with_size((800, 600).into()),
     );

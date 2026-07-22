@@ -6,10 +6,29 @@ use crate::ui::{Event, View};
 use crate::{Context, Node, TextRenderInfo, TextStyle};
 use winit::keyboard::{Key, NamedKey};
 
+/// A single-line text input widget with built-in cursor, selection, and auto-scroll support.
+///
+/// [InputText] maps to a [String] state and emits [String] messages whenever the user types
+/// or modifies the text. It should typically be wrapped in an `adapt` call to map its local
+/// string state to your global application state.
 pub struct InputText {
     pub(crate) captures_tab: bool,
 }
 
+// NOTE: Under the hood, this widget utilizes the `Editor` struct to manage text buffers, unicode
+// boundaries, and cursor movements. The view's bounds use `Overflow::Hidden` and it calculates
+// cursor layout geometry to smoothly clamp scroll constraints and keep the cursor in view when typing.
+
+/// Creates a new `InputText` widget.
+///
+/// # Examples
+/// ```rust,ignore
+/// adapt(
+///     input_text().style(Style::new().width(Size::Fixed(300))),
+///     AppState::username,
+///     AppMsg::UpdateUsername,
+/// )
+/// ```
 pub fn input_text() -> InputText {
     InputText {
         captures_tab: false,
@@ -17,6 +36,10 @@ pub fn input_text() -> InputText {
 }
 
 impl InputText {
+    /// Configures whether this input captures the `Tab` key to insert a tab character (4 spaces).
+    ///
+    /// If `false` (default), pressing `Tab` will bubble up and typically move focus to the
+    /// next focusable widget. If `true`, pressing `Tab` inserts a tab character into the text.
     pub fn captures_tab(mut self, captures: bool) -> Self {
         self.captures_tab = captures;
         self
@@ -325,7 +348,7 @@ impl View<String> for InputText {
                                 // Ignore Ctrl+Tab so it bubbles (or just do nothing here)
                                 handled = EventResult::Ignored;
                             } else if self.captures_tab {
-                                element.editor.insert("\t");
+                                element.editor.insert("    ");
                                 text_changed = true;
                             } else {
                                 if shift {

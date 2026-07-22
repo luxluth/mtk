@@ -77,7 +77,7 @@ impl Color {
         a: 0,
     };
 
-    /// DodgerBlue - a nice color
+    /// Dodger Blue - a nice color
     pub const dodger_blue: Color = Color {
         r: 30,
         g: 144,
@@ -85,8 +85,11 @@ impl Color {
         a: 255,
     };
 
-    /// LLBlue - I like this one a lot
+    /// LL Blue - I like this one a lot
     pub const ll_blue: Color = Color::Hex(0x4455eeff);
+
+    /// Firefox Blue - Firefox selection blue color
+    pub const firefox_blue: Color = Color::Hex(0x3584e4ff);
 
     /// Transform raw hex into RGBA componnent
     /// **FORMAT: RRGGBBAA**

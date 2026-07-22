@@ -407,6 +407,23 @@ pub struct ScrollView<V, S> {
     pub(crate) scrollbar: S,
 }
 
+/// Creates a new `ScrollView` widget wrapping the provided inner content.
+///
+/// A `ScrollView` automatically handles mouse wheel scrolling, touch dragging, and keyboard navigation
+/// (Page Up/Down, Home/End, Arrows) to pan around overflowing content. It also renders an overlay
+/// scrollbar by default (using `DefaultScrollBar`).
+///
+/// # Examples
+/// ```rust,ignore
+/// scroll_view(
+///     column((
+///         text("Item 1"),
+///         text("Item 2"),
+///         // ... many items
+///     ))
+/// )
+/// .axis(ScrollAxis::Vertical)
+/// ```
 pub fn scroll_view<V>(inner: V) -> ScrollView<V, DefaultScrollBar> {
     ScrollView {
         inner,
@@ -418,16 +435,20 @@ pub fn scroll_view<V>(inner: V) -> ScrollView<V, DefaultScrollBar> {
 }
 
 impl<V, S> ScrollView<V, S> {
+    /// Configures which axes the `ScrollView` is permitted to scroll on.
+    /// Default is `ScrollAxis::Both`.
     pub fn axis(mut self, axis: ScrollAxis) -> Self {
         self.axis = axis;
         self
     }
 
+    /// Sets the initial horizontal scroll offset when the view is first built.
     pub fn start_offset_x(mut self, offset: ScrollOffset) -> Self {
         self.initial_x = Some(offset);
         self
     }
 
+    /// Sets the initial vertical scroll offset when the view is first built.
     pub fn start_offset_y(mut self, offset: ScrollOffset) -> Self {
         self.initial_y = Some(offset);
         self

@@ -1,3 +1,31 @@
+//! Built-in UI Widgets in MTK.
+//!
+//! This module provides a set of reusable UI components (widgets) that can be combined
+//! to build complex user interfaces. Each widget implements the [View] trait, meaning
+//! it can be built into a renderable node, react to state changes, and handle user events.
+//!
+//! # Available Widgets
+//! - **Layouts**: [container], [column()], [row()] - Basic building blocks for structuring your UI.
+//! - **Display**: [text()] - Renders static text strings.
+//! - **Input**: [input_text()] - A single-line text input field with full cursor and selection support.
+//! - **Containers**: [scroll_view()] - A scrollable container for displaying overflowing content.
+//!
+//! # Usage
+//! Widgets are typically constructed in your application's `app` function and often wrapped
+//! in `adapt` if they need to map local widget states to global application states.
+//!
+//! ```rust,ignore
+//! fn app(state: &AppState) -> impl View<AppState, Message = AppMsg> + use<> {
+//!     column((
+//!         text("Welcome to MTK!"),
+//!         row((
+//!             text("Username:"),
+//!             adapt(input_text(), AppState::username, AppMsg::UpdateUsername)
+//!         ))
+//!     ))
+//! }
+//! ```
+
 use std::marker::PhantomData;
 
 use crate::{
@@ -14,11 +42,22 @@ mod input_text;
 mod scroll_view;
 mod textarea;
 
+/// A simple widget that displays a string of text.
+///
+/// The `Text` widget takes a string-like value and creates a node with that text.
+/// If the text changes during a rebuild, the underlying node's text is automatically updated.
 pub struct Text<Msg> {
     pub(crate) label: String,
     _marker: PhantomData<Msg>,
 }
 
+/// Creates a new `Text` widget displaying the provided label.
+///
+/// # Examples
+/// ```rust,ignore
+/// text("Hello, World!")
+/// text(format!("Counter: {}", state.count))
+/// ```
 pub fn text<S: ToString, Msg>(label: S) -> Text<Msg> {
     Text {
         label: label.to_string(),
@@ -38,6 +77,9 @@ impl<State, Msg> View<State> for Text<Msg> {
     }
 
     fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
+        // Obscure code note: We only update the text if the label actually changed
+        // between the previous render tree and the new one. This prevents unnecessary
+        // dirtying of the layout and rendering pipeline.
         if self.label != prev.label {
             element.set_text(ctx, &self.label);
         }
@@ -63,11 +105,17 @@ impl<State, Msg> View<State> for Text<Msg> {
     }
 }
 
+/// A generic layout container that groups a sequence of children widgets.
+///
+/// `Container` is the base widget for creating structured layouts. By default, it has no
+/// flex direction (stacking or absolute layout depending on style), but can be configured
+/// to behave as a `column` or `row`.
 pub struct Container<Children> {
     pub(crate) children: Children,
     pub(crate) direction: Option<FlexDirection>,
 }
 
+/// Creates a new `Container` widget with the given children and no default flex direction.
 pub fn container<Children>(children: Children) -> Container<Children> {
     Container {
         children,
@@ -75,6 +123,17 @@ pub fn container<Children>(children: Children) -> Container<Children> {
     }
 }
 
+/// Creates a vertical layout container (`FlexDirection::Column`).
+///
+/// Children provided to `column` will be stacked vertically from top to bottom.
+///
+/// # Examples
+/// ```rust,ignore
+/// column((
+///     text("Top"),
+///     text("Bottom"),
+/// ))
+/// ```
 pub fn column<Children>(children: Children) -> Container<Children> {
     Container {
         children,
@@ -82,6 +141,17 @@ pub fn column<Children>(children: Children) -> Container<Children> {
     }
 }
 
+/// Creates a horizontal layout container (`FlexDirection::Row`).
+///
+/// Children provided to `row` will be stacked horizontally from left to right.
+///
+/// # Examples
+/// ```rust,ignore
+/// row((
+///     text("Left"),
+///     text("Right"),
+/// ))
+/// ```
 pub fn row<Children>(children: Children) -> Container<Children> {
     Container {
         children,
