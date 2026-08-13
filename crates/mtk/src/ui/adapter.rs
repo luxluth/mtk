@@ -5,8 +5,9 @@ use crate::{
     ui::{Event, Lens, View, event::EventResult},
 };
 
-/// Adapt maps a parent state `Outer` down to a child's state `Inner`,
-/// and maps a child's message `V::Message` up to a parent's message `OuterMsg`.
+/// Wraps a child view operating on an `Inner` state and adapts it to operate on an `Outer` state using a [`Lens`].
+///
+/// Also converts child messages (`V::Message`) into parent messages (`OuterMsg`) via a mapper closure.
 pub struct Adapt<Outer, Inner, OuterMsg, L, M, V>
 where
     L: Lens<Outer, Inner>,
@@ -19,6 +20,8 @@ where
     _marker: PhantomData<(Outer, Inner, OuterMsg)>,
 }
 
+/// Creates an [`Adapt`] wrapper that maps a parent state `Outer` down to a child's state `Inner`
+/// using a [`Lens`], and maps child messages up to parent messages.
 pub fn adapt<Outer, Inner, OuterMsg, L, M, V>(
     view: V,
     lens: L,
@@ -81,3 +84,25 @@ where
         (result, outer_msg)
     }
 }
+
+/// Extension trait for [`View`] that enables fluid `.adapt(...)` method chaining.
+pub trait ViewAdaptExt<Inner>: View<Inner> + Sized {
+    /// Adapts a child view from its focused `Inner` state context to a parent `Outer` state context.
+    ///
+    /// # Parameters
+    /// - `lens`: A accessor implementing [`Lens<Outer, Inner>`] (such as an auto-derived field accessor `AppState::field`).
+    /// - `mapper`: A closure mapping child messages (`Self::Message`) to parent messages (`OuterMsg`).
+    fn adapt<Outer, OuterMsg, L, M>(
+        self,
+        lens: L,
+        mapper: M,
+    ) -> Adapt<Outer, Inner, OuterMsg, L, M, Self>
+    where
+        L: Lens<Outer, Inner>,
+        M: Fn(Self::Message) -> OuterMsg,
+    {
+        adapt(self, lens, mapper)
+    }
+}
+
+impl<Inner, V: View<Inner>> ViewAdaptExt<Inner> for V {}

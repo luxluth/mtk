@@ -1,8 +1,7 @@
 use mtk::{
     AlignItems, JustifyContent, Lens, Size, Style, TextStyle, clr, rgb, text_property,
     ui::{
-        EventKind, View, ViewEventExt, ViewStyleExt,
-        adapter::adapt,
+        EventKind, View, ViewAdaptExt, ViewEventExt, ViewStyleExt,
         widgets::{column, text},
     },
     windowing::{Window, WindowAttributes},
@@ -25,7 +24,7 @@ fn counter(count: i32) -> impl View<i32, Message = CounterMsg> {
                     font_size: 48.0,
                     alignment: text_property::Alignment::Center,
                     color: clr!(ll_blue),
-                    font_family: "IosevkaTerm NF".into(),
+                    font_family: "Maple Mono NF".into(),
                     ..Default::default()
                 }),
         )
@@ -63,7 +62,7 @@ fn toggle(is_on: bool) -> impl View<bool, Message = ToggleMsg> {
                     clr!(black).into()
                 },
                 font_weight: text_property::FontWeight::BOLD,
-                font_family: "IosevkaTerm NF".into(),
+                font_family: "Maple Mono NF".into(),
                 ..Default::default()
             }),
     )
@@ -109,16 +108,8 @@ fn main() {
         };
 
         column((
-            adapt(
-                counter(state.click_count),
-                AppState::click_count,
-                AppMsg::CounterEvent, // Maps CounterMsg -> AppMsg
-            ),
-            adapt(
-                toggle(state.dark_mode),
-                AppState::dark_mode,
-                AppMsg::ToggleEvent, // Maps ToggleMsg -> AppMsg
-            ),
+            counter(state.click_count).adapt(AppState::click_count, AppMsg::CounterEvent),
+            toggle(state.dark_mode).adapt(AppState::dark_mode, AppMsg::ToggleEvent),
         ))
         .style(
             Style::new()

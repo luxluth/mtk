@@ -7,6 +7,7 @@ pub mod memoize;
 pub mod style;
 pub mod widgets;
 
+pub use adapter::{ViewAdaptExt, adapt};
 pub use event::{EventKind, ViewEventExt};
 pub use lens::Lens;
 pub use style::ViewStyleExt;
