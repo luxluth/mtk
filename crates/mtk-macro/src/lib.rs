@@ -2,6 +2,26 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, Fields, parse_macro_input};
 
+/// Derives field lenses for a struct.
+///
+/// For each named field in the struct, this derive macro generates:
+/// A. A zero-sized lens struct implementing [`Lens<StructName, FieldType>`](::mtk::ui::Lens).
+/// B. An associated constant on the struct matching the field's name (e.g. `AppState::my_field`)
+///    that provides a static reference to the lens.
+///
+/// # Example
+/// ```ignore
+/// use mtk::Lens;
+///
+/// #[derive(Lens)]
+/// struct AppState {
+///     pub click_count: i32,
+///     pub dark_mode: bool,
+/// }
+///
+/// // Enables passing field lenses directly into views:
+/// // my_view.adapt(AppState::click_count, AppMsg::CounterEvent)
+/// ```
 #[proc_macro_derive(Lens)]
 pub fn derive_lens(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

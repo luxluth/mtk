@@ -640,6 +640,8 @@ impl<'w> Renderer<'w> {
                 multiview_mask: None,
             });
 
+            /// Computes an axis-aligned integer scissor rectangle for GPU rendering from logical clip bounds,
+            /// clamping bounds to the window dimensions and using sub-pixel floor/ceil boundaries.
             fn compute_scissor_rect(
                 clip: crate::style::Rect,
                 screen_width: u32,
