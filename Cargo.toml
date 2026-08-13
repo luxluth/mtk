@@ -9,16 +9,16 @@ authors = ["luxluth <delphin.blehoussi93@gmail.com>"]
 description = "Muse GUI Toolkit"
 
 [workspace.dependencies]
-bytemuck = "1.25.0"
+bytemuck = "1.25"
 cpal = "0.18"
-env_logger = "0.11.11"
+env_logger = "0.11"
 log = "0.4.33"
 parley = "0.11.0"
 pollster = "1"
-resvg = "0.47.0"
-swash = "0.2.9"
-symphonia = { version = "0.6.0", features = ["mp3"] }
-symphonia-bundle-mp3 = "0.6.0"
+resvg = "0.48.1"
+swash = "0.2.10"
+symphonia = { version = "0.6.1", features = ["mp3"] }
+symphonia-bundle-mp3 = "0.6.1"
 tiny-skia = "0.12.0"
 wgpu = "30.0"
 winit = "0.30.13"

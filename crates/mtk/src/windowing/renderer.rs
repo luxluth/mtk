@@ -640,37 +640,51 @@ impl<'w> Renderer<'w> {
                 multiview_mask: None,
             });
 
+            fn compute_scissor_rect(
+                clip: crate::style::Rect,
+                screen_width: u32,
+                screen_height: u32,
+            ) -> Option<(u32, u32, u32, u32)> {
+                let max_w = screen_width as f32;
+                let max_h = screen_height as f32;
+
+                let x0 = clip.x.clamp(0.0, max_w).floor() as u32;
+                let y0 = clip.y.clamp(0.0, max_h).floor() as u32;
+                let x1 = (clip.x + clip.w).clamp(0.0, max_w).ceil() as u32;
+                let y1 = (clip.y + clip.h).clamp(0.0, max_h).ceil() as u32;
+
+                let cw = x1.saturating_sub(x0);
+                let ch = y1.saturating_sub(y0);
+
+                if cw > 0 && ch > 0 {
+                    Some((x0, y0, cw, ch))
+                } else {
+                    None
+                }
+            }
+
             let mut cmd_index = 0;
             for cmd in context.render_list() {
-                if cmd.has_clip() {
-                    let clip = cmd.clip();
-                    let x = clip.x.max(0.0) as u32;
-                    let y = clip.y.max(0.0) as u32;
-                    let w = clip.w.max(0.0) as u32;
-                    let h = clip.h.max(0.0) as u32;
-
-                    let max_w = self.size.width.max(1);
-                    let max_h = self.size.height.max(1);
-
-                    let cx = x.min(max_w);
-                    let cy = y.min(max_h);
-                    let cw = w.min(max_w.saturating_sub(cx));
-                    let ch = h.min(max_h.saturating_sub(cy));
-
-                    if cw == 0 || ch == 0 {
+                let active_scissor = if cmd.has_clip() {
+                    if let Some(rect) =
+                        compute_scissor_rect(cmd.clip(), self.size.width, self.size.height)
+                    {
+                        render_pass.set_scissor_rect(rect.0, rect.1, rect.2, rect.3);
+                        Some(rect)
+                    } else {
                         cmd_index += 1;
                         continue;
                     }
-
-                    render_pass.set_scissor_rect(cx, cy, cw, ch);
                 } else {
+                    let default_rect = (0, 0, self.size.width.max(1), self.size.height.max(1));
                     render_pass.set_scissor_rect(
-                        0,
-                        0,
-                        self.size.width.max(1),
-                        self.size.height.max(1),
+                        default_rect.0,
+                        default_rect.1,
+                        default_rect.2,
+                        default_rect.3,
                     );
-                }
+                    Some(default_rect)
+                };
 
                 if cmd.kind() == RenderCommandKind::DrawQuad {
                     render_pass.set_pipeline(&self.pipelines.solid);
@@ -737,48 +751,43 @@ impl<'w> Renderer<'w> {
                     // Custom text clip for Overflow::Hidden
                     let node = cmd.node();
                     let constraints = node.get_constraints(context).unwrap_or_default();
+                    let mut overflow_clipped = false;
                     if constraints.overflow == crate::Overflow::Hidden {
                         let computed = cmd.computed();
-                        let cx = (computed.x + constraints.border.left).max(0.0) as u32;
-                        let cy = (computed.y + constraints.border.top).max(0.0) as u32;
-                        let cw = (computed.w - constraints.border.left - constraints.border.right)
-                            .max(0.0) as u32;
-                        let ch = (computed.h - constraints.border.top - constraints.border.bottom)
-                            .max(0.0) as u32;
+                        let text_clip = crate::style::Rect {
+                            x: computed.x + constraints.border.left,
+                            y: computed.y + constraints.border.top,
+                            w: (computed.w - constraints.border.left - constraints.border.right)
+                                .max(0.0),
+                            h: (computed.h - constraints.border.top - constraints.border.bottom)
+                                .max(0.0),
+                        };
 
-                        let mut nx = cx;
-                        let mut ny = cy;
-                        let mut nw = cw;
-                        let mut nh = ch;
+                        let effective_clip = if cmd.has_clip() {
+                            let parent_clip = cmd.clip();
+                            let x1 = text_clip.x.max(parent_clip.x);
+                            let y1 = text_clip.y.max(parent_clip.y);
+                            let x2 = (text_clip.x + text_clip.w).min(parent_clip.x + parent_clip.w);
+                            let y2 = (text_clip.y + text_clip.h).min(parent_clip.y + parent_clip.h);
+                            crate::style::Rect {
+                                x: x1,
+                                y: y1,
+                                w: (x2 - x1).max(0.0),
+                                h: (y2 - y1).max(0.0),
+                            }
+                        } else {
+                            text_clip
+                        };
 
-                        if cmd.has_clip() {
-                            let clip = cmd.clip();
-                            let ccx = clip.x.max(0.0) as u32;
-                            let ccy = clip.y.max(0.0) as u32;
-                            let ccw = clip.w.max(0.0) as u32;
-                            let cch = clip.h.max(0.0) as u32;
-
-                            let max_x = (nx + nw).min(ccx + ccw);
-                            let max_y = (ny + nh).min(ccy + cch);
-                            nx = nx.max(ccx);
-                            ny = ny.max(ccy);
-                            nw = max_x.saturating_sub(nx);
-                            nh = max_y.saturating_sub(ny);
-                        }
-
-                        let max_w = self.size.width.max(1);
-                        let max_h = self.size.height.max(1);
-                        nx = nx.min(max_w);
-                        ny = ny.min(max_h);
-                        nw = nw.min(max_w.saturating_sub(nx));
-                        nh = nh.min(max_h.saturating_sub(ny));
-
-                        if nw == 0 || nh == 0 {
+                        if let Some((nx, ny, nw, nh)) =
+                            compute_scissor_rect(effective_clip, self.size.width, self.size.height)
+                        {
+                            render_pass.set_scissor_rect(nx, ny, nw, nh);
+                            overflow_clipped = true;
+                        } else {
                             cmd_index += 1;
                             continue;
                         }
-
-                        render_pass.set_scissor_rect(nx, ny, nw, nh);
                     }
 
                     if let Some(range) = text_ranges.get(&cmd_index) {
@@ -850,6 +859,12 @@ impl<'w> Renderer<'w> {
                             render_pass.set_pipeline(&self.pipelines.solid);
                             render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
                             render_pass.draw(0..6, 0..1);
+                        }
+                    }
+
+                    if overflow_clipped {
+                        if let Some(rect) = active_scissor {
+                            render_pass.set_scissor_rect(rect.0, rect.1, rect.2, rect.3);
                         }
                     }
                 }
