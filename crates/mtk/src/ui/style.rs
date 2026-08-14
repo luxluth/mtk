@@ -147,6 +147,23 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
         }
     }
 
+    fn rebuild_with_parent(
+        &self,
+        prev: &Self,
+        ctx: &mut Context,
+        element: &mut Self::Element,
+        parent: Node,
+    ) {
+        self.inner
+            .rebuild_with_parent(&prev.inner, ctx, &mut element.0, parent);
+        let node = self.inner.get_node(&element.0);
+        element.1.is_animating = self.apply_style(ctx, &mut element.1, node);
+
+        if element.1.is_animating {
+            ctx.request_frame();
+        }
+    }
+
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
         self.inner.teardown(ctx, &mut element.0);
     }

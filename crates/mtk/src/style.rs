@@ -235,6 +235,8 @@ impl MulAssign<f32> for Vector2 {
 pub enum FlexDirection {
     Row,
     Column,
+    RowReverse,
+    ColumnReverse,
 }
 
 impl Into<sys::muFlexDirection> for FlexDirection {
@@ -242,6 +244,8 @@ impl Into<sys::muFlexDirection> for FlexDirection {
         match self {
             FlexDirection::Row => sys::muFlexDirection_MUSE_FLEX_ROW,
             FlexDirection::Column => sys::muFlexDirection_MUSE_FLEX_COLUMN,
+            FlexDirection::RowReverse => sys::muFlexDirection_MUSE_FLEX_ROW_REVERSE,
+            FlexDirection::ColumnReverse => sys::muFlexDirection_MUSE_FLEX_COLUMN_REVERSE,
         }
     }
 }
@@ -251,6 +255,8 @@ impl From<sys::muFlexDirection> for FlexDirection {
         match f {
             sys::muFlexDirection_MUSE_FLEX_ROW => FlexDirection::Row,
             sys::muFlexDirection_MUSE_FLEX_COLUMN => FlexDirection::Column,
+            sys::muFlexDirection_MUSE_FLEX_ROW_REVERSE => FlexDirection::RowReverse,
+            sys::muFlexDirection_MUSE_FLEX_COLUMN_REVERSE => FlexDirection::ColumnReverse,
             _ => FlexDirection::Column,
         }
     }
@@ -320,6 +326,40 @@ impl From<sys::muAlignItems> for AlignItems {
             sys::muAlignItems_MUSE_ALIGN_END => AlignItems::End,
             sys::muAlignItems_MUSE_ALIGN_STRETCH => AlignItems::Stretch,
             _ => AlignItems::Start,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AlignSelf {
+    Auto,
+    Start,
+    Center,
+    End,
+    Stretch,
+}
+
+impl Into<sys::muAlignSelf> for AlignSelf {
+    fn into(self) -> sys::muAlignSelf {
+        match self {
+            AlignSelf::Auto => sys::muAlignSelf_MUSE_ALIGN_SELF_AUTO,
+            AlignSelf::Start => sys::muAlignSelf_MUSE_ALIGN_SELF_START,
+            AlignSelf::Center => sys::muAlignSelf_MUSE_ALIGN_SELF_CENTER,
+            AlignSelf::End => sys::muAlignSelf_MUSE_ALIGN_SELF_END,
+            AlignSelf::Stretch => sys::muAlignSelf_MUSE_ALIGN_SELF_STRETCH,
+        }
+    }
+}
+
+impl From<sys::muAlignSelf> for AlignSelf {
+    fn from(a: sys::muAlignSelf) -> Self {
+        match a {
+            sys::muAlignSelf_MUSE_ALIGN_SELF_AUTO => AlignSelf::Auto,
+            sys::muAlignSelf_MUSE_ALIGN_SELF_START => AlignSelf::Start,
+            sys::muAlignSelf_MUSE_ALIGN_SELF_CENTER => AlignSelf::Center,
+            sys::muAlignSelf_MUSE_ALIGN_SELF_END => AlignSelf::End,
+            sys::muAlignSelf_MUSE_ALIGN_SELF_STRETCH => AlignSelf::Stretch,
+            _ => AlignSelf::Auto,
         }
     }
 }
@@ -430,7 +470,12 @@ pub struct Constraints {
     pub flex_direction: FlexDirection,
     pub justify_content: JustifyContent,
     pub align_items: AlignItems,
+    pub align_self: AlignSelf,
     pub gap: f32,
+
+    pub flex_grow: f32,
+    pub flex_shrink: f32,
+    pub flex_basis: Size,
 
     pub padding: Edges,
     pub border: Edges,
@@ -455,7 +500,12 @@ impl Default for Constraints {
             flex_direction: FlexDirection::Column,
             justify_content: JustifyContent::Start,
             align_items: AlignItems::Start,
+            align_self: AlignSelf::Auto,
             gap: 0.0,
+
+            flex_grow: 0.0,
+            flex_shrink: 1.0,
+            flex_basis: Size::Fit,
 
             padding: Edges::default(),
             border: Edges::default(),
@@ -483,7 +533,11 @@ impl Into<sys::muConstraints> for Constraints {
             flex_direction: self.flex_direction.into(),
             justify_content: self.justify_content.into(),
             align_items: self.align_items.into(),
+            align_self: self.align_self.into(),
             gap: self.gap,
+            flex_grow: self.flex_grow,
+            flex_shrink: self.flex_shrink,
+            flex_basis: self.flex_basis.into(),
             padding: self.padding.into(),
             border: self.border.into(),
             overflow: self.overflow.into(),
@@ -508,7 +562,11 @@ impl From<sys::muConstraints> for Constraints {
             flex_direction: c.flex_direction.into(),
             justify_content: c.justify_content.into(),
             align_items: c.align_items.into(),
+            align_self: c.align_self.into(),
             gap: c.gap,
+            flex_grow: c.flex_grow,
+            flex_shrink: c.flex_shrink,
+            flex_basis: c.flex_basis.into(),
 
             padding: c.padding.into(),
             border: c.border.into(),
@@ -771,6 +829,21 @@ impl Style {
         self
     }
 
+    pub fn align_self(mut self, a: AlignSelf) -> Self {
+        self.base_constraints.align_self = a;
+        self
+    }
+
+    pub fn flex_shrink(mut self, shrink: f32) -> Self {
+        self.base_constraints.flex_shrink = shrink;
+        self
+    }
+
+    pub fn flex_basis(mut self, basis: Size) -> Self {
+        self.base_constraints.flex_basis = basis;
+        self
+    }
+
     pub fn gap(mut self, val: f32) -> Self {
         self.base_constraints.gap = val;
         self
@@ -799,9 +872,7 @@ impl Style {
 
     /// Sets flex grow factor for layout flexing inside flex containers.
     pub fn flex_grow(mut self, val: f32) -> Self {
-        if val > 0.0 {
-            self.base_constraints.width = Size::Percent(val);
-        }
+        self.base_constraints.flex_grow = val;
         self
     }
 
@@ -846,5 +917,30 @@ impl Style {
     pub fn animate(mut self, target: AnimationTarget, duration_ms: f64, curve: Curve) -> Self {
         self.transitions.push((target, duration_ms, curve));
         self
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    #[test]
+    pub(crate) fn test_row_flex_direction_preserved_when_styled() {
+        let style = Style::new();
+        assert_eq!(style.base_constraints.flex_direction, FlexDirection::Column);
+    }
+
+    #[test]
+    fn test_flexbox_new_properties() {
+        let style = Style::new()
+            .align_self(AlignSelf::End)
+            .flex_grow(2.0)
+            .flex_shrink(0.5)
+            .flex_basis(Size::Fixed(100));
+
+        assert_eq!(style.base_constraints.align_self, AlignSelf::End);
+        assert_eq!(style.base_constraints.flex_grow, 2.0);
+        assert_eq!(style.base_constraints.flex_shrink, 0.5);
+        assert_eq!(style.base_constraints.flex_basis, Size::Fixed(100));
     }
 }

@@ -116,7 +116,13 @@ impl Color {
     /// * `h` - Hue in degrees (0.0 - 360.0)
     /// * `s` - Saturation (0.0 - 1.0)
     /// * `l` - Lightness (0.0 - 1.0)
-    pub const fn from_hsl(h: f32, s: f32, l: f32) -> Self {
+    pub const fn from_hsl(h: f32, mut s: f32, mut l: f32) -> Self {
+        if s > 1.0 {
+            s /= 100.0;
+        }
+        if l > 1.0 {
+            l /= 100.0;
+        }
         let r;
         let g;
         let b;

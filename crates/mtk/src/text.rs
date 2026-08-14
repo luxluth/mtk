@@ -64,6 +64,12 @@ impl TextContext {
             parley::style::FontStyle::Oblique(_) => 2,
         };
 
+        let inner_w_bits = if inner_w.is_finite() && inner_w > 0.0 {
+            (inner_w * 100.0) as u32
+        } else {
+            u32::MAX
+        };
+
         let key = TextLayoutCacheKey {
             text: text.to_string(),
             font_size_bits: text_style.font_size.to_bits(),
@@ -75,7 +81,7 @@ impl TextContext {
             strikethrough: text_style.strikethrough,
             selection,
             preedit_range,
-            inner_w_bits: (inner_w * 100.0) as u32,
+            inner_w_bits,
         };
 
         if let Some(entry) = self.layout_cache.get(&key) {
@@ -117,8 +123,8 @@ impl TextContext {
 
         let mut layout = builder.build(text);
 
-        let max_advance = if text_style.wrap && inner_w > 0.0 {
-            Some(inner_w)
+        let max_advance = if text_style.wrap && inner_w.is_finite() && inner_w > 0.0 {
+            Some(inner_w + 0.5)
         } else {
             None
         };

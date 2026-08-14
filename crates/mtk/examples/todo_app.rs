@@ -1,5 +1,5 @@
 use mtk::{
-    AlignItems, Lens, Size, Style, TextStyle, clr, hsl, text_property,
+    AlignItems, AlignSelf, Lens, Size, Style, TextStyle, clr, hsl, text_property,
     ui::{
         EventKind, View, ViewAdaptExt, ViewEventExt, ViewStyleExt,
         memoize::memoize,
@@ -155,7 +155,7 @@ fn todo_item_view(todo: &TodoItem) -> impl View<TodoState, Message = TodoMsg> + 
         // Todo Item Title
         text(todo.title.clone()).style(
             Style::new()
-                .width(Size::Percent(0.84))
+                .flex_grow(1.0)
                 .padding_xy(10.0, 4.0)
                 .set_text_style(TextStyle {
                     font_size: 14.0,
@@ -167,14 +167,19 @@ fn todo_item_view(todo: &TodoItem) -> impl View<TodoState, Message = TodoMsg> + 
         ),
         // Delete Action Button
         text("✕")
-            .style(Style::new().padding_xy(8.0, 4.0).set_text_style(TextStyle {
-                font_size: 13.0,
-                color: hsl!(215.4, 0.16, 0.50), // High contrast slate icon
-                font_weight: text_property::FontWeight::BOLD,
-                alignment: text_property::Alignment::Center,
-                vertical_alignment: mtk::style::VerticalAlignment::Center,
-                ..Default::default()
-            }))
+            .style(
+                Style::new()
+                    .align_self(AlignSelf::Center)
+                    .padding_xy(8.0, 4.0)
+                    .set_text_style(TextStyle {
+                        font_size: 13.0,
+                        color: hsl!(215.4, 0.16, 0.50), // High contrast slate icon
+                        font_weight: text_property::FontWeight::BOLD,
+                        alignment: text_property::Alignment::Center,
+                        vertical_alignment: mtk::style::VerticalAlignment::Center,
+                        ..Default::default()
+                    }),
+            )
             .on_event(EventKind::Click, move |_| Some(TodoMsg::DeleteTodo(id))),
     ))
     .style(
@@ -194,10 +199,9 @@ fn app(state: &TodoState) -> impl View<TodoState, Message = TodoMsg> + use<> {
     let count_str = format!(
         "{} item{} left",
         active_count,
-        if active_count == 1 { "" } else { "s" }
+        if active_count <= 1 { "" } else { "s" }
     );
 
-    // Memoized Todo Item List for 120Hz smooth performance with 1,000+ items
     let filtered_items: Vec<_> = state
         .todos
         .iter()
@@ -211,23 +215,26 @@ fn app(state: &TodoState) -> impl View<TodoState, Message = TodoMsg> + use<> {
 
     let has_completed = completed_count > 0;
 
-    // Centered Shadcn Card Container
     column((
-        // Header Row: App Title & Counter Badge
+        // Header Row: App Title + Counter Badge
         row((
-            text("Tasks").style(Style::new().set_text_style(TextStyle {
-                font_size: 26.0,
-                font_weight: text_property::FontWeight::BOLD,
-                color: hsl!(222.2, 0.84, 0.05), // Slate 950 High Contrast
-                vertical_alignment: mtk::style::VerticalAlignment::Center,
-                ..Default::default()
-            })),
-            text(count_str).style(Style::new().set_text_style(TextStyle {
-                font_size: 13.0,
-                color: hsl!(215.4, 0.16, 0.40), // Slate 600 Badge
-                vertical_alignment: mtk::style::VerticalAlignment::Center,
-                ..Default::default()
-            })),
+            text("Tasks").style(Style::new().align_self(AlignSelf::Center).set_text_style(
+                TextStyle {
+                    font_size: 26.0,
+                    font_weight: text_property::FontWeight::BOLD,
+                    color: hsl!(222.2, 0.84, 0.05), // Slate 950 High Contrast
+                    vertical_alignment: mtk::style::VerticalAlignment::Center,
+                    ..Default::default()
+                },
+            )),
+            text(count_str).style(Style::new().align_self(AlignSelf::Center).set_text_style(
+                TextStyle {
+                    font_size: 13.0,
+                    color: hsl!(215.4, 0.16, 0.40), // Slate 600 Badge
+                    vertical_alignment: mtk::style::VerticalAlignment::Center,
+                    ..Default::default()
+                },
+            )),
         ))
         .style(
             Style::new()
@@ -235,7 +242,7 @@ fn app(state: &TodoState) -> impl View<TodoState, Message = TodoMsg> + use<> {
                 .align_items(AlignItems::Center)
                 .gap(12.0),
         ),
-        // Input Control Bar: [Input Field] + [Primary Action Button]
+        // Input Control Bar: [Input Field (flex_grow: 1)] + [Primary Action Button]
         row((
             input_text()
                 .placeholder("Add a new task...")
@@ -246,7 +253,7 @@ fn app(state: &TodoState) -> impl View<TodoState, Message = TodoMsg> + use<> {
                 })
                 .style(
                     Style::new()
-                        .width(Size::Percent(0.75))
+                        .flex_grow(1.0)
                         .height(Size::Fixed(42))
                         .padding(12.0)
                         .bg_color(clr!(white))

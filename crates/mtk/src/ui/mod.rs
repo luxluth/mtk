@@ -87,6 +87,17 @@ pub trait View<State> {
     /// Diffs and updates persistent element nodes when application state or properties change.
     fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element);
 
+    /// Diffs and updates persistent element nodes, providing access to the parent container node for insertion.
+    fn rebuild_with_parent(
+        &self,
+        prev: &Self,
+        ctx: &mut Context,
+        element: &mut Self::Element,
+        _parent: Node,
+    ) {
+        self.rebuild(prev, ctx, element);
+    }
+
     /// Destroys persistent layout nodes and frees resources associated with `element`.
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element);
 
@@ -148,9 +159,9 @@ macro_rules! impl_view_tuple {
                 )
             }
 
-            fn rebuild(&self, prev: &Self, ctx: &mut Context, elements: &mut Self::Elements, _parent: Node) {
+            fn rebuild(&self, prev: &Self, ctx: &mut Context, elements: &mut Self::Elements, parent: Node) {
                 $(
-                    self.$idx.rebuild(&prev.$idx, ctx, &mut elements.$idx);
+                    self.$idx.rebuild_with_parent(&prev.$idx, ctx, &mut elements.$idx, parent);
                 )*
             }
 
@@ -283,6 +294,33 @@ where
         self.as_ref().map(|v| v.build(ctx))
     }
 
+    fn rebuild_with_parent(
+        &self,
+        prev: &Self,
+        ctx: &mut Context,
+        element: &mut Self::Element,
+        parent: Node,
+    ) {
+        match (self, prev, element) {
+            (Some(new_view), Some(old_view), Some(el)) => {
+                new_view.rebuild_with_parent(old_view, ctx, el, parent);
+            }
+            (Some(new_view), _, el_slot @ None) => {
+                let el = new_view.build(ctx);
+                parent.append(ctx, new_view.get_node(&el));
+                *el_slot = Some(el);
+            }
+            (None, Some(old_view), el_slot @ Some(_)) => {
+                if let Some(mut el) = el_slot.take() {
+                    let node = old_view.get_node(&el);
+                    node.remove(ctx);
+                    old_view.teardown(ctx, &mut el);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
         match (self, prev, element) {
             (Some(new_view), Some(old_view), Some(el)) => {
@@ -293,6 +331,8 @@ where
             }
             (None, Some(old_view), el_slot @ Some(_)) => {
                 if let Some(mut el) = el_slot.take() {
+                    let node = old_view.get_node(&el);
+                    node.remove(ctx);
                     old_view.teardown(ctx, &mut el);
                 }
             }
@@ -350,7 +390,7 @@ where
     fn rebuild(&self, prev: &Self, ctx: &mut Context, elements: &mut Self::Elements, parent: Node) {
         match (self, prev, elements) {
             (Some(new_view), Some(old_view), Some(el)) => {
-                new_view.rebuild(old_view, ctx, el);
+                new_view.rebuild_with_parent(old_view, ctx, el, parent);
             }
             (Some(new_view), _, el_slot @ None) => {
                 let el = new_view.build(ctx);

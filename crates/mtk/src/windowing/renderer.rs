@@ -346,9 +346,8 @@ impl<'w> Renderer<'w> {
 
         {
             let mut text_ctx = context.text_context.lock().unwrap();
-            let mut cmd_index = 0;
 
-            for cmd in context.render_list() {
+            for (cmd_index, cmd) in context.render_list().enumerate() {
                 if cmd.kind() == RenderCommandKind::Text {
                     let start = text_instances.len() as u32;
                     let node = cmd.node();
@@ -575,7 +574,6 @@ impl<'w> Renderer<'w> {
                         );
                     }
                 }
-                cmd_index += 1;
             }
         }
 
@@ -671,8 +669,7 @@ impl<'w> Renderer<'w> {
                 }
             }
 
-            let mut cmd_index = 0;
-            for cmd in context.render_list() {
+            for (cmd_index, cmd) in context.render_list().enumerate() {
                 let active_scissor = if cmd.has_clip() {
                     if let Some(rect) =
                         compute_scissor_rect(cmd.clip(), self.size.width, self.size.height)
@@ -680,7 +677,6 @@ impl<'w> Renderer<'w> {
                         render_pass.set_scissor_rect(rect.0, rect.1, rect.2, rect.3);
                         Some(rect)
                     } else {
-                        cmd_index += 1;
                         continue;
                     }
                 } else {
@@ -793,7 +789,6 @@ impl<'w> Renderer<'w> {
                             render_pass.set_scissor_rect(nx, ny, nw, nh);
                             overflow_clipped = true;
                         } else {
-                            cmd_index += 1;
                             continue;
                         }
                     }
@@ -985,7 +980,6 @@ impl<'w> Renderer<'w> {
                         render_pass.draw(0..6, 0..1);
                     }
                 }
-                cmd_index += 1;
             }
 
             // we draw global focus ring at Z-index Infinity
