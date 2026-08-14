@@ -1,3 +1,9 @@
+//! Declarative styling wrappers, animated property transitions, and view extension traits.
+//!
+//! This module provides the [`StyledView`] component, persistent [`StyledViewState`] animation
+//! tracking, and the [`ViewStyleExt`] extension trait for attaching [`Style`]
+//! declarations to any view.
+
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::animation::AnimatedValue;
@@ -7,12 +13,26 @@ use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
 use crate::{AnimationTarget, Context, Node, Overflow, Style, TextRenderInfo};
 
+/// A wrapper component that applies declarative [`Style`] properties, hover effects, and smooth property transitions to an inner view `V`.
+///
+/// Created via [`ViewStyleExt::style`].
 pub struct StyledView<V> {
     pub(crate) inner: V,
     pub(crate) style: Style,
 }
 
+/// Extension trait for [`View`] that enables fluid `.style(...)` method chaining.
 pub trait ViewStyleExt: Sized {
+    /// Attaches a [`Style`] configuration to this view.
+    ///
+    /// # Examples
+    /// ```rust,ignore
+    /// use mtk::style::Style;
+    /// use mtk::ui::ViewStyleExt;
+    /// use mtk::ui::widgets::text;
+    ///
+    /// let styled_text = text("Hello").style(Style::new().padding(10.0));
+    /// ```
     fn style(self, style: Style) -> StyledView<Self>;
 }
 
@@ -22,16 +42,23 @@ impl<V> ViewStyleExt for V {
     }
 }
 
+/// Persistent element state for a [`StyledView`], tracking hover states and active property transition animations.
 #[derive(Default)]
 pub struct StyledViewState {
+    /// `true` if the mouse cursor is currently hovering over the view's layout node.
     pub is_hovered: bool,
+    /// `true` if any property transition animation (padding, color, scale) is currently progressing.
     pub is_animating: bool,
+    /// Active animation state for padding transitions.
     pub padding_anim: Option<AnimatedValue<f32>>,
+    /// Active animation state for background color transitions.
     pub color_anim: Option<AnimatedValue<Color>>,
+    /// Active animation state for scale transitions.
     pub scale_anim: Option<AnimatedValue<f32>>,
 }
 
 impl StyledViewState {
+    /// Creates a new, unhovered [`StyledViewState`] with no active property animations.
     pub fn new() -> Self {
         Self {
             is_hovered: false,
@@ -66,7 +93,7 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
 
             // ScrollView sets Overflow::Scroll before StyledView runs, preserve it if we didn't explicitly override it (assuming default Visible means no override for ScrollView)
             if self.style.base_constraints.overflow == Overflow::Visible
-                && overflow == Overflow::Scroll
+                && overflow != Overflow::Visible
             {
                 c.overflow = overflow;
             }
@@ -208,7 +235,7 @@ impl<V> StyledView<V> {
                 *c = target_constraints;
 
                 if target_constraints.overflow == crate::style::Overflow::Visible
-                    && overflow == crate::style::Overflow::Scroll
+                    && overflow != crate::style::Overflow::Visible
                 {
                     c.overflow = overflow;
                 }

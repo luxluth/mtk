@@ -302,7 +302,8 @@ typedef struct {
 typedef enum {
   MU_OVERFLOW_VISIBLE = 0,
   MU_OVERFLOW_HIDDEN,
-  MU_OVERFLOW_SCROLL
+  MU_OVERFLOW_SCROLL,
+  MU_OVERFLOW_AUTO
 } muOverflow;
 
 typedef struct {
@@ -343,18 +344,12 @@ typedef struct {
 
 typedef struct {
   float x, y, w, h;
+  float content_w, content_h;
 } muComputed;
 
 typedef struct {
   char dummy;
 } muDirty;
-
-typedef struct {
-  char *data;
-  void *userdata;
-} muText;
-
-typedef struct muContext muContext;
 
 typedef struct {
   // The actual horizontal space the text occupies
@@ -368,6 +363,17 @@ typedef struct {
   float baseline_offset;
 } muTextComputedOutput;
 
+typedef struct {
+  char *data;
+  void *userdata;
+  float cached_avail_w;
+  float cached_avail_h;
+  muTextComputedOutput cached_output;
+  bool is_cached;
+} muText;
+
+typedef struct muContext muContext;
+
 typedef muTextComputedOutput muTextSizingFunc(muContext *ctx, muId text,
                                               float available_width,
                                               float available_height);
@@ -375,6 +381,8 @@ typedef muTextComputedOutput muTextSizingFunc(muContext *ctx, muId text,
 typedef enum {
   MU_CMD_DRAWQUAD,
   MU_CMD_TEXT,
+  MU_CMD_SCROLLBAR_V,
+  MU_CMD_SCROLLBAR_H,
 } muRenderCommandKind;
 
 typedef struct {
@@ -474,6 +482,8 @@ MUSEDEF void muse_build_render_list(muContext *ctx, muRect viewport);
 
 // Get the computed bounding box and offset of the node
 MUSEDEF muComputed *muse_computed_get(muContext *ctx, muNode node);
+MUSEDEF muNode muse_first_child_get(muContext *ctx, muNode parent);
+MUSEDEF muNode muse_next_sibling_get(muContext *ctx, muNode node);
 
 #endif // MUSE_H_
 
@@ -806,6 +816,9 @@ MUSEDEF muConstraints *muse_constraints_get(muContext *ctx, muNode node) {
 MUSEDEF void muse_text_set(muContext *ctx, muNode node, muText text) {
   if (!muse_muid_is_valid(node))
     return;
+  text.is_cached = false;
+  text.cached_avail_w = -1.0f;
+  text.cached_avail_h = -1.0f;
   muse_sparse_insert(&ctx->texts, node, text);
   muse_node_set_dirty(ctx, node);
 }
@@ -836,6 +849,20 @@ MUSEDEF muComputed *muse_computed_get(muContext *ctx, muNode node) {
     return NULL;
 
   return muse_sparse_get(&ctx->computed, node);
+}
+
+MUSEDEF muNode muse_first_child_get(muContext *ctx, muNode parent) {
+  if (!ctx || !muse_muid_is_valid(parent) ||
+      !muse_sparse_has(&ctx->hierarchies, parent))
+    return (muNode){MUSE_SPARSE_NULL, MUSE_SPARSE_NULL};
+  return muse_sparse_get(&ctx->hierarchies, parent)->first_child;
+}
+
+MUSEDEF muNode muse_next_sibling_get(muContext *ctx, muNode node) {
+  if (!ctx || !muse_muid_is_valid(node) ||
+      !muse_sparse_has(&ctx->hierarchies, node))
+    return (muNode){MUSE_SPARSE_NULL, MUSE_SPARSE_NULL};
+  return muse_sparse_get(&ctx->hierarchies, node)->next_sibling;
 }
 
 static void muse__m_clamp_min_max(muComputed *comp, muConstraints *cons) {
@@ -973,6 +1000,26 @@ static void muse__m_compute_top_down(muContext *ctx, muNode node,
   }
 }
 
+static inline muTextComputedOutput muse__m_get_text_size(muContext *ctx,
+                                                         muNode node,
+                                                         float avail_w,
+                                                         float avail_h) {
+  muText *txt = muse_sparse_get(&ctx->texts, node);
+  if (txt != NULL && txt->is_cached && txt->cached_avail_w == avail_w &&
+      txt->cached_avail_h == avail_h) {
+    return txt->cached_output;
+  }
+  muTextComputedOutput output =
+      ctx->text_sizing_func(ctx, node, avail_w, avail_h);
+  if (txt != NULL) {
+    txt->cached_avail_w = avail_w;
+    txt->cached_avail_h = avail_h;
+    txt->cached_output = output;
+    txt->is_cached = true;
+  }
+  return output;
+}
+
 static void muse__m_compute_bottom_up(muContext *ctx, muNode node) {
   if (!muse_muid_is_valid(node))
     return;
@@ -997,7 +1044,7 @@ static void muse__m_compute_bottom_up(muContext *ctx, muNode node) {
         float avail_h = fit_h ? INFINITY : comp->h;
 
         muTextComputedOutput text_size =
-            ctx->text_sizing_func(ctx, node, avail_w, avail_h);
+            muse__m_get_text_size(ctx, node, avail_w, avail_h);
 
         intrinsic_w = text_size.computed_width;
         intrinsic_h = text_size.computed_height;
@@ -1294,6 +1341,85 @@ static void muse__m_compute_positional_alignment(muContext *ctx, muNode node,
   }
 }
 
+static void muse__m_compute_content_bounds(muContext *ctx, muNode node) {
+  if (!muse_muid_is_valid(node))
+    return;
+
+  muComputed *comp = muse_sparse_get(&ctx->computed, node);
+  if (!comp)
+    return;
+
+  float max_w = comp->w;
+  float max_h = comp->h;
+
+  muConstraints *cons = muse_sparse_get(&ctx->constraints, node);
+  float scroll_y = cons ? cons->scroll.y : 0.0f;
+  float scroll_x = cons ? cons->scroll.x : 0.0f;
+
+  if (muse_sparse_has(&ctx->texts, node) && ctx->text_sizing_func != NULL) {
+    float off_w = cons ? (cons->padding.left + cons->border.left +
+                          cons->padding.right + cons->border.right)
+                       : 0.0f;
+    float off_h = cons ? (cons->padding.top + cons->border.top +
+                          cons->padding.bottom + cons->border.bottom)
+                       : 0.0f;
+    float avail_w = (comp->w > off_w) ? (comp->w - off_w) : INFINITY;
+    float avail_h = (comp->h > off_h) ? (comp->h - off_h) : INFINITY;
+    muTextComputedOutput text_size =
+        muse__m_get_text_size(ctx, node, avail_w, avail_h);
+    max_w = text_size.computed_width + off_w;
+    max_h = text_size.computed_height + off_h;
+  } else {
+    muse_foreach_child(child, ctx, node) {
+      muse__m_compute_content_bounds(ctx, child);
+      muComputed *c_comp = muse_sparse_get(&ctx->computed, child);
+      if (c_comp) {
+        float child_bottom = (c_comp->y - comp->y) + c_comp->h + scroll_y;
+        float child_right = (c_comp->x - comp->x) + c_comp->w + scroll_x;
+        if (child_bottom > max_h)
+          max_h = child_bottom;
+        if (child_right > max_w)
+          max_w = child_right;
+      }
+    }
+  }
+
+  if (cons) {
+    max_h += cons->padding.bottom;
+    max_w += cons->padding.right;
+  }
+
+  comp->content_w = (max_w > comp->w) ? max_w : comp->w;
+  comp->content_h = (max_h > comp->h) ? max_h : comp->h;
+
+  if (cons != NULL) {
+    if (cons->scroll.y < 0.0f) {
+      float inner_h = comp->h - cons->padding.top - cons->padding.bottom;
+      float max_y = (comp->content_h - inner_h > 0.0f)
+                        ? (comp->content_h - inner_h)
+                        : 0.0f;
+      float pct = (-cons->scroll.y - 0.0001f);
+      if (pct < 0.0f)
+        pct = 0.0f;
+      if (pct > 1.0f)
+        pct = 1.0f;
+      cons->scroll.y = pct * max_y;
+    }
+    if (cons->scroll.x < 0.0f) {
+      float inner_w = comp->w - cons->padding.left - cons->padding.right;
+      float max_x = (comp->content_w - inner_w > 0.0f)
+                        ? (comp->content_w - inner_w)
+                        : 0.0f;
+      float pct = (-cons->scroll.x - 0.0001f);
+      if (pct < 0.0f)
+        pct = 0.0f;
+      if (pct > 1.0f)
+        pct = 1.0f;
+      cons->scroll.x = pct * max_x;
+    }
+  }
+}
+
 MUSEDEF void muse_compute_layout(muContext *ctx, float viewport_width,
                                  float viewport_height) {
   if (!ctx->rooted)
@@ -1368,6 +1494,9 @@ MUSEDEF void muse_compute_layout(muContext *ctx, float viewport_width,
   // PASS 5: Positional Alignment
   muse__m_compute_positional_alignment(ctx, ctx->root, 0.0f, 0.0f);
 
+  // PASS 5.5: Content Bounds Calculation
+  muse__m_compute_content_bounds(ctx, ctx->root);
+
   // PASS 6: Clear Dirties
   for (size_t i = 0; i < ctx->dirties.dense.count; i++) {
     muNode dirty_node = ctx->dirties.dense.items[i];
@@ -1378,12 +1507,21 @@ MUSEDEF void muse_compute_layout(muContext *ctx, float viewport_width,
   ctx->render_list_dirty = true;
 }
 
+typedef enum {
+  MU_SORT_ITEM_NODE = 0,
+  MU_SORT_ITEM_SCROLLBAR_V = 1,
+  MU_SORT_ITEM_SCROLLBAR_H = 2,
+} muSortItemKind;
+
 typedef struct {
   muNode node;
   muRect clip;
+  muRect content_clip;
   size_t sequence;
   int32_t z_index;
   bool has_clip;
+  bool has_content_clip;
+  muSortItemKind kind;
 } muse__m_SortItem;
 
 typedef MUSE_DA(muse__m_SortItem) muse__m_SortList;
@@ -1401,7 +1539,10 @@ static void muse__m_flatten_recursive(muContext *ctx, muNode node,
   muRect new_clip = current_clip;
   bool new_has_clip = has_clip;
 
-  if (cons != NULL && (cons->overflow == MU_OVERFLOW_HIDDEN || cons->overflow == MU_OVERFLOW_SCROLL) && comp != NULL) {
+  if (cons != NULL &&
+      (cons->overflow == MU_OVERFLOW_HIDDEN ||
+       cons->overflow == MU_OVERFLOW_SCROLL) &&
+      comp != NULL) {
     float cx = comp->x + cons->border.left;
     float cy = comp->y + cons->border.top;
     float cw = comp->w - cons->border.left - cons->border.right;
@@ -1440,7 +1581,10 @@ static void muse__m_flatten_recursive(muContext *ctx, muNode node,
                              .z_index = z,
                              .sequence = (*seq)++,
                              .clip = current_clip,
-                             .has_clip = has_clip};
+                             .content_clip = new_clip,
+                             .has_clip = has_clip,
+                             .has_content_clip = new_has_clip,
+                             .kind = MU_SORT_ITEM_NODE};
     muse_da_append(list, item);
   }
 
@@ -1450,6 +1594,35 @@ static void muse__m_flatten_recursive(muContext *ctx, muNode node,
 
   muse_foreach_child(child, ctx, node) {
     muse__m_flatten_recursive(ctx, child, list, seq, new_clip, new_has_clip);
+  }
+
+  // Shadow subnodes: Emit shadow scrollbar items after all children are
+  // flattened
+  if (cons != NULL && comp != NULL &&
+      (cons->overflow == MU_OVERFLOW_SCROLL ||
+       cons->overflow == MU_OVERFLOW_AUTO)) {
+    float inner_h = (comp->h - cons->padding.top - cons->padding.bottom);
+    float inner_w = (comp->w - cons->padding.left - cons->padding.right);
+
+    if (comp->content_h > inner_h + 0.5f && inner_h > 0.0f) {
+      muse__m_SortItem v_thumb = {.node = node,
+                                  .z_index = z,
+                                  .sequence = (*seq)++,
+                                  .clip = new_clip,
+                                  .has_clip = new_has_clip,
+                                  .kind = MU_SORT_ITEM_SCROLLBAR_V};
+      muse_da_append(list, v_thumb);
+    }
+
+    if (comp->content_w > inner_w + 0.5f && inner_w > 0.0f) {
+      muse__m_SortItem h_thumb = {.node = node,
+                                  .z_index = z,
+                                  .sequence = (*seq)++,
+                                  .clip = new_clip,
+                                  .has_clip = new_has_clip,
+                                  .kind = MU_SORT_ITEM_SCROLLBAR_H};
+      muse_da_append(list, h_thumb);
+    }
   }
 }
 
@@ -1488,27 +1661,58 @@ MUSEDEF void muse_build_render_list(muContext *ctx, muRect viewport) {
     int32_t z = temp_list.items[i].z_index;
     muRect clip = temp_list.items[i].clip;
     bool has_clip = temp_list.items[i].has_clip;
+    muSortItemKind kind = temp_list.items[i].kind;
     muComputed *comp = muse_sparse_get(&ctx->computed, node);
 
     if (comp != NULL) {
-      muRenderCommand quad_cmd = {.kind = MU_CMD_DRAWQUAD,
-                                  .node = node,
-                                  .computed = *comp,
-                                  .clip = clip,
-                                  .has_clip = has_clip,
-                                  .z_index = z};
-
-      muse_da_append(&ctx->render_list, quad_cmd);
-      muText *text = muse_sparse_get(&ctx->texts, node);
-      if (text != NULL && text->data != NULL) {
-        muRenderCommand text_cmd = {.kind = MU_CMD_TEXT,
-                                    .info = {.text = text},
+      if (kind == MU_SORT_ITEM_NODE) {
+        muRenderCommand quad_cmd = {.kind = MU_CMD_DRAWQUAD,
                                     .node = node,
                                     .computed = *comp,
                                     .clip = clip,
                                     .has_clip = has_clip,
                                     .z_index = z};
-        muse_da_append(&ctx->render_list, text_cmd);
+
+        muse_da_append(&ctx->render_list, quad_cmd);
+        muText *text = muse_sparse_get(&ctx->texts, node);
+        if (text != NULL && text->data != NULL) {
+          muConstraints *cons = muse_sparse_get(&ctx->constraints, node);
+          muRect text_clip =
+              (cons != NULL && (cons->overflow == MU_OVERFLOW_HIDDEN ||
+                                cons->overflow == MU_OVERFLOW_SCROLL))
+                  ? temp_list.items[i].content_clip
+                  : clip;
+          bool text_has_clip =
+              (cons != NULL && (cons->overflow == MU_OVERFLOW_HIDDEN ||
+                                cons->overflow == MU_OVERFLOW_SCROLL))
+                  ? temp_list.items[i].has_content_clip
+                  : has_clip;
+
+          muRenderCommand text_cmd = {.kind = MU_CMD_TEXT,
+                                      .info = {.text = text},
+                                      .node = node,
+                                      .computed = *comp,
+                                      .clip = text_clip,
+                                      .has_clip = text_has_clip,
+                                      .z_index = z};
+          muse_da_append(&ctx->render_list, text_cmd);
+        }
+      } else if (kind == MU_SORT_ITEM_SCROLLBAR_V) {
+        muRenderCommand sb_cmd = {.kind = MU_CMD_SCROLLBAR_V,
+                                  .node = node,
+                                  .computed = *comp,
+                                  .clip = clip,
+                                  .has_clip = has_clip,
+                                  .z_index = z};
+        muse_da_append(&ctx->render_list, sb_cmd);
+      } else if (kind == MU_SORT_ITEM_SCROLLBAR_H) {
+        muRenderCommand sb_cmd = {.kind = MU_CMD_SCROLLBAR_H,
+                                  .node = node,
+                                  .computed = *comp,
+                                  .clip = clip,
+                                  .has_clip = has_clip,
+                                  .z_index = z};
+        muse_da_append(&ctx->render_list, sb_cmd);
       }
     }
   }
@@ -1531,7 +1735,6 @@ MUSEDEF muNodeList muse_node_pick(muContext *ctx, float x, float y) {
 
     if (muse_muid_eq(node, last_checked))
       continue;
-    last_checked = node;
 
     bool in_bounds =
         (x >= cmd.computed.x && x <= cmd.computed.x + cmd.computed.w &&
@@ -1540,30 +1743,15 @@ MUSEDEF muNodeList muse_node_pick(muContext *ctx, float x, float y) {
     if (!in_bounds)
       continue;
 
-    bool clipped = false;
-    muHierarchy *hrc = muse_sparse_get(&ctx->hierarchies, node);
-    muNode curr_parent = (hrc != NULL) ? hrc->parent : MUSE_UNDEFINED_MUID;
-
-    while (muse_muid_is_valid(curr_parent)) {
-      muConstraints *p_cons = muse_sparse_get(&ctx->constraints, curr_parent);
-      muComputed *p_comp = muse_sparse_get(&ctx->computed, curr_parent);
-
-      if (p_cons != NULL && p_comp != NULL &&
-          (p_cons->overflow == MU_OVERFLOW_HIDDEN || p_cons->overflow == MU_OVERFLOW_SCROLL)) {
-        if (x < p_comp->x || x > p_comp->x + p_comp->w || y < p_comp->y ||
-            y > p_comp->y + p_comp->h) {
-          clipped = true;
-          break;
-        }
+    if (cmd.has_clip) {
+      if (x < cmd.clip.x || x > cmd.clip.x + cmd.clip.w || y < cmd.clip.y ||
+          y > cmd.clip.y + cmd.clip.h) {
+        continue;
       }
-
-      muHierarchy *p_hrc = muse_sparse_get(&ctx->hierarchies, curr_parent);
-      curr_parent = (p_hrc != NULL) ? p_hrc->parent : MUSE_UNDEFINED_MUID;
     }
 
-    if (!clipped) {
-      muse_da_append(&hits, node);
-    }
+    last_checked = node;
+    muse_da_append(&hits, node);
   }
 
   return hits;

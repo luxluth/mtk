@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Instant};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 
 use winit::{
     application::ApplicationHandler,
@@ -9,7 +9,7 @@ use winit::{
 };
 
 use crate::{
-    Context, TextStyle,
+    Context, Node, TextStyle,
     ui::{Event, View, event::EventResult},
     windowing::renderer::Renderer,
 };
@@ -32,6 +32,10 @@ where
     attr: WindowAttributes,
     cursor_pos: (f32, f32),
     last_frame_time: Instant,
+    scroll_targets: HashMap<Node, f32>,
+    scroll_targets_x: HashMap<Node, f32>,
+    drag_scroll_node: Option<(Node, f32, f32)>,
+    drag_scroll_x_node: Option<(Node, f32, f32)>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -188,6 +192,10 @@ where
             element: Some(element),
             cursor_pos: (0.0, 0.0),
             last_frame_time: Instant::now(),
+            scroll_targets: HashMap::new(),
+            scroll_targets_x: HashMap::new(),
+            drag_scroll_node: None,
+            drag_scroll_x_node: None,
         }
     }
 
@@ -211,9 +219,301 @@ where
         ) {
             let is_tick = matches!(mtk_event, Event::Tick { .. });
 
+            // Sync scroll targets when widgets update constraints.scroll directly
+            if !matches!(mtk_event, Event::Tick { .. } | Event::MouseWheel { .. }) {
+                let targets_y: Vec<Node> = self.scroll_targets.keys().copied().collect();
+                for node in targets_y {
+                    if let Some(c) = node.get_constraints(&self.context) {
+                        self.scroll_targets.insert(node, c.scroll.y);
+                    }
+                }
+                let targets_x: Vec<Node> = self.scroll_targets_x.keys().copied().collect();
+                for node in targets_x {
+                    if let Some(c) = node.get_constraints(&self.context) {
+                        self.scroll_targets_x.insert(node, c.scroll.x);
+                    }
+                }
+            }
+
+            // A) Tick kinetic lerping for ultra-smooth 120Hz/60Hz scrolling
+            if let Event::Tick { dt } = mtk_event {
+                let mut lerp_animating = false;
+                let keys: Vec<Node> = self.scroll_targets.keys().copied().collect();
+                for node in keys {
+                    if self.drag_scroll_node.map(|(n, ..)| n) == Some(node) {
+                        continue;
+                    }
+                    if let Some(target_scroll_y) = self.scroll_targets.get(&node).copied() {
+                        let constraints = node.get_constraints(&self.context).unwrap_or_default();
+                        let inner_h = if let Some(computed) = node.get_computed(&self.context) {
+                            (computed.h - constraints.padding.top - constraints.padding.bottom)
+                                .max(0.0)
+                        } else {
+                            0.0
+                        };
+                        let content_h = node.compute_content_height(&self.context);
+                        let max_scroll_y = (content_h - inner_h).max(0.0);
+                        let clamped_target = target_scroll_y.clamp(0.0, max_scroll_y);
+
+                        let diff = clamped_target - constraints.scroll.y;
+                        if diff.abs() > 0.1 {
+                            lerp_animating = true;
+                            let factor = 1.0 - (-22.0 * dt).exp();
+                            let new_scroll_y = constraints.scroll.y + diff * factor;
+                            node.update_constraints(&mut self.context, |c| {
+                                c.scroll.y = new_scroll_y;
+                            });
+                        } else {
+                            if (constraints.scroll.y - clamped_target).abs() > 0.001 {
+                                node.update_constraints(&mut self.context, |c| {
+                                    c.scroll.y = clamped_target;
+                                });
+                            }
+                            self.scroll_targets.insert(node, constraints.scroll.y);
+                        }
+                    }
+                }
+                let keys_x: Vec<Node> = self.scroll_targets_x.keys().copied().collect();
+                for node in keys_x {
+                    if self.drag_scroll_x_node.map(|(n, ..)| n) == Some(node) {
+                        continue;
+                    }
+                    if let Some(target_scroll_x) = self.scroll_targets_x.get(&node).copied() {
+                        let constraints = node.get_constraints(&self.context).unwrap_or_default();
+                        let (inner_w, content_w) = if let Some(computed) =
+                            node.get_computed(&self.context)
+                        {
+                            let iw =
+                                (computed.w - constraints.padding.left - constraints.padding.right)
+                                    .max(0.0);
+                            let cw = computed.content_w.max(iw);
+                            (iw, cw)
+                        } else {
+                            (0.0, 0.0)
+                        };
+                        let max_scroll_x = (content_w - inner_w).max(0.0);
+                        let clamped_target = target_scroll_x.clamp(0.0, max_scroll_x);
+
+                        let diff = clamped_target - constraints.scroll.x;
+                        if diff.abs() > 0.1 {
+                            lerp_animating = true;
+                            let factor = 1.0 - (-22.0 * dt).exp();
+                            let new_scroll_x = constraints.scroll.x + diff * factor;
+                            node.update_constraints(&mut self.context, |c| {
+                                c.scroll.x = new_scroll_x;
+                            });
+                        } else {
+                            if (constraints.scroll.x - clamped_target).abs() > 0.001 {
+                                node.update_constraints(&mut self.context, |c| {
+                                    c.scroll.x = clamped_target;
+                                });
+                            }
+                            self.scroll_targets_x.insert(node, constraints.scroll.x);
+                        }
+                    }
+                }
+                if lerp_animating {
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                }
+            }
+
+            // B) Scrollbar thumb drag start
+            if let Event::MouseInput {
+                pressed,
+                x,
+                y,
+                ref hit_nodes,
+            } = mtk_event
+            {
+                if pressed {
+                    for node in hit_nodes.iter().rev() {
+                        let constraints = node.get_constraints(&self.context).unwrap_or_default();
+                        if constraints.overflow == crate::Overflow::Scroll
+                            || constraints.overflow == crate::Overflow::Auto
+                        {
+                            if let Some(computed) = node.get_computed(&self.context) {
+                                let inner_h = (computed.h
+                                    - constraints.padding.top
+                                    - constraints.padding.bottom)
+                                    .max(0.0);
+                                let content_h = node.compute_content_height(&self.context);
+                                let max_scroll_y = (content_h - inner_h).max(0.0);
+                                if max_scroll_y > 0.0 {
+                                    if x >= computed.x + computed.w - 14.0
+                                        && x <= computed.x + computed.w
+                                    {
+                                        self.drag_scroll_node =
+                                            Some((*node, y, constraints.scroll.y));
+                                        break;
+                                    }
+                                }
+
+                                let inner_w = (computed.w
+                                    - constraints.padding.left
+                                    - constraints.padding.right)
+                                    .max(0.0);
+                                let content_w = computed.content_w.max(inner_w);
+                                let max_scroll_x = (content_w - inner_w).max(0.0);
+                                if max_scroll_x > 0.0 {
+                                    if y >= computed.y + computed.h - 14.0
+                                        && y <= computed.y + computed.h
+                                    {
+                                        self.drag_scroll_x_node =
+                                            Some((*node, x, constraints.scroll.x));
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    self.drag_scroll_node = None;
+                    self.drag_scroll_x_node = None;
+                }
+            }
+
+            // C) Scrollbar thumb drag motion
+            if let Event::CursorMoved { x, y, .. } = mtk_event {
+                if let Some((node, drag_start_y, drag_start_scroll_y)) = self.drag_scroll_node {
+                    let constraints = node.get_constraints(&self.context).unwrap_or_default();
+                    if let Some(computed) = node.get_computed(&self.context) {
+                        let inner_h =
+                            (computed.h - constraints.padding.top - constraints.padding.bottom)
+                                .max(0.0);
+                        let content_h = node.compute_content_height(&self.context);
+                        let max_scroll_y = (content_h - inner_h).max(0.0);
+                        if max_scroll_y > 0.0 {
+                            let track_h = (computed.h - 8.0).max(0.0);
+                            let thumb_h = ((track_h / content_h) * track_h).clamp(24.0, track_h);
+                            let track_travel = (track_h - thumb_h).max(1.0);
+                            let delta_y = y - drag_start_y;
+                            let scroll_delta = (delta_y / track_travel) * max_scroll_y;
+                            let new_scroll_y =
+                                (drag_start_scroll_y + scroll_delta).clamp(0.0, max_scroll_y);
+                            node.update_constraints(&mut self.context, |c| {
+                                c.scroll.y = new_scroll_y;
+                            });
+                            self.scroll_targets.insert(node, new_scroll_y);
+                            if let Some(window) = &self.window {
+                                window.request_redraw();
+                            }
+                        }
+                    }
+                }
+                if let Some((node, drag_start_x, drag_start_scroll_x)) = self.drag_scroll_x_node {
+                    let constraints = node.get_constraints(&self.context).unwrap_or_default();
+                    if let Some(computed) = node.get_computed(&self.context) {
+                        let inner_w =
+                            (computed.w - constraints.padding.left - constraints.padding.right)
+                                .max(0.0);
+                        let content_w = computed.content_w.max(inner_w);
+                        let max_scroll_x = (content_w - inner_w).max(0.0);
+                        if max_scroll_x > 0.0 {
+                            let track_w = (computed.w - 8.0).max(0.0);
+                            let thumb_w = ((track_w / content_w) * track_w).clamp(24.0, track_w);
+                            let track_travel = (track_w - thumb_w).max(1.0);
+                            let delta_x = x - drag_start_x;
+                            let scroll_delta = (delta_x / track_travel) * max_scroll_x;
+                            let new_scroll_x =
+                                (drag_start_scroll_x + scroll_delta).clamp(0.0, max_scroll_x);
+                            node.update_constraints(&mut self.context, |c| {
+                                c.scroll.x = new_scroll_x;
+                            });
+                            self.scroll_targets_x.insert(node, new_scroll_x);
+                            if let Some(window) = &self.window {
+                                window.request_redraw();
+                            }
+                        }
+                    }
+                }
+            }
+
             // Pass 1 - READONLY state down
             let (result, optional_msg) =
-                view.handle_event(element, &self.state, mtk_event, &mut self.context);
+                view.handle_event(element, &self.state, mtk_event.clone(), &mut self.context);
+
+            if result == EventResult::Ignored {
+                if let Event::MouseWheel {
+                    delta_x,
+                    delta_y,
+                    ref hit_nodes,
+                    ..
+                } = mtk_event
+                {
+                    for node in hit_nodes.iter().rev() {
+                        let constraints = node.get_constraints(&self.context).unwrap_or_default();
+                        let is_scrollable_y = constraints.overflow == crate::Overflow::Scroll
+                            || constraints.overflow == crate::Overflow::Auto;
+                        let is_scrollable_x = constraints.overflow == crate::Overflow::Scroll
+                            || constraints.overflow == crate::Overflow::Auto
+                            || constraints.overflow == crate::Overflow::Hidden;
+
+                        if is_scrollable_y || is_scrollable_x {
+                            if let Some(computed) = node.get_computed(&self.context) {
+                                let inner_h = (computed.h
+                                    - constraints.padding.top
+                                    - constraints.padding.bottom)
+                                    .max(0.0);
+                                let content_h = node.compute_content_height(&self.context);
+                                let max_scroll_y = (content_h - inner_h).max(0.0);
+
+                                let inner_w = (computed.w
+                                    - constraints.padding.left
+                                    - constraints.padding.right)
+                                    .max(0.0);
+                                let content_w = computed.content_w.max(inner_w);
+                                let max_scroll_x = (content_w - inner_w).max(0.0);
+
+                                let mut scrolled = false;
+
+                                if is_scrollable_y && max_scroll_y > 0.0 && delta_y.abs() > 0.0 {
+                                    let current_target = self
+                                        .scroll_targets
+                                        .get(node)
+                                        .copied()
+                                        .unwrap_or(constraints.scroll.y);
+                                    let new_target =
+                                        (current_target - delta_y * 1.6).clamp(0.0, max_scroll_y);
+                                    self.scroll_targets.insert(*node, new_target);
+                                    scrolled = true;
+                                }
+
+                                let scroll_delta_x = if delta_x.abs() > 0.0 {
+                                    delta_x
+                                } else if !is_scrollable_y {
+                                    delta_y
+                                } else {
+                                    0.0
+                                };
+
+                                if is_scrollable_x
+                                    && max_scroll_x > 0.0
+                                    && scroll_delta_x.abs() > 0.0
+                                {
+                                    let current_target = self
+                                        .scroll_targets_x
+                                        .get(node)
+                                        .copied()
+                                        .unwrap_or(constraints.scroll.x);
+                                    let new_target = (current_target - scroll_delta_x * 1.6)
+                                        .clamp(0.0, max_scroll_x);
+                                    self.scroll_targets_x.insert(*node, new_target);
+                                    scrolled = true;
+                                }
+
+                                if scrolled {
+                                    if let Some(window) = &self.window {
+                                        window.request_redraw();
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             let mut state_changed = false;
 

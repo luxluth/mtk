@@ -1,3 +1,8 @@
+//! Declarative, reactive view hierarchy and event dispatch system for MTK.
+//!
+//! This module defines the core [`View`] trait, [`ViewSequence`] container composition,
+//! state lenses, adapters, and input events ([`Event`]) used to compose user interfaces.
+
 use crate::{Context, Node, ui::event::EventResult, windowing::WindowDimension};
 
 pub mod adapter;
@@ -12,54 +17,83 @@ pub use event::{EventKind, ViewEventExt};
 pub use lens::Lens;
 pub use style::ViewStyleExt;
 
-#[derive(Clone)]
+/// Represents user interaction, layout lifecycle, and system input events dispatched down the view tree.
+#[derive(Clone, Debug)]
 pub enum Event {
+    /// Dispatched when the mouse cursor moves across the viewport.
     CursorMoved {
+        /// Absolute horizontal pixel position.
         x: f32,
+        /// Absolute vertical pixel position.
         y: f32,
+        /// Ordered list of layout nodes hit-tested under the cursor.
         hit_nodes: Vec<Node>,
     },
+    /// Dispatched when a mouse button press or release action occurs.
     MouseInput {
+        /// `true` if button was pressed down; `false` if released.
         pressed: bool,
+        /// Absolute horizontal pixel position.
         x: f32,
+        /// Absolute vertical pixel position.
         y: f32,
+        /// Ordered list of layout nodes hit-tested under the cursor.
         hit_nodes: Vec<Node>,
     },
+    /// Dispatched when mouse scroll wheel or touchpad scroll gestures are detected.
     MouseWheel {
+        /// Horizontal scroll displacement.
         delta_x: f32,
+        /// Vertical scroll displacement.
         delta_y: f32,
+        /// `true` if scrolling originated from a continuous touchpad surface.
         is_touchpad: bool,
+        /// Touch phase state associated with gesture scrolling.
         phase: winit::event::TouchPhase,
+        /// Ordered list of layout nodes hit-tested under the cursor.
         hit_nodes: Vec<Node>,
     },
+    /// Dispatched when a physical or virtual keyboard key is pressed or released.
     KeyboardInput {
+        /// Low-level key event payload provided by `winit`.
         event: winit::event::KeyEvent,
+        /// `true` if generated synthetically by MTK event repeat logic.
         is_synthetic: bool,
     },
+    /// Dispatched when an OS Input Method Editor (IME) updates preedit or commits text.
     Ime(winit::event::Ime),
+    /// Dispatched once per frame tick to drive animations and physics interpolation.
     Tick {
+        /// Elapsed time delta in seconds since the previous frame tick.
         dt: f32,
     },
+    /// Dispatched when the parent application window size changes.
     WindowResized(WindowDimension),
 }
 
+/// The foundational trait for all declarative, reactive UI components in MTK.
+///
+/// A `View` represents a lightweight blueprint for constructing and updating underlying
+/// layout nodes ([`Node`]) bound to an application state (`State`).
 pub trait View<State> {
-    /// The persistent state we keep around between frames
+    /// The persistent DOM-like element state maintained between render frames.
     type Element;
+    /// The message type emitted by this view upon user interaction.
     type Message;
 
-    /// Called once when the widget is first created
+    /// Instantiates initial layout nodes and state primitives for this view.
     fn build(&self, ctx: &mut Context) -> Self::Element;
 
-    /// Called when the state changes. We pass the old view and the new view.
+    /// Diffs and updates persistent element nodes when application state or properties change.
     fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element);
 
-    /// Called to destroy the element and its children
+    /// Destroys persistent layout nodes and frees resources associated with `element`.
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element);
 
-    /// Get the root node of this view (used by containers to attach it to the tree)
+    /// Returns the root layout node handle representing this view.
     fn get_node(&self, element: &Self::Element) -> Node;
 
+    /// Handles incoming user interaction events, returning event consumption status and optional domain messages.
     fn handle_event(
         &self,
         element: &mut Self::Element,
@@ -69,14 +103,23 @@ pub trait View<State> {
     ) -> (EventResult, Option<Self::Message>);
 }
 
+/// Defines container composition for sequential views, such as tuples `(ViewA, ViewB)` or `Vec<V>`.
 pub trait ViewSequence<State> {
+    /// The persistent element tuple or collection corresponding to child views.
     type Elements;
+    /// The common message type emitted by child views in this sequence.
     type Message;
 
+    /// Instantiates initial layout nodes for all items in the sequence and appends them to `parent`.
     fn build(&self, ctx: &mut Context, parent: Node) -> Self::Elements;
+
+    /// Diffs and updates layout nodes for all items in the sequence.
     fn rebuild(&self, prev: &Self, ctx: &mut Context, elements: &mut Self::Elements, parent: Node);
+
+    /// Destroys layout nodes and cleans up resources for all items in the sequence.
     fn teardown(&self, ctx: &mut Context, elements: &mut Self::Elements);
 
+    /// Routes events through items in the sequence sequentially until consumed.
     fn handle_event(
         &self,
         elements: &mut Self::Elements,
@@ -157,6 +200,9 @@ impl_view_tuple!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G);
 impl_view_tuple!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H);
 impl_view_tuple!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I);
 impl_view_tuple!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J);
+impl_view_tuple!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J, 10 => K);
+impl_view_tuple!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J, 10 => K, 11 => L);
+impl_view_tuple!(0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J, 10 => K, 11 => L, 12 => M);
 
 // Implement ViewSequence for Vec<V> to support dynamic lists
 impl<State, Msg, V> ViewSequence<State> for Vec<V>

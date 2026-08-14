@@ -6,6 +6,8 @@ use crate::sys;
 pub enum RenderCommandKind {
     DrawQuad,
     Text,
+    ScrollbarV,
+    ScrollbarH,
 }
 
 impl From<sys::muRenderCommandKind> for RenderCommandKind {
@@ -13,6 +15,8 @@ impl From<sys::muRenderCommandKind> for RenderCommandKind {
         match kind {
             sys::muRenderCommandKind_MU_CMD_DRAWQUAD => RenderCommandKind::DrawQuad,
             sys::muRenderCommandKind_MU_CMD_TEXT => RenderCommandKind::Text,
+            sys::muRenderCommandKind_MU_CMD_SCROLLBAR_V => RenderCommandKind::ScrollbarV,
+            sys::muRenderCommandKind_MU_CMD_SCROLLBAR_H => RenderCommandKind::ScrollbarH,
             _ => RenderCommandKind::DrawQuad,
         }
     }

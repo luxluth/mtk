@@ -1,23 +1,39 @@
+//! Event handling wrappers, event consumption states, and view extension traits.
+//!
+//! This module provides declarative event listener wrappers ([`EventHandler`]), event results
+//! ([`EventResult`]), interaction kinds ([`EventKind`]), and the [`ViewEventExt`] extension trait
+//! for attaching click, hover, press, and release handlers to views.
+
 use super::{Event, View};
 use crate::{Context, Node};
 use std::rc::Rc;
 
+/// Categorizes high-level user interaction gesture triggers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EventKind {
+    /// Triggered on mouse button release while the cursor is over the view.
     Click,
+    /// Triggered when the mouse cursor enters the view's layout bounds.
     HoverIn,
+    /// Triggered when the mouse cursor exits the view's layout bounds.
     HoverOut,
+    /// Triggered when a mouse button is pressed down over the view.
     Press,
+    /// Triggered when a mouse button is released over the view.
     Release,
 }
 
+/// Indicates whether a view successfully processed or ignored an incoming event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventResult {
+    /// The event was processed by the view.
     Handled,
+    /// The event was not consumed by the view and may propagate further.
     Ignored,
 }
 
 impl EventResult {
+    /// Combines two [`EventResult`] values. Returns [`EventResult::Handled`] if either result is handled.
     pub fn or(self, other: EventResult) -> EventResult {
         match (self, other) {
             (EventResult::Handled, _) | (_, EventResult::Handled) => EventResult::Handled,
@@ -26,6 +42,9 @@ impl EventResult {
     }
 }
 
+/// A wrapper view that attaches an event listener closure to an inner view.
+///
+/// Created via [`ViewEventExt::on_event`].
 pub struct EventHandler<State, V, F> {
     pub(crate) inner: V,
     pub(crate) kind: EventKind,
@@ -33,6 +52,7 @@ pub struct EventHandler<State, V, F> {
     pub(crate) _marker: std::marker::PhantomData<State>,
 }
 
+/// Persistent element state for an [`EventHandler`], tracking current hover state and inner element state.
 pub struct EventElement<VEl> {
     pub(crate) inner_element: VEl,
     pub(crate) is_hovered: bool,
@@ -117,7 +137,13 @@ where
     }
 }
 
+/// Extension trait for [`View`] providing event handling combinators.
 pub trait ViewEventExt<State>: View<State> + Sized {
+    /// Attaches an event listener closure that runs when `event` occurs on this view.
+    ///
+    /// # Parameters
+    /// - `event`: The [`EventKind`] trigger (e.g. `EventKind::Click`, `EventKind::HoverIn`).
+    /// - `handler`: A closure evaluating current application state and optionally returning a message.
     fn on_event<F>(self, event: EventKind, handler: F) -> EventHandler<State, Self, F>
     where
         F: Fn(&State) -> Option<Self::Message> + 'static;

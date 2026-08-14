@@ -19,6 +19,7 @@ tiny-skia = { workspace = true }
 wgpu = { workspace = true }
 winit = { workspace = true }
 zune-image = { workspace = true }
+arboard = { workspace = true }
 mtk-macro = { path = "../mtk-macro" }
 
 [build-dependencies]

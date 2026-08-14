@@ -13,6 +13,8 @@ pub struct Editor {
     selection_anchor: Option<usize>,
     /// Temporary text being composed by the OS Input Method Editor (IME).
     ime_preedit: Option<(String, Option<(usize, usize)>)>,
+    /// Target column offset preserved when navigating vertically across lines of varying length.
+    preferred_col: Option<usize>,
 }
 
 impl Default for Editor {
@@ -29,6 +31,7 @@ impl Editor {
             cursor: 0,
             selection_anchor: None,
             ime_preedit: None,
+            preferred_col: None,
         }
     }
 
@@ -399,8 +402,155 @@ impl Editor {
         }
     }
 
+    /// Returns the total number of lines in the text buffer.
+    pub fn line_count(&self) -> usize {
+        self.text.split('\n').count()
+    }
+
+    /// Returns `(line_index, column_byte_offset)` for the current cursor position.
+    pub fn current_line_info(&self) -> (usize, usize) {
+        let mut line_idx = 0;
+        let mut last_line_start = 0;
+
+        for (i, b) in self.text[..self.cursor].bytes().enumerate() {
+            if b == b'\n' {
+                line_idx += 1;
+                last_line_start = i + 1;
+            }
+        }
+
+        let col_offset = self.cursor - last_line_start;
+        (line_idx, col_offset)
+    }
+
+    /// Returns `(start_byte, end_byte)` for the specified line index (0-indexed).
+    /// `end_byte` excludes the trailing newline `\n` if present.
+    pub fn line_range(&self, line_idx: usize) -> Option<(usize, usize)> {
+        let mut current_idx = 0;
+        let mut start = 0;
+
+        for (i, b) in self.text.bytes().enumerate() {
+            if current_idx == line_idx {
+                if b == b'\n' {
+                    return Some((start, i));
+                }
+            } else if b == b'\n' {
+                current_idx += 1;
+                start = i + 1;
+            }
+        }
+
+        if current_idx == line_idx {
+            Some((start, self.text.len()))
+        } else {
+            None
+        }
+    }
+
+    /// Inserts a newline `\n` at the current cursor position.
+    pub fn insert_newline(&mut self) {
+        self.preferred_col = None;
+        self.insert_char('\n');
+    }
+
+    /// Moves the cursor to the beginning of the current line (Home key).
+    pub fn move_line_start(&mut self, shift: bool) {
+        self.preferred_col = None;
+        let (cur_line, _) = self.current_line_info();
+        if let Some((start, _)) = self.line_range(cur_line) {
+            if shift {
+                if self.selection_anchor.is_none() {
+                    self.selection_anchor = Some(self.cursor);
+                }
+            } else {
+                self.selection_anchor = None;
+            }
+            self.cursor = start;
+        }
+    }
+
+    /// Moves the cursor to the end of the current line (End key).
+    pub fn move_line_end(&mut self, shift: bool) {
+        self.preferred_col = None;
+        let (cur_line, _) = self.current_line_info();
+        if let Some((_, end)) = self.line_range(cur_line) {
+            if shift {
+                if self.selection_anchor.is_none() {
+                    self.selection_anchor = Some(self.cursor);
+                }
+            } else {
+                self.selection_anchor = None;
+            }
+            self.cursor = end;
+        }
+    }
+
+    /// Moves the cursor up to the previous line (Up Arrow key), preserving preferred column width.
+    pub fn move_up(&mut self, shift: bool) {
+        let (cur_line, cur_col) = self.current_line_info();
+        if cur_line == 0 {
+            return;
+        }
+
+        let pref_col = *self.preferred_col.get_or_insert(cur_col);
+
+        if shift {
+            if self.selection_anchor.is_none() {
+                self.selection_anchor = Some(self.cursor);
+            }
+        } else {
+            self.selection_anchor = None;
+        }
+
+        let target_line = cur_line - 1;
+        if let Some((start, end)) = self.line_range(target_line) {
+            let line_text = &self.text[start..end];
+            let mut col_bytes = 0;
+            for c in line_text.chars() {
+                if col_bytes + c.len_utf8() > pref_col {
+                    break;
+                }
+                col_bytes += c.len_utf8();
+            }
+            self.cursor = start + col_bytes;
+        }
+    }
+
+    /// Moves the cursor down to the next line (Down Arrow key), preserving preferred column width.
+    pub fn move_down(&mut self, shift: bool) {
+        let (cur_line, cur_col) = self.current_line_info();
+        let total_lines = self.line_count();
+        if cur_line + 1 >= total_lines {
+            return;
+        }
+
+        let pref_col = *self.preferred_col.get_or_insert(cur_col);
+
+        if shift {
+            if self.selection_anchor.is_none() {
+                self.selection_anchor = Some(self.cursor);
+            }
+        } else {
+            self.selection_anchor = None;
+        }
+
+        let target_line = cur_line + 1;
+        if let Some((start, end)) = self.line_range(target_line) {
+            let line_text = &self.text[start..end];
+            let mut col_bytes = 0;
+            for c in line_text.chars() {
+                if col_bytes + c.len_utf8() > pref_col {
+                    break;
+                }
+                col_bytes += c.len_utf8();
+            }
+            self.cursor = start + col_bytes;
+        }
+    }
+
     /// Moves the cursor to the very beginning of the text buffer.
     pub fn move_to_start(&mut self, shift: bool) {
+        self.preferred_col = None;
         if shift {
             if self.selection_anchor.is_none() {
                 self.selection_anchor = Some(self.cursor);
@@ -413,6 +563,7 @@ impl Editor {
 
     /// Moves the cursor to the very end of the text buffer.
     pub fn move_to_end(&mut self, shift: bool) {
+        self.preferred_col = None;
         if shift {
             if self.selection_anchor.is_none() {
                 self.selection_anchor = Some(self.cursor);
@@ -532,5 +683,43 @@ mod tests {
         assert_eq!(editor.text(), "hello world");
         assert_eq!(editor.preedit_range(), None);
         assert_eq!(editor.cursor(), 11);
+    }
+
+    #[test]
+    fn test_editor_multiline() {
+        let mut editor = Editor::new();
+        editor.insert("first line\nsecond line\nthird line");
+
+        assert_eq!(editor.line_count(), 3);
+        assert_eq!(editor.line_range(0), Some((0, 10)));
+        assert_eq!(editor.line_range(1), Some((11, 22)));
+        assert_eq!(editor.line_range(2), Some((23, 33)));
+
+        // Cursor is at end of third line (33)
+        assert_eq!(editor.current_line_info(), (2, 10));
+
+        // Move to line start
+        editor.move_line_start(false);
+        assert_eq!(editor.cursor(), 23);
+        assert_eq!(editor.current_line_info(), (2, 0));
+
+        // Move to line end
+        editor.move_line_end(false);
+        assert_eq!(editor.cursor(), 33);
+
+        // Move Up to second line
+        editor.move_up(false);
+        assert_eq!(editor.current_line_info(), (1, 10));
+        assert_eq!(editor.cursor(), 21); // after 'e' of "second line"
+
+        // Move Up to first line
+        editor.move_up(false);
+        assert_eq!(editor.current_line_info(), (0, 10));
+        assert_eq!(editor.cursor(), 10); // after 'e' of "first line"
+
+        // Move Down to second line
+        editor.move_down(false);
+        assert_eq!(editor.current_line_info(), (1, 10));
+        assert_eq!(editor.cursor(), 21);
     }
 }

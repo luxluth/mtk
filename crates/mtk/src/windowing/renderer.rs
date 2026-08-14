@@ -836,7 +836,6 @@ impl<'w> Renderer<'w> {
 
                         // C) Draw Caret
                         if let Some(c_rect) = &range.caret {
-                            // println!("DRAWING CARET: {:?}", c_rect);
                             let immediate_data = ImmediateData {
                                 color: range.style.caret_color.into(),
                                 border_color: [0.0; 4],
@@ -868,6 +867,88 @@ impl<'w> Renderer<'w> {
                         if let Some(rect) = active_scissor {
                             render_pass.set_scissor_rect(rect.0, rect.1, rect.2, rect.3);
                         }
+                    }
+                } else if cmd.kind() == RenderCommandKind::ScrollbarV {
+                    render_pass.set_pipeline(&self.pipelines.solid);
+                    let node = cmd.node();
+                    let computed = cmd.computed();
+                    let constraints = node.get_constraints(context).unwrap_or_default();
+                    let inner_h =
+                        (computed.h - constraints.padding.top - constraints.padding.bottom)
+                            .max(0.0);
+                    let content_h = node.compute_content_height(context);
+                    let max_scroll_y = (content_h - inner_h).max(0.0);
+
+                    if max_scroll_y > 0.0 {
+                        let track_top = computed.y + 4.0;
+                        let track_h = (computed.h - 8.0).max(0.0);
+                        let thumb_h = ((track_h / content_h) * track_h).clamp(24.0, track_h);
+                        let thumb_top =
+                            track_top + (constraints.scroll.y / max_scroll_y) * (track_h - thumb_h);
+
+                        let scrollbar_data = ImmediateData {
+                            color: [0.4, 0.4, 0.4, 0.85],
+                            border_color: [0.0; 4],
+                            pos: [computed.x + computed.w - 10.0, thumb_top],
+                            screen_size: [self.size.width as f32, self.size.height as f32],
+                            quad_size: [6.0, thumb_h],
+                            src_offset: [0.0, 0.0],
+                            src_size: [0.0, 0.0],
+                            border_radius: 3.0,
+                            alpha: 0.9,
+                            shadow_spread: 0.0,
+                            shadow_power: 0.0,
+                            vibrancy: 0.0,
+                            vibrancy_darkness: 0.0,
+                            passes: 0.0,
+                            _pad1: 0.0,
+                            _pad2: 0.0,
+                            _pad3: 0.0,
+                            border_widths: [0.0; 4],
+                        };
+                        render_pass.set_immediates(0, bytemuck::bytes_of(&scrollbar_data));
+                        render_pass.draw(0..6, 0..1);
+                    }
+                } else if cmd.kind() == RenderCommandKind::ScrollbarH {
+                    render_pass.set_pipeline(&self.pipelines.solid);
+                    let node = cmd.node();
+                    let computed = cmd.computed();
+                    let constraints = node.get_constraints(context).unwrap_or_default();
+                    let inner_w =
+                        (computed.w - constraints.padding.left - constraints.padding.right)
+                            .max(0.0);
+                    let content_w = computed.content_w.max(inner_w);
+                    let max_scroll_x = (content_w - inner_w).max(0.0);
+
+                    if max_scroll_x > 0.0 {
+                        let track_left = computed.x + 4.0;
+                        let track_w = (computed.w - 8.0).max(0.0);
+                        let thumb_w = ((track_w / content_w) * track_w).clamp(24.0, track_w);
+                        let thumb_left = track_left
+                            + (constraints.scroll.x / max_scroll_x) * (track_w - thumb_w);
+
+                        let scrollbar_data_x = ImmediateData {
+                            color: [0.4, 0.4, 0.4, 0.85],
+                            border_color: [0.0; 4],
+                            pos: [thumb_left, computed.y + computed.h - 10.0],
+                            screen_size: [self.size.width as f32, self.size.height as f32],
+                            quad_size: [thumb_w, 6.0],
+                            src_offset: [0.0, 0.0],
+                            src_size: [0.0, 0.0],
+                            border_radius: 3.0,
+                            alpha: 0.9,
+                            shadow_spread: 0.0,
+                            shadow_power: 0.0,
+                            vibrancy: 0.0,
+                            vibrancy_darkness: 0.0,
+                            passes: 0.0,
+                            _pad1: 0.0,
+                            _pad2: 0.0,
+                            _pad3: 0.0,
+                            border_widths: [0.0; 4],
+                        };
+                        render_pass.set_immediates(0, bytemuck::bytes_of(&scrollbar_data_x));
+                        render_pass.draw(0..6, 0..1);
                     }
                 }
                 cmd_index += 1;

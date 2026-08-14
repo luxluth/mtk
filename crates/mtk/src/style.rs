@@ -329,6 +329,7 @@ pub enum Overflow {
     Visible,
     Hidden,
     Scroll,
+    Auto,
 }
 
 impl Into<sys::muOverflow> for Overflow {
@@ -336,7 +337,7 @@ impl Into<sys::muOverflow> for Overflow {
         match self {
             Overflow::Visible => sys::muOverflow_MU_OVERFLOW_VISIBLE,
             Overflow::Hidden => sys::muOverflow_MU_OVERFLOW_HIDDEN,
-            Overflow::Scroll => sys::muOverflow_MU_OVERFLOW_SCROLL,
+            Overflow::Scroll | Overflow::Auto => sys::muOverflow_MU_OVERFLOW_SCROLL,
         }
     }
 }
@@ -519,12 +520,14 @@ impl From<sys::muConstraints> for Constraints {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Computed {
     pub x: f32,
     pub y: f32,
     pub w: f32,
     pub h: f32,
+    pub content_w: f32,
+    pub content_h: f32,
 }
 
 impl From<sys::muComputed> for Computed {
@@ -534,6 +537,8 @@ impl From<sys::muComputed> for Computed {
             y: c.y,
             w: c.w,
             h: c.h,
+            content_w: c.content_w,
+            content_h: c.content_h,
         }
     }
 }
@@ -645,7 +650,7 @@ impl Default for TextStyle {
             font_weight: FontWeight::default(),
             font_style: FontStyle::default(),
             alignment: Alignment::Start,
-            vertical_alignment: VerticalAlignment::Center,
+            vertical_alignment: VerticalAlignment::Top,
             wrap: false,
             overflow_wrap: OverflowWrap::default(),
             selection_color: clr!(white),

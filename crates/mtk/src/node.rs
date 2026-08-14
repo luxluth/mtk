@@ -3,6 +3,11 @@ use crate::style::{Computed, Constraints};
 use crate::{Context, sys};
 use std::hash::Hash;
 
+/// An opaque, generational handle representing a UI layout element.
+///
+/// `Node` wraps a C-level layout node (`sys::muNode`). Nodes form the tree hierarchy
+/// and carry styling constraints ([`Constraints`](crate::style::Constraints)),
+/// computed layout geometry ([`Computed`](crate::style::Computed)), text content, and visual effects.
 #[derive(Clone, Copy, Debug)]
 pub struct Node(pub(crate) sys::muNode);
 
@@ -29,7 +34,7 @@ impl Hash for Node {
 }
 
 impl Node {
-    /// Append a child node to the start of the parent node tree.
+    /// Prepend a child node to the start of the parent node tree.
     pub fn prepend(&self, ctxt: &mut Context, child: Node) -> bool {
         unsafe { sys::muse_node_prepend(ctxt.ctx, self.0, child.0) }
     }
@@ -39,10 +44,10 @@ impl Node {
         unsafe { sys::muse_node_set_dirty(ctxt.ctx, self.0) }
     }
 
-    /// Detach a node from its parent but don't destroy it,
-    /// ideal for moving elements and appending them elsewhere.
+    /// Remove a child node from its parent.
+    ///
     /// If you want to completely remove the node and its subsequent children,
-    /// use `Context::destroy_node`.
+    /// consider calling [Context::destroy_node] after removing it from the parent layout hierarchy.
     pub fn remove(&self, ctxt: &mut Context) -> bool {
         unsafe { sys::muse_node_remove(ctxt.ctx, self.0) }
     }
@@ -70,32 +75,21 @@ impl Node {
         unsafe { sys::muse_node_append(ctxt.ctx, self.0, child.0) }
     }
 
-    /// Add constraints or overwrite the current existing constraints on a node.
+    /// Set constraints on a node.
     pub fn set_constraints(&self, ctxt: &mut Context, constraints: Constraints) {
         unsafe {
             sys::muse_constraints_set(ctxt.ctx, self.0, constraints.into());
         }
     }
 
-    /// Get the currently applied constraints on the node.
+    /// Get constraints currently set on a node.
     pub fn get_constraints(&self, ctxt: &Context) -> Option<Constraints> {
-        let ptr = unsafe { sys::muse_constraints_get(ctxt.ctx, self.0) };
-        if ptr.is_null() {
+        let cons = unsafe { sys::muse_constraints_get(ctxt.ctx, self.0) };
+        if cons.is_null() {
             None
         } else {
-            Some(unsafe { *ptr }.into())
+            Some(unsafe { *cons }.into())
         }
-    }
-
-    /// Add effects or overwrite the current existing effects on a node.
-    pub fn set_effects(&self, ctxt: &mut Context, effects: Effects) {
-        ctxt.effects.insert(*self, effects);
-        ctxt.dirty_effects.insert(*self);
-    }
-
-    /// Get the effects of a node if any are set.
-    pub fn get_effects(&self, ctxt: &Context) -> Option<Effects> {
-        ctxt.effects.get(self).cloned()
     }
 
     /// Fetch, modify, and apply constraints in one go. Useful for making small adjustments.
@@ -110,6 +104,23 @@ impl Node {
         if old_constraints != new_constraints {
             self.set_constraints(ctxt, new_constraints);
         }
+    }
+
+    /// Builder method to add constraints or overwrite the current existing constraints on a node.
+    pub fn with_constraints(self, ctxt: &mut Context, constraints: Constraints) -> Self {
+        self.set_constraints(ctxt, constraints);
+        self
+    }
+
+    /// Set effects on a node.
+    pub fn set_effects(&self, ctxt: &mut Context, effects: Effects) {
+        ctxt.effects.insert(*self, effects);
+        ctxt.dirty_effects.insert(*self);
+    }
+
+    /// Get effects on a node.
+    pub fn get_effects(&self, ctxt: &Context) -> Option<Effects> {
+        ctxt.effects.get(self).cloned()
     }
 
     /// Fetch, modify, and apply effects in one go.
@@ -128,12 +139,6 @@ impl Node {
         }
     }
 
-    /// Builder method to add constraints or overwrite the current existing constraints on a node.
-    pub fn with_constraints(self, ctxt: &mut Context, constraints: Constraints) -> Self {
-        self.set_constraints(ctxt, constraints);
-        self
-    }
-
     /// Builder method to add effects or overwrite the current existing effects on a node.
     pub fn with_effects(self, ctxt: &mut Context, effects: Effects) -> Self {
         self.set_effects(ctxt, effects);
@@ -148,6 +153,29 @@ impl Node {
         } else {
             Some(unsafe { *comp }.into())
         }
+    }
+
+    /// Returns a vector of direct child nodes attached to this parent.
+    pub fn children(&self, ctxt: &Context) -> Vec<Node> {
+        let mut list = Vec::new();
+        let mut curr = unsafe { sys::muse_first_child_get(ctxt.ctx, self.0) };
+        let null_val = sys::MUSE_SPARSE_NULL as usize;
+        while curr.numeral != null_val && curr.generation != null_val {
+            list.push(Node(curr));
+            curr = unsafe { sys::muse_next_sibling_get(ctxt.ctx, curr) };
+        }
+        list
+    }
+
+    /// Computes the total inner content height of this node.
+    pub fn compute_content_height(&self, ctxt: &Context) -> f32 {
+        let constraints = self.get_constraints(ctxt).unwrap_or_default();
+        let computed = match self.get_computed(ctxt) {
+            Some(c) => c,
+            None => return 0.0,
+        };
+        let inner_h = (computed.h - constraints.padding.top - constraints.padding.bottom).max(0.0);
+        computed.content_h.max(inner_h)
     }
 
     /// Transform a node into a text element, making it partake in text sizing.
@@ -170,6 +198,14 @@ impl Node {
                 sys::muText {
                     data: ptr as *mut _,
                     userdata: existing_userdata as *mut std::ffi::c_void,
+                    cached_avail_w: -1.0,
+                    cached_avail_h: -1.0,
+                    cached_output: sys::muTextComputedOutput {
+                        computed_width: 0.0,
+                        computed_height: 0.0,
+                        baseline_offset: 0.0,
+                    },
+                    is_cached: false,
                 },
             );
         }
@@ -181,14 +217,9 @@ impl Node {
         let ptr = c_string.as_ptr();
         ctxt.texts.insert(*self, c_string);
 
-        let any_box: Box<dyn std::any::Any> = Box::new(userdata);
-        let userdata_ptr = Box::into_raw(Box::new(any_box));
-
-        if let Some(old_ptr) = ctxt.text_userdatas.insert(*self, userdata_ptr) {
-            unsafe {
-                let _ = Box::from_raw(old_ptr);
-            }
-        }
+        let boxed: Box<Box<dyn std::any::Any>> = Box::new(Box::new(userdata));
+        let raw_ptr = Box::into_raw(boxed);
+        ctxt.text_userdatas.insert(*self, raw_ptr);
 
         unsafe {
             sys::muse_text_set(
@@ -196,13 +227,21 @@ impl Node {
                 self.0,
                 sys::muText {
                     data: ptr as *mut _,
-                    userdata: userdata_ptr as *mut std::ffi::c_void,
+                    userdata: raw_ptr as *mut std::ffi::c_void,
+                    cached_avail_w: -1.0,
+                    cached_avail_h: -1.0,
+                    cached_output: sys::muTextComputedOutput {
+                        computed_width: 0.0,
+                        computed_height: 0.0,
+                        baseline_offset: 0.0,
+                    },
+                    is_cached: false,
                 },
             );
         }
     }
 
-    /// Remove the ability of a node to act like a text element.
+    /// Remove text from a node.
     pub fn unset_text(&self, ctxt: &mut Context) {
         ctxt.texts.remove(self);
         if let Some(ptr) = ctxt.text_userdatas.remove(self) {

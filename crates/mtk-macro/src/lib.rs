@@ -5,7 +5,7 @@ use syn::{Data, DeriveInput, Fields, parse_macro_input};
 /// Derives field lenses for a struct.
 ///
 /// For each named field in the struct, this derive macro generates:
-/// A. A zero-sized lens struct implementing [`Lens<StructName, FieldType>`](::mtk::ui::Lens).
+/// A. A zero-sized lens struct implementing `Lens<StructName, FieldType>`.
 /// B. An associated constant on the struct matching the field's name (e.g. `AppState::my_field`)
 ///    that provides a static reference to the lens.
 ///

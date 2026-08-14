@@ -89,8 +89,11 @@ impl View<String> for InputText {
     }
 
     fn rebuild(&self, _prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
-        // Preserve the user's TextStyle if they set one via StyleWrap
-        let mut text_style = TextStyle::default();
+        // Preserve the user's TextStyle if they set one via StyleWrap, defaulting to Center for single-line inputs
+        let mut text_style = TextStyle {
+            vertical_alignment: crate::style::VerticalAlignment::Center,
+            ..TextStyle::default()
+        };
         if let Some(info) = element.node.get_text_userdata::<TextRenderInfo>(ctx) {
             text_style = info.style.clone();
         } else if let Some(style) = element.node.get_text_userdata::<TextStyle>(ctx) {
@@ -173,7 +176,7 @@ impl View<String> for InputText {
                                 y - computed.y - constraints.padding.top + constraints.scroll.y;
                             let shift = ctx.modifiers().shift_key();
 
-                            let inner_w =
+                            let _inner_w =
                                 (computed.w - constraints.padding.left - constraints.padding.right)
                                     .max(0.0);
                             let inner_h =
@@ -194,7 +197,7 @@ impl View<String> for InputText {
                             let index = crate::text::hit_test_text(
                                 &element.editor.display_text(),
                                 &text_style,
-                                inner_w,
+                                f32::INFINITY,
                                 inner_h,
                                 rel_x,
                                 rel_y,
@@ -255,7 +258,7 @@ impl View<String> for InputText {
                             x - computed.x - constraints.padding.left + constraints.scroll.x;
                         let rel_y = y - computed.y - constraints.padding.top + constraints.scroll.y;
 
-                        let inner_w =
+                        let _inner_w =
                             (computed.w - constraints.padding.left - constraints.padding.right)
                                 .max(0.0);
                         let inner_h =
@@ -273,7 +276,7 @@ impl View<String> for InputText {
                         let index = crate::text::hit_test_text(
                             &element.editor.display_text(),
                             &text_style,
-                            inner_w,
+                            f32::INFINITY,
                             inner_h,
                             rel_x,
                             rel_y,
@@ -361,6 +364,34 @@ impl View<String> for InputText {
                         Key::Character(s) if ctrl_alt && (s == "a" || s == "A") => {
                             element.editor.select_all();
                             ctx.request_frame();
+                        }
+                        Key::Character(s) if ctrl_alt && (s == "c" || s == "C") => {
+                            if let Some((start, end)) = element.editor.selection() {
+                                let display_str = element.editor.display_text();
+                                if start < display_str.len() && end <= display_str.len() {
+                                    ctx.clipboard_copy(crate::ClipboardData::Text(
+                                        display_str[start..end].to_string(),
+                                    ));
+                                }
+                            }
+                        }
+                        Key::Character(s) if ctrl_alt && (s == "x" || s == "X") => {
+                            if let Some((start, end)) = element.editor.selection() {
+                                let display_str = element.editor.display_text();
+                                if start < display_str.len() && end <= display_str.len() {
+                                    ctx.clipboard_copy(crate::ClipboardData::Text(
+                                        display_str[start..end].to_string(),
+                                    ));
+                                    element.editor.delete_backward();
+                                    text_changed = true;
+                                }
+                            }
+                        }
+                        Key::Character(s) if ctrl_alt && (s == "v" || s == "V") => {
+                            if let Some(crate::ClipboardData::Text(pasted)) = ctx.clipboard_get() {
+                                element.editor.insert(&pasted);
+                                text_changed = true;
+                            }
                         }
                         _ => {
                             if let Some(text) = &key_event.text {
@@ -457,7 +488,7 @@ impl View<String> for InputText {
                     let (cx, cy, ch) = crate::text::get_cursor_geometry(
                         &element.editor.display_text(),
                         &text_style_for_scroll,
-                        inner_w,
+                        f32::INFINITY,
                         cursor_after,
                         &ctx.text_context,
                     );
@@ -465,7 +496,7 @@ impl View<String> for InputText {
                     let measured = crate::text::measure_text(
                         &element.editor.display_text(),
                         &text_style_for_scroll,
-                        inner_w,
+                        f32::INFINITY,
                         inner_h,
                         &ctx.text_context,
                     );

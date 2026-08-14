@@ -1,15 +1,35 @@
+//! View memoization utilities for caching layout subtrees based on value equality.
+//!
+//! Memoization prevents unnecessary view rebuilds and layout tree diffing when input parameters
+//! (`data`) remain unchanged between render passes.
+
 use crate::{
     Context,
     ui::{Event, View, event::EventResult},
 };
 
+/// A memoized view wrapper that caches sub-view layout trees based on key equality (`T: PartialEq`).
 pub struct Memoize<T, F> {
     pub(crate) data: T,
     pub(crate) builder: F,
 }
 
-/// Memoizes a view. The view will only be rebuilt if `data` changes.
-/// `T` must implement [PartialEq] and [Clone].
+/// Memoizes a view construction function.
+///
+/// The returned [`Memoize`] component will only rebuild its inner view if `data` compares unequal (`!=`)
+/// to the key stored during the previous frame.
+///
+/// # Requirements
+/// - `T` must implement [`PartialEq`] and [`Clone`].
+///
+/// # Examples
+/// ```rust,ignore
+/// use mtk::ui::memoize::memoize;
+/// use mtk::ui::widgets::text;
+///
+/// let name = "Alice".to_string();
+/// let view = memoize(name, |data| text(format!("Hello, {data}")));
+/// ```
 pub fn memoize<T, V, F>(data: T, builder: F) -> Memoize<T, F>
 where
     T: PartialEq + Clone,
@@ -25,9 +45,10 @@ where
     V: View<State>,
     F: Fn(&T) -> V,
 {
-    // The data we diff against (T)
-    // The previously generated view (V)
-    // The persistent element state (V::Element)
+    /// Element state tuple holding:
+    /// 1 - The cached key `T` diffed against new frames.
+    /// 2 - The constructed view `V`.
+    /// 3 - The persistent element node state `V::Element`.
     type Element = (T, V, V::Element);
     type Message = V::Message;
 
