@@ -2,6 +2,8 @@
 
 MTK is a responsive, reactive GUI framework built for Rust, inspired by [Xilem](https://github.com/linebender/xilem). It is powered by a high-performance C layout engine (`muse.h`), native WGPU hardware rendering, fluid layout flexing, and Parley typography.
 
+![Todo App Example](https://raw.github.com/luxluth/mtk/master/assets/todoapp.png)
+
 > [!WARNING]
 > _Still experimental. Not for production use_
 
