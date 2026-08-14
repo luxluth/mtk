@@ -338,6 +338,7 @@ impl<'w> Renderer<'w> {
             glyphs: std::ops::Range<usize>,
             selections: Vec<[f32; 4]>,
             strikethroughs: Vec<[f32; 4]>,
+            underlines: Vec<[f32; 4]>,
             caret: Option<[f32; 4]>,
             style: TextStyle,
         }
@@ -556,6 +557,26 @@ impl<'w> Renderer<'w> {
                             }
                         }
 
+                        let mut underlines = Vec::new();
+                        if let Some((start, end)) = preedit_range {
+                            if start < end {
+                                let start_cursor =
+                                    Cursor::from_byte_index(&layout, start, Affinity::Downstream);
+                                let end_cursor =
+                                    Cursor::from_byte_index(&layout, end, Affinity::Upstream);
+
+                                let selection_obj = Selection::new(start_cursor, end_cursor);
+                                let thickness = (text_style.font_size * 0.08).max(1.5);
+                                for rect in selection_obj.geometry(&layout) {
+                                    let u_x = text_x + rect.0.x0 as f32;
+                                    let u_y = text_y + rect.0.y1 as f32 - (thickness * 0.5);
+                                    let u_w = (rect.0.x1 - rect.0.x0) as f32;
+                                    let u_h = thickness;
+                                    underlines.push([u_x, u_y, u_w, u_h]);
+                                }
+                            }
+                        }
+
                         let end = text_instances.len() as u32;
 
                         if Some(cmd.node()) == context.focused_node() {
@@ -568,6 +589,7 @@ impl<'w> Renderer<'w> {
                                 glyphs: (start as usize)..(end as usize),
                                 selections: selection_rects,
                                 strikethroughs,
+                                underlines,
                                 caret: caret_rect,
                                 style: text_style.clone(),
                             },
@@ -871,6 +893,34 @@ impl<'w> Renderer<'w> {
                                 pos: [strike[0], strike[1]],
                                 screen_size: [self.size.width as f32, self.size.height as f32],
                                 quad_size: [strike[2], strike[3]],
+                                src_offset: [0.0, 0.0],
+                                src_size: [0.0, 0.0],
+                                border_radius: 0.0,
+                                alpha: 1.0,
+                                shadow_spread: 0.0,
+                                shadow_power: 0.0,
+                                vibrancy: 0.0,
+                                vibrancy_darkness: 0.0,
+                                passes: 0.0,
+                                _pad1: 0.0,
+                                _pad2: 0.0,
+                                _pad3: 0.0,
+                                border_widths: [0.0; 4],
+                            };
+
+                            render_pass.set_pipeline(&self.pipelines.solid);
+                            render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
+                            render_pass.draw(0..6, 0..1);
+                        }
+
+                        // E) Draw Underlines (e.g. IME Preedit Underline)
+                        for u in &range.underlines {
+                            let immediate_data = ImmediateData {
+                                color: range.style.color.into(),
+                                border_color: [0.0; 4],
+                                pos: [u[0], u[1]],
+                                screen_size: [self.size.width as f32, self.size.height as f32],
+                                quad_size: [u[2], u[3]],
                                 src_offset: [0.0, 0.0],
                                 src_size: [0.0, 0.0],
                                 border_radius: 0.0,

@@ -55,10 +55,14 @@ impl Editor {
     }
 
     /// Sets the active IME preedit state. If `text` is empty, the preedit state is cleared.
+    /// If starting a new composition while text is selected, the selected text is deleted first.
     pub fn set_ime_preedit(&mut self, text: String, cursor_pos: Option<(usize, usize)>) {
         if text.is_empty() {
             self.ime_preedit = None;
         } else {
+            if self.ime_preedit.is_none() {
+                self.delete_selection();
+            }
             self.ime_preedit = Some((text, cursor_pos));
         }
     }
@@ -86,8 +90,15 @@ impl Editor {
     /// any active IME preedit and its internal cursor position.
     pub fn display_cursor(&self) -> usize {
         if let Some((text, cursor_pos)) = &self.ime_preedit {
-            if let Some((start, _)) = cursor_pos {
-                self.cursor + start
+            if let Some((start, end)) = cursor_pos {
+                let offset = if *end > 0 {
+                    *end
+                } else if *start > 0 {
+                    *start
+                } else {
+                    text.len()
+                };
+                self.cursor + offset.min(text.len())
             } else {
                 self.cursor + text.len()
             }
@@ -683,6 +694,28 @@ mod tests {
         assert_eq!(editor.text(), "hello world");
         assert_eq!(editor.preedit_range(), None);
         assert_eq!(editor.cursor(), 11);
+    }
+
+    #[test]
+    fn test_editor_selection_replacement() {
+        let mut editor = Editor::new();
+        editor.insert("hello world");
+        editor.select_all(); // Selects 0..11
+        assert_eq!(editor.selection(), Some((0, 11)));
+
+        // Type 'a' over selection
+        editor.insert("a");
+        assert_eq!(editor.text(), "a");
+        assert_eq!(editor.cursor(), 1);
+        assert_eq!(editor.selection(), None);
+
+        // Select 'a' and start IME composition
+        editor.select_all();
+        assert_eq!(editor.selection(), Some((0, 1)));
+        editor.set_ime_preedit("ni".to_string(), None);
+        assert_eq!(editor.text(), ""); // Selected text 'a' deleted immediately
+        assert_eq!(editor.display_text(), "ni");
+        assert_eq!(editor.selection(), None);
     }
 
     #[test]
