@@ -233,15 +233,19 @@ typedef struct {
   size_t numeral, generation;
 } muId;
 
+typedef muId muNode;
+
 #define MUSE_UNDEFINED_MUID                                                    \
   ((muId){.numeral = MUSE_SPARSE_NULL, .generation = MUSE_SPARSE_NULL})
+
+// Get an invalid muid
+MUSEDEF muNode muse_muid_invalid();
 
 // Check if a muId|muNode is valid
 MUSEDEF bool muse_muid_is_valid(muId id);
 // Compare two muId|muNode to see if they match
 MUSEDEF bool muse_muid_eq(muId a, muId b);
 
-typedef muId muNode;
 typedef MUSE_DA(muNode) muNodeList;
 
 typedef struct {
@@ -488,6 +492,8 @@ MUSEDEF muNode muse_next_sibling_get(muContext *ctx, muNode node);
 #endif // MUSE_H_
 
 #ifdef MUSE_IMPLEMENTATION
+
+MUSEDEF muNode muse_muid_invalid() { return MUSE_UNDEFINED_MUID; }
 
 MUSEDEF bool muse_muid_is_valid(muId id) {
   return id.numeral != MUSE_SPARSE_NULL && id.generation != MUSE_SPARSE_NULL;

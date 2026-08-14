@@ -89,7 +89,10 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
         node.update_constraints(ctx, |c| {
             let overflow = c.overflow;
             let scroll = c.scroll;
+            let flex_dir = self.style.flex_direction.unwrap_or(c.flex_direction);
             *c = self.style.base_constraints;
+
+            c.flex_direction = flex_dir;
 
             // ScrollView sets Overflow::Scroll before StyledView runs, preserve it if we didn't explicitly override it (assuming default Visible means no override for ScrollView)
             if self.style.base_constraints.overflow == Overflow::Visible
@@ -232,7 +235,10 @@ impl<V> StyledView<V> {
             node.update_constraints(ctx, |c| {
                 let overflow = c.overflow;
                 let scroll = c.scroll;
+                let flex_dir = self.style.flex_direction.unwrap_or(c.flex_direction);
                 *c = target_constraints;
+
+                c.flex_direction = flex_dir;
 
                 if target_constraints.overflow == crate::style::Overflow::Visible
                     && overflow != crate::style::Overflow::Visible
@@ -311,5 +317,51 @@ impl<V> StyledView<V> {
         }
 
         return is_animating;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::FlexDirection;
+    use crate::ui::widgets::{column, row, text};
+
+    #[test]
+    fn test_row_flex_direction_preserved_when_styled() {
+        let mut ctx = Context::new();
+        let row_view =
+            row((text::<_, ()>("Left"), text::<_, ()>("Right"))).style(Style::new().padding(10.0));
+
+        let element = View::<()>::build(&row_view, &mut ctx);
+        let node = View::<()>::get_node(&row_view, &element);
+        let constraints = node.get_constraints(&ctx).unwrap();
+
+        assert_eq!(constraints.flex_direction, FlexDirection::Row);
+    }
+
+    #[test]
+    fn test_column_flex_direction_preserved_when_styled() {
+        let mut ctx = Context::new();
+        let col_view = column((text::<_, ()>("Top"), text::<_, ()>("Bottom")))
+            .style(Style::new().padding(10.0));
+
+        let element = View::<()>::build(&col_view, &mut ctx);
+        let node = View::<()>::get_node(&col_view, &element);
+        let constraints = node.get_constraints(&ctx).unwrap();
+
+        assert_eq!(constraints.flex_direction, FlexDirection::Column);
+    }
+
+    #[test]
+    fn test_row_flex_direction_explicit_override() {
+        let mut ctx = Context::new();
+        let row_view = row((text::<_, ()>("A"), text::<_, ()>("B")))
+            .style(Style::new().flex_direction(FlexDirection::Column));
+
+        let element = View::<()>::build(&row_view, &mut ctx);
+        let node = View::<()>::get_node(&row_view, &element);
+        let constraints = node.get_constraints(&ctx).unwrap();
+
+        assert_eq!(constraints.flex_direction, FlexDirection::Column);
     }
 }

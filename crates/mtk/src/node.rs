@@ -34,6 +34,10 @@ impl Hash for Node {
 }
 
 impl Node {
+    pub fn get_invalid() -> Node {
+        Node(unsafe { crate::sys::muse_muid_invalid() })
+    }
+
     /// Prepend a child node to the start of the parent node tree.
     pub fn prepend(&self, ctxt: &mut Context, child: Node) -> bool {
         unsafe { sys::muse_node_prepend(ctxt.ctx, self.0, child.0) }

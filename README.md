@@ -2,6 +2,9 @@
 
 MTK is a responsive, reactive GUI framework built for Rust, inspired by [Xilem](https://github.com/linebender/xilem). It is powered by a high-performance C layout engine (`muse.h`), native WGPU hardware rendering, fluid layout flexing, and Parley typography.
 
+> [!WARNING]
+> _Still experimental. Not for production use_
+
 ---
 
 ## Quick Start Example
@@ -43,7 +46,7 @@ fn main() {
 ## Key Capabilities
 
 - **Declarative View Hierarchy**: Compose user interfaces cleanly using reactive view trees (`View`).
-- **Lenses & State Adaptation**: Decouple stateful sub-widgets from root application state using zero-cost `Lens` accessors.
+- **Lenses and State Adaptation**: Decouple stateful sub-widgets from root application state using zero-cost `Lens` accessors.
 - **Unidirectional Data Flow**: State updates pass through pure `update` functions driven by typed messages.
 - **Rich UI Widgets**: Includes `container`, `column`, `row`, `text`, `scroll_view`, `input_text`, and `text_area`.
 - **Seamless Intrinsic Scrolling**: Automatic content bounds calculation, smooth kinetic scrolling, and overlay shadow scrollbars.
@@ -51,7 +54,7 @@ fn main() {
 
 ---
 
-## State Management, Lenses & The Adapter Pattern
+## State Management, Lenses and The Adapter Pattern
 
 MTK uses **Lenses** and the **Adapter Pattern** to focus large global application states into isolated, reusable sub-views while keeping state flow 100% type-safe.
 
@@ -105,14 +108,14 @@ fn view(state: &AppState) -> impl mtk::ui::View<AppState, Message = AppMsg> {
 
 ---
 
-## Core Architecture & Execution Model
+## Core Architecture and Execution Model
 
 The lifetime of a frame inside MTK follows a structured multi-pass execution model managed by `Context`:
 
 1. **Tree Construction**: Widgets create and attach layout primitives (`Node`) to the context.
 2. **Layout Pass (`compute_layout`)**: A multi-pass algorithm calculates intrinsic text sizes, flex dimensions, percentages, and absolute bounds across the tree.
 3. **Render List Generation (`build_render_list`)**: The layout tree is flattened into a Z-indexed array of draw commands (`RenderCommand`), applying scissor clipping rectangles for scroll views and containers.
-4. **Event Dispatch & Picking (`pick`)**: Coordinate hit-testing determines mouse target nodes and routes keyboard/focus events.
+4. **Event Dispatch and Picking (`pick`)**: Coordinate hit-testing determines mouse target nodes and routes keyboard/focus events.
 
 ---
 

@@ -33,7 +33,6 @@ pub struct Memoize<T, F> {
 pub fn memoize<T, V, F>(data: T, builder: F) -> Memoize<T, F>
 where
     T: PartialEq + Clone,
-    V: View<()>, // Or your global State, depending on your needs
     F: Fn(&T) -> V,
 {
     Memoize { data, builder }

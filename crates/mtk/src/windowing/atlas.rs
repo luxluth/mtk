@@ -9,6 +9,7 @@ pub struct CacheKey {
     pub font_ptr: usize,
     pub font_size: u32,
     pub glyph_id: u16,
+    pub coords_hash: u64,
 }
 
 pub struct Atlas {
@@ -80,6 +81,10 @@ impl Atlas {
             next_y: 0,
             row_height: 0,
         }
+    }
+
+    pub fn get(&self, key: CacheKey) -> Option<GlyphInfo> {
+        self.glyphs.get(&key).copied()
     }
 
     pub fn get_or_insert(

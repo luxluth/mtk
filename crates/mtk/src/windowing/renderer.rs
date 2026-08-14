@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use bytemuck::{Pod, Zeroable};
-use parley::{Affinity, AlignmentOptions, Cursor, Selection};
+use parley::{Affinity, Cursor, Selection};
 use wgpu::CompositeAlphaMode;
 use winit::{dpi::PhysicalSize, event_loop::OwnedDisplayHandle, window::Window};
 
@@ -337,6 +337,7 @@ impl<'w> Renderer<'w> {
         struct RenderTextData {
             glyphs: std::ops::Range<usize>,
             selections: Vec<[f32; 4]>,
+            strikethroughs: Vec<[f32; 4]>,
             caret: Option<[f32; 4]>,
             style: TextStyle,
         }
@@ -376,55 +377,27 @@ impl<'w> Renderer<'w> {
 
                         let text_ctx_ref = &mut *text_ctx;
 
-                        use parley::style::{LineHeight, StyleProperty};
-
-                        let display_scale = 1.0;
-                        let quantize = true;
-
-                        let mut builder = text_ctx_ref.layout_cx.ranged_builder(
-                            &mut text_ctx_ref.font_cx,
+                        let layout_entry = text_ctx_ref.get_or_create_layout(
                             text,
-                            display_scale,
-                            quantize,
+                            text_style,
+                            inner_w,
+                            selection,
+                            preedit_range,
                         );
+                        let layout = &layout_entry.layout;
+                        let actual_text_width = layout_entry.actual_text_width;
+                        let actual_text_height = layout_entry.actual_text_height;
 
-                        builder.push_default(StyleProperty::Brush(text_style.color));
-                        builder.push_default(StyleProperty::FontSize(text_style.font_size));
-                        builder.push_default(StyleProperty::LineHeight(
-                            LineHeight::FontSizeRelative(text_style.line_height.resolve()),
-                        ));
-                        builder.push_default(StyleProperty::FontWeight(text_style.font_weight));
-                        builder.push_default(StyleProperty::FontStyle(text_style.font_style));
-                        builder.push_default(parley::style::FontFamily::from(
-                            text_style.font_family.as_str(),
-                        ));
-                        if text_style.wrap {
-                            builder.push_default(StyleProperty::OverflowWrap(
-                                text_style.overflow_wrap,
-                            ));
-                        }
-
-                        if let Some((start, end)) = preedit_range {
-                            // Style the preedit text with an underline to show it is being composed
-                            builder.push(StyleProperty::Underline(true), start..end);
-                        }
-
-                        if let Some((start, end)) = selection {
-                            builder
-                                .push(StyleProperty::Brush(text_style.selection_color), start..end);
-                        }
-
-                        let mut layout = builder.build(text);
-
-                        let max_advance = if text_style.wrap && inner_w > 0.0 {
-                            Some(inner_w)
-                        } else {
-                            None
+                        let horizontal_offset = match text_style.alignment {
+                            parley::layout::Alignment::Center => {
+                                ((inner_w - actual_text_width) / 2.0).max(0.0)
+                            }
+                            parley::layout::Alignment::End | parley::layout::Alignment::Right => {
+                                (inner_w - actual_text_width).max(0.0)
+                            }
+                            _ => 0.0,
                         };
-                        layout.break_all_lines(max_advance);
-                        layout.align(text_style.alignment, AlignmentOptions::default());
 
-                        let actual_text_height = layout.height();
                         let vertical_offset = match text_style.vertical_alignment {
                             crate::style::VerticalAlignment::Top => 0.0,
                             crate::style::VerticalAlignment::Center => {
@@ -435,7 +408,8 @@ impl<'w> Renderer<'w> {
                             }
                         };
 
-                        let text_x = computed.x + constraints.padding.left - constraints.scroll.x;
+                        let text_x = computed.x + constraints.padding.left + horizontal_offset
+                            - constraints.scroll.x;
                         let text_y = computed.y + constraints.padding.top + vertical_offset
                             - constraints.scroll.y;
 
@@ -454,35 +428,55 @@ impl<'w> Renderer<'w> {
                                 };
 
                                 let font_data = glyph_run.run().font();
-                                let swash_font = swash::FontRef::from_index(
-                                    font_data.data.as_ref(),
-                                    font_data.index as usize,
-                                )
-                                .unwrap();
                                 let font_size = glyph_run.run().font_size();
                                 let font_ptr = font_data.data.as_ref().as_ptr() as usize;
                                 let brush = glyph_run.style().brush;
 
-                                let mut scaler = text_ctx_ref
-                                    .scale_cx
-                                    .builder(swash_font)
-                                    .size(font_size)
-                                    .hint(true)
-                                    .normalized_coords(glyph_run.run().normalized_coords())
-                                    .build();
+                                let norm_coords = glyph_run.run().normalized_coords();
+                                use std::hash::{Hash, Hasher};
+                                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                                norm_coords.hash(&mut hasher);
+                                let coords_hash = hasher.finish();
+
+                                let mut scaler_opt = None;
 
                                 for glyph in glyph_run.positioned_glyphs() {
                                     let cache_key = atlas::CacheKey {
                                         font_ptr,
                                         font_size: (font_size * 1000.0) as u32,
                                         glyph_id: glyph.id as u16,
+                                        coords_hash,
                                     };
 
-                                    if let Some(info) = self.atlas.get_or_insert(
-                                        &self.queue,
-                                        &mut scaler,
-                                        cache_key,
-                                    ) {
+                                    let info_opt = if let Some(info) = self.atlas.get(cache_key) {
+                                        Some(info)
+                                    } else {
+                                        if scaler_opt.is_none() {
+                                            let swash_font = swash::FontRef::from_index(
+                                                font_data.data.as_ref(),
+                                                font_data.index as usize,
+                                            )
+                                            .unwrap();
+
+                                            scaler_opt = Some(
+                                                text_ctx_ref
+                                                    .scale_cx
+                                                    .builder(swash_font)
+                                                    .size(font_size)
+                                                    .hint(false)
+                                                    .normalized_coords(norm_coords)
+                                                    .build(),
+                                            );
+                                        }
+
+                                        self.atlas.get_or_insert(
+                                            &self.queue,
+                                            scaler_opt.as_mut().unwrap(),
+                                            cache_key,
+                                        )
+                                    };
+
+                                    if let Some(info) = info_opt {
                                         let global_x = text_x + glyph.x + info.offset_x as f32;
                                         // `glyph.y` is already positioned by `positioned_glyphs()`
                                         let global_y = text_y + glyph.y + info.offset_y as f32;
@@ -552,6 +546,17 @@ impl<'w> Renderer<'w> {
                             }
                         }
 
+                        let mut strikethroughs = Vec::new();
+                        if text_style.strikethrough {
+                            let thickness = (text_style.font_size * 0.08).max(1.5);
+                            for line in layout.lines() {
+                                let line_w = line.metrics().advance;
+                                let line_y =
+                                    text_y + (actual_text_height * 0.52) - (thickness * 0.5);
+                                strikethroughs.push([text_x, line_y, line_w, thickness]);
+                            }
+                        }
+
                         let end = text_instances.len() as u32;
 
                         if Some(cmd.node()) == context.focused_node() {
@@ -563,6 +568,7 @@ impl<'w> Renderer<'w> {
                             RenderTextData {
                                 glyphs: (start as usize)..(end as usize),
                                 selections: selection_rects,
+                                strikethroughs,
                                 caret: caret_rect,
                                 style: text_style.clone(),
                             },
@@ -842,6 +848,34 @@ impl<'w> Renderer<'w> {
                                 pos: [c_rect[0], c_rect[1]],
                                 screen_size: [self.size.width as f32, self.size.height as f32],
                                 quad_size: [c_rect[2], c_rect[3]],
+                                src_offset: [0.0, 0.0],
+                                src_size: [0.0, 0.0],
+                                border_radius: 0.0,
+                                alpha: 1.0,
+                                shadow_spread: 0.0,
+                                shadow_power: 0.0,
+                                vibrancy: 0.0,
+                                vibrancy_darkness: 0.0,
+                                passes: 0.0,
+                                _pad1: 0.0,
+                                _pad2: 0.0,
+                                _pad3: 0.0,
+                                border_widths: [0.0; 4],
+                            };
+
+                            render_pass.set_pipeline(&self.pipelines.solid);
+                            render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
+                            render_pass.draw(0..6, 0..1);
+                        }
+
+                        // D) Draw Strikethroughs
+                        for strike in &range.strikethroughs {
+                            let immediate_data = ImmediateData {
+                                color: range.style.color.into(),
+                                border_color: [0.0; 4],
+                                pos: [strike[0], strike[1]],
+                                screen_size: [self.size.width as f32, self.size.height as f32],
+                                quad_size: [strike[2], strike[3]],
                                 src_offset: [0.0, 0.0],
                                 src_size: [0.0, 0.0],
                                 border_radius: 0.0,

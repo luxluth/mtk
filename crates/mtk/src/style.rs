@@ -638,6 +638,7 @@ pub struct TextStyle {
     pub selection_color: Color,
     pub selection_bg: Color,
     pub caret_color: Color,
+    pub strikethrough: bool,
 }
 
 impl Default for TextStyle {
@@ -656,6 +657,7 @@ impl Default for TextStyle {
             selection_color: clr!(white),
             selection_bg: clr!(ll_blue),
             caret_color: clr!(black),
+            strikethrough: false,
         }
     }
 }
@@ -672,6 +674,7 @@ pub struct Style {
     pub base_constraints: Constraints,
     pub base_effects: Effects,
     pub base_text_style: TextStyle,
+    pub flex_direction: Option<FlexDirection>,
 
     pub hover_constraints: Option<Constraints>,
     pub hover_effects: Option<Effects>,
@@ -687,6 +690,17 @@ impl Style {
 
     pub fn padding(mut self, val: f32) -> Self {
         self.base_constraints.padding = Edges::all(val);
+        self
+    }
+
+    /// Sets symmetric horizontal (`x`) and vertical (`y`) padding edges.
+    pub fn padding_xy(mut self, x: f32, y: f32) -> Self {
+        self.base_constraints.padding = Edges {
+            top: y,
+            right: x,
+            bottom: y,
+            left: x,
+        };
         self
     }
 
@@ -779,6 +793,15 @@ impl Style {
 
     pub fn flex_direction(mut self, dir: FlexDirection) -> Self {
         self.base_constraints.flex_direction = dir;
+        self.flex_direction = Some(dir);
+        self
+    }
+
+    /// Sets flex grow factor for layout flexing inside flex containers.
+    pub fn flex_grow(mut self, val: f32) -> Self {
+        if val > 0.0 {
+            self.base_constraints.width = Size::Percent(val);
+        }
         self
     }
 

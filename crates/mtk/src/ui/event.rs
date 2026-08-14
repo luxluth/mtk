@@ -21,6 +21,8 @@ pub enum EventKind {
     Press,
     /// Triggered when a mouse button is released over the view.
     Release,
+    /// Triggered when the user submits input (e.g., pressing Enter in a focused input field).
+    Submit,
 }
 
 /// Indicates whether a view successfully processed or ignored an incoming event.
@@ -120,6 +122,24 @@ where
                         }
                     } else {
                         if self.kind == EventKind::Release || self.kind == EventKind::Click {
+                            emitted_msg = (self.handler)(state);
+                            handled = EventResult::Handled;
+                        }
+                    }
+                }
+            }
+            Event::KeyboardInput {
+                event: key_event, ..
+            } => {
+                if self.kind == EventKind::Submit && key_event.state.is_pressed() {
+                    let self_node = self.get_node(element);
+                    if Some(self_node) == ctx.focused_node() {
+                        let is_enter = match key_event.logical_key.as_ref() {
+                            winit::keyboard::Key::Named(winit::keyboard::NamedKey::Enter) => true,
+                            winit::keyboard::Key::Character(s) => s == "\r" || s == "\n",
+                            _ => false,
+                        };
+                        if is_enter {
                             emitted_msg = (self.handler)(state);
                             handled = EventResult::Handled;
                         }

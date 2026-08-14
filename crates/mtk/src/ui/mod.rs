@@ -270,3 +270,121 @@ where
         (handled, emitted_msg)
     }
 }
+
+// Implement View for Option<V> to support conditional rendering as a standalone View
+impl<State, V> View<State> for Option<V>
+where
+    V: View<State>,
+{
+    type Element = Option<V::Element>;
+    type Message = V::Message;
+
+    fn build(&self, ctx: &mut Context) -> Self::Element {
+        self.as_ref().map(|v| v.build(ctx))
+    }
+
+    fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
+        match (self, prev, element) {
+            (Some(new_view), Some(old_view), Some(el)) => {
+                new_view.rebuild(old_view, ctx, el);
+            }
+            (Some(new_view), _, el_slot @ None) => {
+                *el_slot = Some(new_view.build(ctx));
+            }
+            (None, Some(old_view), el_slot @ Some(_)) => {
+                if let Some(mut el) = el_slot.take() {
+                    old_view.teardown(ctx, &mut el);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
+        if let (Some(view), Some(el)) = (self.as_ref(), element) {
+            view.teardown(ctx, el);
+        }
+    }
+
+    fn get_node(&self, element: &Self::Element) -> Node {
+        if let (Some(view), Some(el)) = (self.as_ref(), element) {
+            view.get_node(el)
+        } else {
+            Node::get_invalid()
+        }
+    }
+
+    fn handle_event(
+        &self,
+        element: &mut Self::Element,
+        state: &State,
+        event: Event,
+        ctx: &mut Context,
+    ) -> (EventResult, Option<Self::Message>) {
+        if let (Some(view), Some(el)) = (self.as_ref(), element) {
+            view.handle_event(el, state, event, ctx)
+        } else {
+            (EventResult::Ignored, None)
+        }
+    }
+}
+
+// Implement ViewSequence for Option<V> to support conditional rendering
+impl<State, V> ViewSequence<State> for Option<V>
+where
+    V: View<State>,
+{
+    type Elements = Option<V::Element>;
+    type Message = V::Message;
+
+    fn build(&self, ctx: &mut Context, parent: Node) -> Self::Elements {
+        if let Some(view) = self {
+            let el = view.build(ctx);
+            parent.append(ctx, view.get_node(&el));
+            Some(el)
+        } else {
+            None
+        }
+    }
+
+    fn rebuild(&self, prev: &Self, ctx: &mut Context, elements: &mut Self::Elements, parent: Node) {
+        match (self, prev, elements) {
+            (Some(new_view), Some(old_view), Some(el)) => {
+                new_view.rebuild(old_view, ctx, el);
+            }
+            (Some(new_view), _, el_slot @ None) => {
+                let el = new_view.build(ctx);
+                parent.append(ctx, new_view.get_node(&el));
+                *el_slot = Some(el);
+            }
+            (None, Some(old_view), el_slot @ Some(_)) => {
+                if let Some(mut el) = el_slot.take() {
+                    let node = old_view.get_node(&el);
+                    node.remove(ctx);
+                    old_view.teardown(ctx, &mut el);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn teardown(&self, ctx: &mut Context, elements: &mut Self::Elements) {
+        if let (Some(view), Some(el)) = (self, elements) {
+            view.teardown(ctx, el);
+        }
+    }
+
+    fn handle_event(
+        &self,
+        elements: &mut Self::Elements,
+        state: &State,
+        event: Event,
+        ctx: &mut Context,
+    ) -> (EventResult, Option<Self::Message>) {
+        if let (Some(view), Some(el)) = (self, elements) {
+            view.handle_event(el, state, event, ctx)
+        } else {
+            (EventResult::Ignored, None)
+        }
+    }
+}

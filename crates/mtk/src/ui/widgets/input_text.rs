@@ -13,18 +13,16 @@ use winit::keyboard::{Key, NamedKey};
 /// string state to your global application state.
 pub struct InputText {
     pub(crate) captures_tab: bool,
+    pub(crate) placeholder: Option<String>,
+    pub(crate) text_style: Option<TextStyle>,
 }
-
-// NOTE: Under the hood, this widget utilizes the `Editor` struct to manage text buffers, unicode
-// boundaries, and cursor movements. The view's bounds use `Overflow::Hidden` and it calculates
-// cursor layout geometry to smoothly clamp scroll constraints and keep the cursor in view when typing.
 
 /// Creates a new `InputText` widget.
 ///
 /// # Examples
 /// ```rust,ignore
 /// adapt(
-///     input_text().style(Style::new().width(Size::Fixed(300))),
+///     input_text().placeholder("Search...").style(Style::new().width(Size::Fixed(300))),
 ///     AppState::username,
 ///     AppMsg::UpdateUsername,
 /// )
@@ -32,6 +30,8 @@ pub struct InputText {
 pub fn input_text() -> InputText {
     InputText {
         captures_tab: false,
+        placeholder: None,
+        text_style: None,
     }
 }
 
@@ -43,6 +43,84 @@ impl InputText {
     pub fn captures_tab(mut self, captures: bool) -> Self {
         self.captures_tab = captures;
         self
+    }
+
+    /// Sets placeholder prompt text displayed when the input field is empty.
+    pub fn placeholder(mut self, placeholder: impl Into<String>) -> Self {
+        self.placeholder = Some(placeholder.into());
+        self
+    }
+
+    /// Configures explicit typography/text styling for this input field.
+    pub fn text_style(mut self, text_style: TextStyle) -> Self {
+        self.text_style = Some(text_style);
+        self
+    }
+
+    fn sync_render_nodes(&self, ctx: &mut Context, element: &mut InputInner) {
+        let text_style = if let Some(ref style) = self.text_style {
+            style.clone()
+        } else if let Some(info) = element.node.get_text_userdata::<TextRenderInfo>(ctx) {
+            info.style.clone()
+        } else if let Some(style) = element.node.get_text_userdata::<TextStyle>(ctx) {
+            style.clone()
+        } else {
+            TextStyle {
+                vertical_alignment: crate::style::VerticalAlignment::Center,
+                ..TextStyle::default()
+            }
+        };
+
+        let is_focused = Some(element.node.clone()) == ctx.focused_node();
+        let display_text = element.editor.display_text();
+        let show_placeholder = display_text.is_empty() && self.placeholder.is_some();
+
+        let (text_to_render, final_text_style) = if show_placeholder {
+            let ph = self.placeholder.as_ref().unwrap();
+            let mut ph_style = text_style.clone();
+            let base_alpha = if ph_style.color.a == 0 {
+                255
+            } else {
+                ph_style.color.a
+            };
+            ph_style.color.a = (base_alpha as f32 * 0.45) as u8;
+            (ph.clone(), ph_style)
+        } else {
+            (display_text, text_style)
+        };
+
+        let render_info = TextRenderInfo {
+            style: final_text_style,
+            cursor: if is_focused && !show_placeholder {
+                Some(element.editor.display_cursor())
+            } else if is_focused && show_placeholder {
+                Some(0)
+            } else {
+                None
+            },
+            selection: if is_focused && !show_placeholder {
+                element.editor.selection()
+            } else {
+                None
+            },
+            preedit_range: if show_placeholder {
+                None
+            } else {
+                element.editor.preedit_range()
+            },
+        };
+
+        let current_text = element.node.get_text(ctx);
+        let current_info = element.node.get_text_userdata::<TextRenderInfo>(ctx);
+
+        let needs_update =
+            current_text != Some(&text_to_render) || current_info != Some(&render_info);
+
+        if needs_update {
+            element
+                .node
+                .set_text_with_userdata(ctx, &text_to_render, render_info);
+        }
     }
 }
 
@@ -81,6 +159,7 @@ impl View<String> for InputText {
 
         let caret = ctx.create_node();
         node.append(ctx, caret.clone());
+
         node.update_constraints(ctx, |c| {
             c.overflow = crate::style::Overflow::Hidden;
         });
@@ -89,44 +168,15 @@ impl View<String> for InputText {
     }
 
     fn rebuild(&self, _prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
-        // Preserve the user's TextStyle if they set one via StyleWrap, defaulting to Center for single-line inputs
-        let mut text_style = TextStyle {
-            vertical_alignment: crate::style::VerticalAlignment::Center,
-            ..TextStyle::default()
-        };
-        if let Some(info) = element.node.get_text_userdata::<TextRenderInfo>(ctx) {
-            text_style = info.style.clone();
-        } else if let Some(style) = element.node.get_text_userdata::<TextStyle>(ctx) {
-            text_style = style.clone();
-        }
-
-        let is_focused = Some(element.node.clone()) == ctx.focused_node();
-
-        let render_info = TextRenderInfo {
-            style: text_style,
-            cursor: if is_focused {
-                Some(element.editor.display_cursor())
-            } else {
-                None
-            },
-            selection: if is_focused {
-                element.editor.selection()
-            } else {
-                None
-            },
-            preedit_range: element.editor.preedit_range(),
-        };
-        element
-            .node
-            .set_text_with_userdata(ctx, &element.editor.display_text(), render_info);
+        self.sync_render_nodes(ctx, element);
     }
 
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
-        ctx.unregister_focusable(element.node);
+        ctx.unregister_focusable(element.node.clone());
         element.caret.remove(ctx);
-        ctx.destroy_node(element.caret);
+        ctx.destroy_node(element.caret.clone());
         element.node.remove(ctx);
-        ctx.destroy_node(element.node);
+        ctx.destroy_node(element.node.clone());
     }
 
     fn get_node(&self, element: &Self::Element) -> Node {
@@ -438,32 +488,7 @@ impl View<String> for InputText {
             _ => {}
         }
 
-        let mut text_style = TextStyle::default();
-        if let Some(info) = element.node.get_text_userdata::<TextRenderInfo>(ctx) {
-            text_style = info.style.clone();
-        } else if let Some(style) = element.node.get_text_userdata::<TextStyle>(ctx) {
-            text_style = style.clone();
-        }
-
-        let is_focused = Some(element.node.clone()) == ctx.focused_node();
-
-        let render_info = TextRenderInfo {
-            style: text_style,
-            cursor: if is_focused {
-                Some(element.editor.display_cursor())
-            } else {
-                None
-            },
-            selection: if is_focused {
-                element.editor.selection()
-            } else {
-                None
-            },
-            preedit_range: element.editor.preedit_range(),
-        };
-        element
-            .node
-            .set_text_with_userdata(ctx, &element.editor.display_text(), render_info);
+        self.sync_render_nodes(ctx, element);
 
         let cursor_after = element.editor.cursor();
         if cursor_before != cursor_after || emitted_msg.is_some() {
