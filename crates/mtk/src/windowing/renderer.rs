@@ -779,20 +779,23 @@ impl<'w> Renderer<'w> {
 
                         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-                        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("Canvas Bind Group"),
-                            layout: &self.texture_bind_group_layout,
-                            entries: &[
-                                wgpu::BindGroupEntry {
-                                    binding: 0,
-                                    resource: wgpu::BindingResource::TextureView(&view),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 1,
-                                    resource: wgpu::BindingResource::Sampler(&self.texture_sampler),
-                                },
-                            ],
-                        });
+                        let bind_group =
+                            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("Canvas Bind Group"),
+                                layout: &self.texture_bind_group_layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: wgpu::BindingResource::TextureView(&view),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: wgpu::BindingResource::Sampler(
+                                            &self.texture_sampler,
+                                        ),
+                                    },
+                                ],
+                            });
 
                         self.canvas_textures.insert(
                             *node,
@@ -814,7 +817,11 @@ impl<'w> Renderer<'w> {
                             }
                             crate::ui::widgets::CanvasPainterKind::Wgpu(p) => {
                                 if !canvas_data.initialized {
-                                    p.init(&self.device, &self.queue, wgpu::TextureFormat::Rgba8UnormSrgb);
+                                    p.init(
+                                        &self.device,
+                                        &self.queue,
+                                        wgpu::TextureFormat::Rgba8UnormSrgb,
+                                    );
                                     canvas_data.initialized = true;
                                 }
                                 p.resize(&self.device, &self.queue, w, h);
@@ -858,7 +865,11 @@ impl<'w> Renderer<'w> {
                         }
                         crate::ui::widgets::CanvasPainterKind::Wgpu(p) => {
                             if !canvas_data.initialized {
-                                p.init(&self.device, &self.queue, wgpu::TextureFormat::Rgba8UnormSrgb);
+                                p.init(
+                                    &self.device,
+                                    &self.queue,
+                                    wgpu::TextureFormat::Rgba8UnormSrgb,
+                                );
                                 canvas_data.initialized = true;
                             }
                             p.prepare(&self.device, &self.queue);
