@@ -44,9 +44,18 @@ pub struct TextInstance {
     pub color: [f32; 4],
 }
 
+pub struct CanvasGpuResource {
+    pub texture: wgpu::Texture,
+    pub view: wgpu::TextureView,
+    pub bind_group: wgpu::BindGroup,
+    pub width: u32,
+    pub height: u32,
+}
+
 pub struct Pipelines {
     pub solid: wgpu::RenderPipeline,
     pub text: wgpu::RenderPipeline,
+    pub texture: wgpu::RenderPipeline,
 }
 
 pub struct Renderer<'w> {
@@ -64,6 +73,9 @@ pub struct Renderer<'w> {
     pub text_bind_group: wgpu::BindGroup,
     pub text_instance_buffer: wgpu::Buffer,
     pub text_instance_capacity: usize,
+    pub texture_bind_group_layout: wgpu::BindGroupLayout,
+    pub texture_sampler: wgpu::Sampler,
+    pub canvas_textures: HashMap<crate::Node, CanvasGpuResource>,
 }
 
 impl<'w> Renderer<'w> {
@@ -273,6 +285,82 @@ impl<'w> Renderer<'w> {
             ],
         });
 
+        let texture_shader = device.create_shader_module(wgpu::include_wgsl!("texture.wgsl"));
+        let texture_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Canvas Texture Sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Canvas Texture Bind Group Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+
+        let texture_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Canvas Texture Pipeline Layout"),
+                bind_group_layouts: &[Some(&texture_bind_group_layout)],
+                immediate_size: std::mem::size_of::<ImmediateData>() as u32,
+            });
+
+        let texture_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Canvas Texture Pipeline"),
+            layout: Some(&texture_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &texture_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &texture_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
         Self {
             instance,
             window,
@@ -285,12 +373,16 @@ impl<'w> Renderer<'w> {
             pipelines: Pipelines {
                 solid: solid_pipeline,
                 text: text_pipeline,
+                texture: texture_pipeline,
             },
             atlas,
             text_bind_group_layout,
             text_bind_group,
             text_instance_buffer,
             text_instance_capacity,
+            texture_bind_group_layout,
+            texture_sampler,
+            canvas_textures: HashMap::new(),
         }
     }
 
@@ -648,6 +740,151 @@ impl<'w> Renderer<'w> {
                 label: Some("Render Encoder"),
             });
 
+        // Retain only active canvases
+        self.canvas_textures
+            .retain(|node, _| context.canvases.borrow().contains_key(node));
+
+        let any_canvas_requested_frame = std::cell::Cell::new(false);
+
+        // Execute canvas rendering
+        {
+            let mut canvases = context.canvases.borrow_mut();
+            for (node, canvas_data) in canvases.iter_mut() {
+                if let Some(computed) = node.get_computed(context) {
+                    let w = (computed.w.round() as u32).max(1);
+                    let h = (computed.h.round() as u32).max(1);
+
+                    let needs_recreate = match self.canvas_textures.get(node) {
+                        Some(res) => res.width != w || res.height != h,
+                        None => true,
+                    };
+
+                    if needs_recreate {
+                        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                            label: Some("Canvas Offscreen Texture"),
+                            size: wgpu::Extent3d {
+                                width: w,
+                                height: h,
+                                depth_or_array_layers: 1,
+                            },
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: wgpu::TextureDimension::D2,
+                            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                                | wgpu::TextureUsages::RENDER_ATTACHMENT
+                                | wgpu::TextureUsages::COPY_DST,
+                            view_formats: &[],
+                        });
+
+                        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+                        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("Canvas Bind Group"),
+                            layout: &self.texture_bind_group_layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: wgpu::BindingResource::TextureView(&view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::Sampler(&self.texture_sampler),
+                                },
+                            ],
+                        });
+
+                        self.canvas_textures.insert(
+                            *node,
+                            CanvasGpuResource {
+                                texture,
+                                view,
+                                bind_group,
+                                width: w,
+                                height: h,
+                            },
+                        );
+
+                        canvas_data.width = w;
+                        canvas_data.height = h;
+
+                        match &mut canvas_data.painter {
+                            crate::ui::widgets::CanvasPainterKind::Pixel(_) => {
+                                canvas_data.cpu_buffer.resize((w * h) as usize, 0);
+                            }
+                            crate::ui::widgets::CanvasPainterKind::Wgpu(p) => {
+                                if !canvas_data.initialized {
+                                    p.init(&self.device, &self.queue, wgpu::TextureFormat::Rgba8UnormSrgb);
+                                    canvas_data.initialized = true;
+                                }
+                                p.resize(&self.device, &self.queue, w, h);
+                            }
+                        }
+                    }
+
+                    let gpu_res = self.canvas_textures.get(node).unwrap();
+                    match &mut canvas_data.painter {
+                        crate::ui::widgets::CanvasPainterKind::Pixel(p) => {
+                            if canvas_data.cpu_buffer.len() != (w * h) as usize {
+                                canvas_data.cpu_buffer.resize((w * h) as usize, 0);
+                            }
+                            let mut p_buf = crate::ui::widgets::PixelBuffer::new(
+                                w,
+                                h,
+                                &mut canvas_data.cpu_buffer,
+                                &any_canvas_requested_frame,
+                            );
+                            p.paint(&mut p_buf);
+
+                            self.queue.write_texture(
+                                wgpu::TexelCopyTextureInfo {
+                                    texture: &gpu_res.texture,
+                                    mip_level: 0,
+                                    origin: wgpu::Origin3d::ZERO,
+                                    aspect: wgpu::TextureAspect::All,
+                                },
+                                bytemuck::cast_slice(&canvas_data.cpu_buffer),
+                                wgpu::TexelCopyBufferLayout {
+                                    offset: 0,
+                                    bytes_per_row: Some(4 * w),
+                                    rows_per_image: Some(h),
+                                },
+                                wgpu::Extent3d {
+                                    width: w,
+                                    height: h,
+                                    depth_or_array_layers: 1,
+                                },
+                            );
+                        }
+                        crate::ui::widgets::CanvasPainterKind::Wgpu(p) => {
+                            if !canvas_data.initialized {
+                                p.init(&self.device, &self.queue, wgpu::TextureFormat::Rgba8UnormSrgb);
+                                canvas_data.initialized = true;
+                            }
+                            p.prepare(&self.device, &self.queue);
+
+                            let mut paint_ctx = crate::ui::widgets::PaintContext {
+                                device: &self.device,
+                                queue: &self.queue,
+                                encoder: &mut encoder,
+                                target: &gpu_res.view,
+                                width: w,
+                                height: h,
+                                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                                dt: context.dt,
+                                frame_requested: &any_canvas_requested_frame,
+                            };
+                            p.paint(&mut paint_ctx);
+                        }
+                    }
+                }
+            }
+        }
+
+        if any_canvas_requested_frame.get() {
+            self.window.request_redraw();
+        }
+
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
@@ -713,12 +950,22 @@ impl<'w> Renderer<'w> {
                 };
 
                 if cmd.kind() == RenderCommandKind::DrawQuad {
-                    render_pass.set_pipeline(&self.pipelines.solid);
                     let node = cmd.node();
+                    let canvas_res = self.canvas_textures.get(&node);
+                    if let Some(res) = canvas_res {
+                        render_pass.set_pipeline(&self.pipelines.texture);
+                        render_pass.set_bind_group(0, &res.bind_group, &[]);
+                    } else {
+                        render_pass.set_pipeline(&self.pipelines.solid);
+                    }
                     let effects = context.effects.get(&node).cloned().unwrap_or_default();
                     let constraints = node.get_constraints(context).unwrap_or_default();
                     let bg_color = effects.background_color;
-                    let color = bg_color.into();
+                    let color = if canvas_res.is_some() && bg_color.a == 0 {
+                        [1.0, 1.0, 1.0, 1.0]
+                    } else {
+                        bg_color.into()
+                    };
 
                     let computed = cmd.computed();
 
@@ -726,15 +973,15 @@ impl<'w> Renderer<'w> {
                     let mut vibrancy_darkness = 0.0;
                     let mut passes = 0.0;
                     for f in &effects.filters {
-                        match f {
+                        match *f {
                             Filter::Blur {
                                 vibrancy: v,
                                 vibrancy_darkness: vd,
                                 passes: p,
                             } => {
-                                vibrancy = *v;
-                                vibrancy_darkness = *vd;
-                                passes = *p;
+                                vibrancy = v;
+                                vibrancy_darkness = vd;
+                                passes = p;
                                 break;
                             }
                         }

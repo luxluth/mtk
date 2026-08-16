@@ -1,9 +1,12 @@
 #![allow(non_upper_case_globals)]
 
+use bytemuck::{Pod, Zeroable};
+
 use crate::animation::Animatable;
 
-/// RGBA defined color values
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// RGBA defined color values (8 bits per channel: Red, Green, Blue, Alpha).
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq, Pod, Zeroable)]
 pub struct Color {
     pub r: u8,
     pub g: u8,
@@ -22,9 +25,36 @@ impl Color {
         Self { r, g, b, a }
     }
 
+    /// Encodes this color into a 32-bit integer matching the native RGBA8 memory layout (`[R, G, B, A]`).
+    #[inline]
+    pub const fn to_rgba_u32(&self) -> u32 {
+        u32::from_ne_bytes([self.r, self.g, self.b, self.a])
+    }
+
+    /// Decodes a 32-bit RGBA8 value into a `Color`.
+    #[inline]
+    pub const fn from_rgba_u32(val: u32) -> Self {
+        let [r, g, b, a] = val.to_ne_bytes();
+        Self { r, g, b, a }
+    }
+
     #[inline]
     pub const fn as_u32(&self) -> u32 {
-        ((self.a as u32) << 24) | ((self.r as u32) << 16) | ((self.g as u32) << 8) | (self.b as u32)
+        self.to_rgba_u32()
+    }
+}
+
+impl From<Color> for u32 {
+    #[inline]
+    fn from(c: Color) -> Self {
+        c.to_rgba_u32()
+    }
+}
+
+impl From<u32> for Color {
+    #[inline]
+    fn from(val: u32) -> Self {
+        Color::from_rgba_u32(val)
     }
 }
 

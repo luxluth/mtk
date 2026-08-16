@@ -139,7 +139,7 @@ impl Default for WindowAttributes {
 
             transparent: true,
             blur: false,
-            decorations: false,
+            decorations: true,
 
             #[cfg(any(
                 target_os = "linux",
@@ -587,6 +587,7 @@ where
             window.clone(),
         ));
         self.renderer = Some(renderer);
+        window.request_redraw();
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
@@ -671,6 +672,7 @@ where
                 let now = Instant::now();
                 let dt = now.duration_since(self.last_frame_time).as_secs_f32();
                 self.last_frame_time = now;
+                self.context.dt = dt;
                 self.dispatch_and_rebuild(Event::Tick { dt });
 
                 let size = window.inner_size();

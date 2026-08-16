@@ -33,10 +33,12 @@ use crate::{
     ui::{Event, View, ViewSequence, event::EventResult},
 };
 
+pub use canvas::*;
 pub use input_text::*;
 pub use scroll_view::*;
 pub use textarea::*;
 
+mod canvas;
 mod editor;
 mod input_text;
 mod scroll_view;

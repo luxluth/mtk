@@ -15,11 +15,13 @@ use ::winit::keyboard::ModifiersState;
 use ::winit::window::Window;
 pub use mtk_macro::Lens;
 
+pub use crate::colors::Color;
 use crate::effects::Effects;
 pub use crate::node::Node;
 use crate::render::RenderCommand;
 pub use crate::style::*;
 pub use crate::text::*;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ffi::CString;
@@ -83,6 +85,8 @@ pub struct Context {
     pub(crate) modifiers: ModifiersState,
     pub(crate) ensure_visible_requests: HashMap<Node, crate::style::Rect>,
     pub(crate) clipboard: Arc<Mutex<Option<arboard::Clipboard>>>,
+    pub(crate) canvases: RefCell<HashMap<Node, crate::ui::widgets::CanvasData>>,
+    pub(crate) dt: f32,
 }
 
 impl Context {
@@ -104,7 +108,14 @@ impl Context {
             modifiers: winit::keyboard::ModifiersState::default(),
             ensure_visible_requests: HashMap::new(),
             clipboard,
+            canvases: RefCell::new(HashMap::new()),
+            dt: 0.016,
         }
+    }
+
+    /// Returns the elapsed delta time in seconds from the most recent frame tick.
+    pub fn dt(&self) -> f32 {
+        self.dt
     }
 
     /// Sets the focused node to `node` and requests a window redraw.
@@ -249,6 +260,7 @@ impl Context {
         self.texts.remove(&node);
         self.effects.remove(&node);
         self.dirty_effects.remove(&node);
+        self.canvases.borrow_mut().remove(&node);
 
         if let Some(ptr) = self.text_userdatas.remove(&node) {
             unsafe {
@@ -371,5 +383,13 @@ pub mod text_property {
 }
 
 pub mod winit {
-    pub use winit::*;
+    pub use ::winit::*;
+}
+
+pub mod wgpu {
+    pub use ::wgpu::*;
+}
+
+pub mod bytemuck {
+    pub use ::bytemuck::*;
 }
