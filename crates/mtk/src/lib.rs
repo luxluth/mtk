@@ -383,13 +383,13 @@ pub mod text_property {
 }
 
 pub mod winit {
-    pub use ::winit::*;
+    pub use winit::*;
 }
 
 pub mod wgpu {
-    pub use ::wgpu::*;
+    pub use wgpu::*;
 }
 
 pub mod bytemuck {
-    pub use ::bytemuck::*;
+    pub use bytemuck::*;
 }
