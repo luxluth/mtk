@@ -245,14 +245,13 @@ where
                     }
                     if let Some(target_scroll_y) = self.scroll_targets.get(&node).copied() {
                         let constraints = node.get_constraints(&self.context).unwrap_or_default();
-                        let inner_h = if let Some(computed) = node.get_computed(&self.context) {
-                            (computed.h - constraints.padding.top - constraints.padding.bottom)
-                                .max(0.0)
-                        } else {
-                            0.0
-                        };
-                        let content_h = node.compute_content_height(&self.context);
-                        let max_scroll_y = (content_h - inner_h).max(0.0);
+                        let (computed_h, content_h) =
+                            if let Some(computed) = node.get_computed(&self.context) {
+                                (computed.h, node.compute_content_height(&self.context))
+                            } else {
+                                (0.0, 0.0)
+                            };
+                        let max_scroll_y = (content_h - computed_h).max(0.0);
                         let clamped_target = target_scroll_y.clamp(0.0, max_scroll_y);
 
                         let diff = clamped_target - constraints.scroll.y;
@@ -280,18 +279,13 @@ where
                     }
                     if let Some(target_scroll_x) = self.scroll_targets_x.get(&node).copied() {
                         let constraints = node.get_constraints(&self.context).unwrap_or_default();
-                        let (inner_w, content_w) = if let Some(computed) =
-                            node.get_computed(&self.context)
-                        {
-                            let iw =
-                                (computed.w - constraints.padding.left - constraints.padding.right)
-                                    .max(0.0);
-                            let cw = computed.content_w.max(iw);
-                            (iw, cw)
-                        } else {
-                            (0.0, 0.0)
-                        };
-                        let max_scroll_x = (content_w - inner_w).max(0.0);
+                        let (computed_w, content_w) =
+                            if let Some(computed) = node.get_computed(&self.context) {
+                                (computed.w, computed.content_w.max(computed.w))
+                            } else {
+                                (0.0, 0.0)
+                            };
+                        let max_scroll_x = (content_w - computed_w).max(0.0);
                         let clamped_target = target_scroll_x.clamp(0.0, max_scroll_x);
 
                         let diff = clamped_target - constraints.scroll.x;
@@ -334,12 +328,8 @@ where
                             || constraints.overflow == crate::Overflow::Auto
                         {
                             if let Some(computed) = node.get_computed(&self.context) {
-                                let inner_h = (computed.h
-                                    - constraints.padding.top
-                                    - constraints.padding.bottom)
-                                    .max(0.0);
                                 let content_h = node.compute_content_height(&self.context);
-                                let max_scroll_y = (content_h - inner_h).max(0.0);
+                                let max_scroll_y = (content_h - computed.h).max(0.0);
                                 if max_scroll_y > 0.0 {
                                     if x >= computed.x + computed.w - 14.0
                                         && x <= computed.x + computed.w
@@ -350,12 +340,8 @@ where
                                     }
                                 }
 
-                                let inner_w = (computed.w
-                                    - constraints.padding.left
-                                    - constraints.padding.right)
-                                    .max(0.0);
-                                let content_w = computed.content_w.max(inner_w);
-                                let max_scroll_x = (content_w - inner_w).max(0.0);
+                                let content_w = computed.content_w.max(computed.w);
+                                let max_scroll_x = (content_w - computed.w).max(0.0);
                                 if max_scroll_x > 0.0 {
                                     if y >= computed.y + computed.h - 14.0
                                         && y <= computed.y + computed.h
@@ -377,13 +363,9 @@ where
             // C) Scrollbar thumb drag motion
             if let Event::CursorMoved { x, y, .. } = mtk_event {
                 if let Some((node, drag_start_y, drag_start_scroll_y)) = self.drag_scroll_node {
-                    let constraints = node.get_constraints(&self.context).unwrap_or_default();
                     if let Some(computed) = node.get_computed(&self.context) {
-                        let inner_h =
-                            (computed.h - constraints.padding.top - constraints.padding.bottom)
-                                .max(0.0);
                         let content_h = node.compute_content_height(&self.context);
-                        let max_scroll_y = (content_h - inner_h).max(0.0);
+                        let max_scroll_y = (content_h - computed.h).max(0.0);
                         if max_scroll_y > 0.0 {
                             let track_h = (computed.h - 8.0).max(0.0);
                             let thumb_h = ((track_h / content_h) * track_h).clamp(24.0, track_h);
@@ -403,13 +385,9 @@ where
                     }
                 }
                 if let Some((node, drag_start_x, drag_start_scroll_x)) = self.drag_scroll_x_node {
-                    let constraints = node.get_constraints(&self.context).unwrap_or_default();
                     if let Some(computed) = node.get_computed(&self.context) {
-                        let inner_w =
-                            (computed.w - constraints.padding.left - constraints.padding.right)
-                                .max(0.0);
-                        let content_w = computed.content_w.max(inner_w);
-                        let max_scroll_x = (content_w - inner_w).max(0.0);
+                        let content_w = computed.content_w.max(computed.w);
+                        let max_scroll_x = (content_w - computed.w).max(0.0);
                         if max_scroll_x > 0.0 {
                             let track_w = (computed.w - 8.0).max(0.0);
                             let thumb_w = ((track_w / content_w) * track_w).clamp(24.0, track_w);
@@ -452,19 +430,11 @@ where
 
                         if is_scrollable_y || is_scrollable_x {
                             if let Some(computed) = node.get_computed(&self.context) {
-                                let inner_h = (computed.h
-                                    - constraints.padding.top
-                                    - constraints.padding.bottom)
-                                    .max(0.0);
                                 let content_h = node.compute_content_height(&self.context);
-                                let max_scroll_y = (content_h - inner_h).max(0.0);
+                                let max_scroll_y = (content_h - computed.h).max(0.0);
 
-                                let inner_w = (computed.w
-                                    - constraints.padding.left
-                                    - constraints.padding.right)
-                                    .max(0.0);
-                                let content_w = computed.content_w.max(inner_w);
-                                let max_scroll_x = (content_w - inner_w).max(0.0);
+                                let content_w = computed.content_w.max(computed.w);
+                                let max_scroll_x = (content_w - computed.w).max(0.0);
 
                                 let mut scrolled = false;
 
@@ -482,7 +452,7 @@ where
 
                                 let scroll_delta_x = if delta_x.abs() > 0.0 {
                                     delta_x
-                                } else if !is_scrollable_y {
+                                } else if max_scroll_y == 0.0 || !is_scrollable_y {
                                     delta_y
                                 } else {
                                     0.0
@@ -574,7 +544,7 @@ where
         }
 
         self.context
-            .compute_layout(attr.size.height as f32, attr.size.width as f32);
+            .compute_layout(attr.size.width as f32, attr.size.height as f32);
 
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
         window.set_ime_allowed(true);

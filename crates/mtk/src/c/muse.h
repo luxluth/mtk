@@ -928,11 +928,15 @@ static void muse__m_compute_top_down(muContext *ctx, muNode node,
   muConstraints *cons = muse_sparse_get(&ctx->constraints, node);
 
   if (cons != NULL && muse_sparse_has(&ctx->dirties, node)) {
+    bool is_root = muse_muid_eq(node, ctx->root);
+
     // WIDTH
     if (cons->dimension.width.kind == MU_FIXED) {
       comp->w = (float)cons->dimension.width.px;
     } else if (cons->dimension.width.kind == MU_PERCENT) {
       comp->w = parent_bounds.w * cons->dimension.width.percent;
+    } else if (is_root && cons->dimension.width.kind == MU_FILL) {
+      comp->w = parent_bounds.w;
     } else {
       // MU_FIT or MU_FILL
       comp->w = 0.0f;
@@ -943,6 +947,8 @@ static void muse__m_compute_top_down(muContext *ctx, muNode node,
       comp->h = (float)cons->dimension.height.px;
     } else if (cons->dimension.height.kind == MU_PERCENT) {
       comp->h = parent_bounds.h * cons->dimension.height.percent;
+    } else if (is_root && cons->dimension.height.kind == MU_FILL) {
+      comp->h = parent_bounds.h;
     } else {
       comp->h = 0.0f;
     }
@@ -1692,7 +1698,7 @@ static void muse__m_flatten_recursive(muContext *ctx, muNode node,
     float inner_h = (comp->h - cons->padding.top - cons->padding.bottom);
     float inner_w = (comp->w - cons->padding.left - cons->padding.right);
 
-    if (comp->content_h > inner_h + 0.5f && inner_h > 0.0f) {
+    if (comp->content_h > comp->h + 0.5f && inner_h > 0.0f) {
       muse__m_SortItem v_thumb = {.node = node,
                                   .z_index = z,
                                   .sequence = (*seq)++,
@@ -1702,7 +1708,7 @@ static void muse__m_flatten_recursive(muContext *ctx, muNode node,
       muse_da_append(list, v_thumb);
     }
 
-    if (comp->content_w > inner_w + 0.5f && inner_w > 0.0f) {
+    if (comp->content_w > comp->w + 0.5f && inner_w > 0.0f) {
       muse__m_SortItem h_thumb = {.node = node,
                                   .z_index = z,
                                   .sequence = (*seq)++,

@@ -3,10 +3,11 @@ struct ImmediateData {
     pos: vec2<f32>,
     screen_size: vec2<f32>,
     quad_size: vec2<f32>,
-    src_offset: vec2<f32>,
-    src_size: vec2<f32>,
     border_radius: f32,
     alpha: f32,
+    border_color: vec4<f32>,
+    shadow_color: vec4<f32>,
+    border_widths: vec4<f32>, // top, right, bottom, left
     shadow_spread: f32,
     shadow_power: f32,
     vibrancy: f32,
@@ -15,8 +16,6 @@ struct ImmediateData {
     _pad1: f32,
     _pad2: f32,
     _pad3: f32,
-    border_widths: vec4<f32>, // top, right, bottom, left
-    border_color: vec4<f32>,
 }
 var<immediate> imm: ImmediateData;
 
@@ -30,18 +29,12 @@ struct VertexOutput {
 
 @vertex
 fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> VertexOutput {
-
     var positions = array<vec2<f32>, 6>(
         vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0),
         vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0)
     );
 
-    var uvs = array<vec2<f32>, 6>(
-        vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0),
-        vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0)
-    );
-
-    let expansion = 2.0;
+    let expansion = max(2.0, imm.shadow_spread * 2.8);
     let logical_center = imm.pos + imm.quad_size * 0.5;
 
     let expand_dir = positions[in_vertex_index] * 2.0 - 1.0;
@@ -52,7 +45,6 @@ fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> VertexOutput {
 
     var out: VertexOutput;
     out.clip_position = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
-
     out.fragP = physical_p - logical_center;
     out.fragQuadSize = imm.quad_size;
     out.fragBorderRadius = imm.border_radius;
@@ -68,16 +60,15 @@ fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, radius: f32) -> f32 {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Pos is relative to logical center
     let p = in.fragP;
     let b = in.fragQuadSize * 0.5;
 
     let dist = sdRoundedBox(p, b, in.fragBorderRadius);
 
-    // Outer edge alpha (fades out as dist > 0)
-    let outer_alpha = 1.0 - smoothstep(-0.75, 0.75, dist);
+    // Outer edge alpha (smooth anti-aliasing)
+    let outer_alpha = clamp(1.0 - smoothstep(-0.75, 0.75, dist), 0.0, 1.0);
 
-    var outColor = imm.color;
+    var boxColor = imm.color;
 
     let has_border = imm.border_widths.x > 0.0 || imm.border_widths.y > 0.0 || imm.border_widths.z > 0.0 || imm.border_widths.w > 0.0;
     if has_border {
@@ -100,15 +91,33 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
         if total_a > 0.0 {
             let rgb = (imm.color.rgb * bg_a + imm.border_color.rgb * bd_a) / total_a;
-            outColor = vec4<f32>(rgb, total_a);
+            boxColor = vec4<f32>(rgb, total_a);
         } else {
-            outColor = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+            boxColor = vec4<f32>(0.0, 0.0, 0.0, 0.0);
         }
     } else {
-        outColor.a = outColor.a * outer_alpha;
+        boxColor.a = boxColor.a * outer_alpha;
     }
 
-    outColor.a = outColor.a * in.fragAlpha;
+    // Outer Drop Shadow & Glow computation
+    var shadowColor = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    if (imm.shadow_spread > 0.0 && dist > -2.0) {
+        let sigma = max(1.0, imm.shadow_spread * 0.45);
+        let d = max(0.0, dist);
+        let shadow_falloff = exp(-0.5 * (d * d) / (sigma * sigma));
+        let s_alpha = shadow_falloff * imm.shadow_color.a * imm.shadow_power;
+        shadowColor = vec4<f32>(imm.shadow_color.rgb, s_alpha);
+    }
 
-    return outColor;
+    // Composite: Box over Drop Shadow
+    let final_rgb = boxColor.rgb * boxColor.a + shadowColor.rgb * shadowColor.a * (1.0 - boxColor.a);
+    let final_a = boxColor.a + shadowColor.a * (1.0 - boxColor.a);
+
+    var finalColor = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    if (final_a > 0.001) {
+        finalColor = vec4<f32>(final_rgb / final_a, final_a);
+    }
+
+    finalColor.a = finalColor.a * in.fragAlpha;
+    return finalColor;
 }

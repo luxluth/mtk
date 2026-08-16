@@ -89,7 +89,10 @@ where
         let container_node = ctx.create_node();
         container_node.update_constraints(ctx, |c| {
             c.width = crate::style::Size::Percent(1.0);
-            c.height = crate::style::Size::Percent(1.0);
+            c.height = match self.axis {
+                ScrollAxis::Horizontal => crate::style::Size::Fit,
+                _ => crate::style::Size::Percent(1.0),
+            };
             c.overflow = Overflow::Scroll;
         });
 

@@ -9,6 +9,7 @@ pub struct CacheKey {
     pub font_ptr: usize,
     pub font_size: u32,
     pub glyph_id: u16,
+    pub subpx: u8,
     pub coords_hash: u64,
 }
 
@@ -77,8 +78,8 @@ impl Atlas {
             sampler,
             size,
             glyphs: HashMap::new(),
-            next_x: 0,
-            next_y: 0,
+            next_x: 2,
+            next_y: 2,
             row_height: 0,
         }
     }
@@ -97,13 +98,14 @@ impl Atlas {
             return Some(*info);
         }
 
+        let subpx_offset = (cache_key.subpx as f32) * 0.25;
         let rendered_glyph = Render::new(&[
             Source::ColorOutline(0),
             Source::ColorBitmap(StrikeWith::BestFit),
             Source::Outline,
         ])
         .format(Format::Alpha)
-        .offset(Vector::new(0.0, 0.0)) // Ignore subpixel offset for now
+        .offset(Vector::new(subpx_offset, 0.0))
         .render(scaler, cache_key.glyph_id)?;
 
         let width = rendered_glyph.placement.width;
@@ -151,20 +153,20 @@ impl Atlas {
             }
         };
 
-        if self.next_x + width > self.size {
-            self.next_x = 0;
-            self.next_y += self.row_height + 1;
+        if self.next_x + width + 2 > self.size {
+            self.next_x = 2;
+            self.next_y += self.row_height + 2;
             self.row_height = 0;
         }
 
-        if self.next_y + height > self.size {
+        if self.next_y + height + 2 > self.size {
             return None; // Out of atlas memory
         }
 
         let x = self.next_x;
         let y = self.next_y;
 
-        self.next_x += width + 1;
+        self.next_x += width + 2;
         self.row_height = self.row_height.max(height);
 
         queue.write_texture(

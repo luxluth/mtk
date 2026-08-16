@@ -1,7 +1,7 @@
 use crate::colors::Color;
 use crate::sys;
 use crate::{Node, TextStyle};
-use parley::style::{LineHeight, StyleProperty};
+use parley::style::{FontStyle, LineHeight, StyleProperty};
 use parley::{
     AlignmentOptions, BreakReason, Cluster, ClusterSide, Cursor, FontContext, LayoutContext,
 };
@@ -21,6 +21,7 @@ pub(crate) struct TextLayoutCacheKey {
     pub color_u32: u32,
     pub wrap: bool,
     pub strikethrough: bool,
+    pub underline: bool,
     pub selection: Option<(usize, usize)>,
     pub preedit_range: Option<(usize, usize)>,
     pub inner_w_bits: u32,
@@ -54,18 +55,18 @@ impl TextContext {
         &mut self,
         text: &str,
         text_style: &TextStyle,
-        inner_w: f32,
+        avail_w: f32,
         selection: Option<(usize, usize)>,
         preedit_range: Option<(usize, usize)>,
     ) -> Arc<TextLayoutCacheEntry> {
         let font_style_u8 = match text_style.font_style {
-            parley::style::FontStyle::Normal => 0,
-            parley::style::FontStyle::Italic => 1,
-            parley::style::FontStyle::Oblique(_) => 2,
+            FontStyle::Normal => 0,
+            FontStyle::Italic => 1,
+            FontStyle::Oblique(_) => 2,
         };
 
-        let inner_w_bits = if inner_w.is_finite() && inner_w > 0.0 {
-            (inner_w * 100.0) as u32
+        let inner_w_bits = if avail_w.is_finite() && avail_w > 0.0 {
+            avail_w.to_bits()
         } else {
             u32::MAX
         };
@@ -79,6 +80,7 @@ impl TextContext {
             color_u32: text_style.color.as_u32(),
             wrap: text_style.wrap,
             strikethrough: text_style.strikethrough,
+            underline: text_style.underline,
             selection,
             preedit_range,
             inner_w_bits,
@@ -113,6 +115,10 @@ impl TextContext {
             builder.push_default(StyleProperty::Strikethrough(true));
         }
 
+        if text_style.underline {
+            builder.push_default(StyleProperty::Underline(true));
+        }
+
         if let Some((start, end)) = preedit_range {
             builder.push(StyleProperty::Underline(true), start..end);
         }
@@ -123,8 +129,8 @@ impl TextContext {
 
         let mut layout = builder.build(text);
 
-        let max_advance = if text_style.wrap && inner_w.is_finite() && inner_w > 0.0 {
-            Some(inner_w + 0.5)
+        let max_advance = if text_style.wrap && avail_w.is_finite() && avail_w > 0.0 {
+            Some(avail_w + 0.5)
         } else {
             None
         };
@@ -200,6 +206,10 @@ pub(crate) fn hit_test_text(
 
     if text_style.strikethrough {
         builder.push_default(StyleProperty::Strikethrough(true));
+    }
+
+    if text_style.underline {
+        builder.push_default(StyleProperty::Underline(true));
     }
 
     let mut layout = builder.build(text);
@@ -303,6 +313,10 @@ pub(crate) fn get_cursor_geometry(
 
     if text_style.strikethrough {
         builder.push_default(StyleProperty::Strikethrough(true));
+    }
+
+    if text_style.underline {
+        builder.push_default(StyleProperty::Underline(true));
     }
 
     let mut layout = builder.build(text);

@@ -5,7 +5,7 @@ use parley::style::{FontStyle, FontWeight, OverflowWrap};
 
 use crate::animation::Curve;
 use crate::colors::Color;
-use crate::effects::{Effects, Radius};
+use crate::effects::{Effects, Radius, Shadow};
 use crate::{clr, sys};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -697,6 +697,7 @@ pub struct TextStyle {
     pub selection_bg: Color,
     pub caret_color: Color,
     pub strikethrough: bool,
+    pub underline: bool,
 }
 
 impl Default for TextStyle {
@@ -716,34 +717,251 @@ impl Default for TextStyle {
             selection_bg: clr!(ll_blue),
             caret_color: clr!(black),
             strikethrough: false,
+            underline: false,
         }
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum AnimationTarget {
+/// Target properties that can be transitioned.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TransitionProperty {
+    /// Transitions all changing properties simultaneously.
+    All,
     Padding,
+    Border,
+    Width,
+    Height,
+    Size,
+    Gap,
     BackgroundColor,
+    BorderColor,
+    CornerRadius,
     Scale,
+    Opacity,
+    Shadow,
+    TextColor,
+    FontSize,
 }
 
-#[derive(Clone, Debug, Default)]
+/// Backwards compatibility alias for [`TransitionProperty`].
+pub type AnimationTarget = TransitionProperty;
+
+/// Configuration for a smooth property transition.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Transition {
+    pub property: TransitionProperty,
+    pub duration_ms: f64,
+    pub curve: Curve,
+}
+
+impl Transition {
+    pub fn new(property: TransitionProperty, duration_ms: f64, curve: Curve) -> Self {
+        Self {
+            property,
+            duration_ms,
+            curve,
+        }
+    }
+}
+
+impl Constraints {
+    /// Merges non-default properties from `other` into `self`.
+    pub fn merge(&mut self, other: &Constraints) {
+        if other.width != Size::Fit {
+            self.width = other.width;
+        }
+        if other.height != Size::Fit {
+            self.height = other.height;
+        }
+        if other.min_width != 0.0 {
+            self.min_width = other.min_width;
+        }
+        if other.max_width != f32::INFINITY {
+            self.max_width = other.max_width;
+        }
+        if other.min_height != 0.0 {
+            self.min_height = other.min_height;
+        }
+        if other.max_height != f32::INFINITY {
+            self.max_height = other.max_height;
+        }
+        if other.aspect_ratio != 0.0 {
+            self.aspect_ratio = other.aspect_ratio;
+        }
+        if other.positioning != PositionStrategy::Inflow {
+            self.positioning = other.positioning;
+        }
+        if other.justify_content != JustifyContent::Start {
+            self.justify_content = other.justify_content;
+        }
+        if other.align_items != AlignItems::Start {
+            self.align_items = other.align_items;
+        }
+        if other.align_self != AlignSelf::Auto {
+            self.align_self = other.align_self;
+        }
+        if other.gap != 0.0 {
+            self.gap = other.gap;
+        }
+        if other.flex_grow != 0.0 {
+            self.flex_grow = other.flex_grow;
+        }
+        if other.flex_shrink != 1.0 {
+            self.flex_shrink = other.flex_shrink;
+        }
+        if other.flex_basis != Size::Fit {
+            self.flex_basis = other.flex_basis;
+        }
+        if other.padding != Edges::default() {
+            self.padding = other.padding;
+        }
+        if other.border != Edges::default() {
+            self.border = other.border;
+        }
+        if other.overflow != Overflow::Visible {
+            self.overflow = other.overflow;
+        }
+        if other.z_index != 0 {
+            self.z_index = other.z_index;
+        }
+    }
+}
+
+impl Effects {
+    /// Merges non-default visual effects from `other` into `self`.
+    pub fn merge(&mut self, other: &Effects) {
+        if other.background_color != Color::transparent {
+            self.background_color = other.background_color;
+        }
+        if other.border != crate::effects::Border::default() {
+            self.border = other.border;
+        }
+        if other.shadow != Shadow::default() {
+            self.shadow = other.shadow;
+        }
+        if !other.filters.is_empty() {
+            self.filters = other.filters.clone();
+        }
+        if (other.opacity - 1.0).abs() > 1e-4 {
+            self.opacity = other.opacity;
+        }
+        if (other.scale - 1.0).abs() > 1e-4 {
+            self.scale = other.scale;
+        }
+    }
+}
+
+impl TextStyle {
+    /// Merges non-default typography styling from `other` into `self`.
+    pub fn merge(&mut self, other: &TextStyle) {
+        if (other.font_size - 16.0).abs() > 1e-4 {
+            self.font_size = other.font_size;
+        }
+        if other.line_height != LineHeight::Auto {
+            self.line_height = other.line_height;
+        }
+        if other.color != clr!(black) {
+            self.color = other.color;
+        }
+        if other.font_family != "system-ui" {
+            self.font_family = other.font_family.clone();
+        }
+        if other.font_weight != FontWeight::default() {
+            self.font_weight = other.font_weight;
+        }
+        if other.font_style != FontStyle::default() {
+            self.font_style = other.font_style;
+        }
+        if other.alignment != Alignment::Start {
+            self.alignment = other.alignment;
+        }
+        if other.vertical_alignment != VerticalAlignment::Top {
+            self.vertical_alignment = other.vertical_alignment;
+        }
+        if other.wrap {
+            self.wrap = other.wrap;
+        }
+        if other.strikethrough {
+            self.strikethrough = other.strikethrough;
+        }
+        if other.underline {
+            self.underline = other.underline;
+        }
+    }
+}
+
+/// Declarative styling container defining layout constraints, visual effects, typography, pseudo-states, and transitions.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Style {
     pub base_constraints: Constraints,
     pub base_effects: Effects,
     pub base_text_style: TextStyle,
     pub flex_direction: Option<FlexDirection>,
 
-    pub hover_constraints: Option<Constraints>,
-    pub hover_effects: Option<Effects>,
-    pub hover_text_style: Option<TextStyle>,
+    pub hover: Option<Box<Style>>,
+    pub active: Option<Box<Style>>,
+    pub focus: Option<Box<Style>>,
+    pub disabled: Option<Box<Style>>,
 
-    pub transitions: Vec<(AnimationTarget, f64, Curve)>,
+    pub transitions: Vec<Transition>,
 }
 
 impl Style {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Merges `other` into `self`, overriding conflicting properties while preserving non-conflicting base styles.
+    pub fn merge(mut self, other: Style) -> Self {
+        self.base_constraints.merge(&other.base_constraints);
+        self.base_effects.merge(&other.base_effects);
+        self.base_text_style.merge(&other.base_text_style);
+
+        if let Some(dir) = other.flex_direction {
+            self.flex_direction = Some(dir);
+            self.base_constraints.flex_direction = dir;
+        }
+
+        if let Some(h) = other.hover {
+            self.hover = Some(Box::new(match self.hover {
+                Some(existing) => existing.merge(*h),
+                None => *h,
+            }));
+        }
+
+        if let Some(a) = other.active {
+            self.active = Some(Box::new(match self.active {
+                Some(existing) => existing.merge(*a),
+                None => *a,
+            }));
+        }
+
+        if let Some(f) = other.focus {
+            self.focus = Some(Box::new(match self.focus {
+                Some(existing) => existing.merge(*f),
+                None => *f,
+            }));
+        }
+
+        if let Some(d) = other.disabled {
+            self.disabled = Some(Box::new(match self.disabled {
+                Some(existing) => existing.merge(*d),
+                None => *d,
+            }));
+        }
+
+        self.transitions.extend(other.transitions);
+        self
+    }
+
+    /// Applies a reusable style mixin function `f`.
+    pub fn apply(self, f: impl FnOnce(Style) -> Style) -> Self {
+        f(self)
+    }
+
+    /// Conditionally applies style modifications when `condition` is `true`.
+    pub fn when(self, condition: bool, f: impl FnOnce(Style) -> Style) -> Self {
+        if condition { f(self) } else { self }
     }
 
     pub fn padding(mut self, val: f32) -> Self {
@@ -786,6 +1004,29 @@ impl Style {
 
     pub fn corner_radius_precise(mut self, radius: Radius) -> Self {
         self.base_effects.border.radius = radius;
+        self
+    }
+
+    pub fn shadow(mut self, color: Color, spread: f32, power: f32) -> Self {
+        self.base_effects.shadow = Shadow {
+            color,
+            spread,
+            power,
+        };
+        self
+    }
+
+    pub fn blur(mut self, vibrancy: f32) -> Self {
+        self.base_effects.filters = vec![crate::effects::Filter::Blur {
+            vibrancy,
+            vibrancy_darkness: 0.2,
+            passes: 4.0,
+        }];
+        self
+    }
+
+    pub fn opacity(mut self, opacity: f32) -> Self {
+        self.base_effects.opacity = opacity;
         self
     }
 
@@ -906,16 +1147,61 @@ impl Style {
         self
     }
 
+    /// Declares style overrides applied when the mouse cursor hovers over the element.
     pub fn on_hover(mut self, hover_fn: impl FnOnce(Style) -> Style) -> Self {
-        let hover_style = hover_fn(self.clone());
-        self.hover_constraints = Some(hover_style.base_constraints);
-        self.hover_effects = Some(hover_style.base_effects);
-        self.hover_text_style = Some(hover_style.base_text_style);
+        let base = self.clone();
+        let hover_style = hover_fn(base);
+        self.hover = Some(Box::new(hover_style));
         self
     }
 
-    pub fn animate(mut self, target: AnimationTarget, duration_ms: f64, curve: Curve) -> Self {
-        self.transitions.push((target, duration_ms, curve));
+    /// Declares style overrides applied when the mouse button is pressed over the element (active state).
+    pub fn on_active(mut self, active_fn: impl FnOnce(Style) -> Style) -> Self {
+        let base = self.clone();
+        let active_style = active_fn(base);
+        self.active = Some(Box::new(active_style));
+        self
+    }
+
+    /// Declares style overrides applied when the element receives focus.
+    pub fn on_focus(mut self, focus_fn: impl FnOnce(Style) -> Style) -> Self {
+        let base = self.clone();
+        let focus_style = focus_fn(base);
+        self.focus = Some(Box::new(focus_style));
+        self
+    }
+
+    /// Declares style overrides applied when the element is disabled.
+    pub fn on_disabled(mut self, disabled_fn: impl FnOnce(Style) -> Style) -> Self {
+        let base = self.clone();
+        let disabled_style = disabled_fn(base);
+        self.disabled = Some(Box::new(disabled_style));
+        self
+    }
+
+    /// Smoothly transitions all changing properties over `duration_ms` with easing/spring `curve`.
+    pub fn transition_all(mut self, duration_ms: f64, curve: Curve) -> Self {
+        self.transitions
+            .push(Transition::new(TransitionProperty::All, duration_ms, curve));
+        self
+    }
+
+    /// Smoothly transitions a specific property over `duration_ms` with easing/spring `curve`.
+    pub fn transition(
+        mut self,
+        property: TransitionProperty,
+        duration_ms: f64,
+        curve: Curve,
+    ) -> Self {
+        self.transitions
+            .push(Transition::new(property, duration_ms, curve));
+        self
+    }
+
+    /// Backwards-compatible animation transition builder.
+    pub fn animate(mut self, target: TransitionProperty, duration_ms: f64, curve: Curve) -> Self {
+        self.transitions
+            .push(Transition::new(target, duration_ms, curve));
         self
     }
 }
@@ -942,5 +1228,21 @@ pub(crate) mod tests {
         assert_eq!(style.base_constraints.flex_grow, 2.0);
         assert_eq!(style.base_constraints.flex_shrink, 0.5);
         assert_eq!(style.base_constraints.flex_basis, Size::Fixed(100));
+    }
+
+    #[test]
+    fn test_root_node_size_fill() {
+        let mut ctx = crate::Context::new();
+        let root = ctx.create_node();
+        root.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fill;
+            c.height = Size::Fill;
+        });
+        ctx.root_attach(root);
+        ctx.compute_layout(1024.0, 768.0);
+
+        let bounds = root.get_computed(&ctx).unwrap();
+        assert_eq!(bounds.w, 1024.0);
+        assert_eq!(bounds.h, 768.0);
     }
 }

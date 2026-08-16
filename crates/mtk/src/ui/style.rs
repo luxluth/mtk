@@ -1,27 +1,17 @@
 //! Declarative styling wrappers, animated property transitions, and view extension traits.
 //!
 //! This module provides the [`StyledView`] component, persistent [`StyledViewState`] animation
-//! tracking, and the [`ViewStyleExt`] extension trait for attaching [`Style`]
-//! declarations to any view.
+//! tracking, [`KeyframedView`], and the [`ViewStyleExt`] extension trait for attaching [`Style`]
+//! declarations and keyframe animations to any view.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::animation::AnimatedValue;
-use crate::colors::Color;
-use crate::style::Edges;
+use crate::animation::{AnimatedValue, Curve, Keyframes};
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
-use crate::{AnimationTarget, Context, Node, Overflow, Style, TextRenderInfo};
+use crate::{Context, Node, Overflow, Style, TextRenderInfo, TransitionProperty};
 
-/// A wrapper component that applies declarative [`Style`] properties, hover effects, and smooth property transitions to an inner view `V`.
-///
-/// Created via [`ViewStyleExt::style`].
-pub struct StyledView<V> {
-    pub(crate) inner: V,
-    pub(crate) style: Style,
-}
-
-/// Extension trait for [`View`] that enables fluid `.style(...)` method chaining.
+/// Extension trait for [`View`] that enables fluid `.style(...)` and `.animate_keyframes(...)` method chaining.
 pub trait ViewStyleExt: Sized {
     /// Attaches a [`Style`] configuration to this view.
     ///
@@ -34,38 +24,51 @@ pub trait ViewStyleExt: Sized {
     /// let styled_text = text("Hello").style(Style::new().padding(10.0));
     /// ```
     fn style(self, style: Style) -> StyledView<Self>;
+
+    /// Attaches a [`Keyframes`] timeline animation sequence to this view.
+    fn animate_keyframes(self, keyframes: Keyframes<Style>) -> KeyframedView<Self>;
 }
 
 impl<V> ViewStyleExt for V {
     fn style(self, style: Style) -> StyledView<Self> {
         StyledView { inner: self, style }
     }
+
+    fn animate_keyframes(self, keyframes: Keyframes<Style>) -> KeyframedView<Self> {
+        KeyframedView {
+            inner: self,
+            keyframes,
+        }
+    }
 }
 
-/// Persistent element state for a [`StyledView`], tracking hover states and active property transition animations.
+/// Persistent element state for a [`StyledView`], tracking hover, active, focus states and active property transition animations.
 #[derive(Default)]
 pub struct StyledViewState {
     /// `true` if the mouse cursor is currently hovering over the view's layout node.
     pub is_hovered: bool,
-    /// `true` if any property transition animation (padding, color, scale) is currently progressing.
+    /// `true` if the mouse button is pressed over the view's layout node (active state).
+    pub is_active: bool,
+    /// `true` if the layout node has input focus.
+    pub is_focused: bool,
+    /// `true` if the element is disabled.
+    pub is_disabled: bool,
+    /// `true` if any property transition animation is currently progressing.
     pub is_animating: bool,
-    /// Active animation state for padding transitions.
-    pub padding_anim: Option<AnimatedValue<f32>>,
-    /// Active animation state for background color transitions.
-    pub color_anim: Option<AnimatedValue<Color>>,
-    /// Active animation state for scale transitions.
-    pub scale_anim: Option<AnimatedValue<f32>>,
+    /// Active animation state interpolating the computed style.
+    pub style_anim: Option<AnimatedValue<Style>>,
 }
 
 impl StyledViewState {
-    /// Creates a new, unhovered [`StyledViewState`] with no active property animations.
+    /// Creates a new unhovered, inactive [`StyledViewState`].
     pub fn new() -> Self {
         Self {
             is_hovered: false,
+            is_active: false,
+            is_focused: false,
+            is_disabled: false,
             is_animating: false,
-            padding_anim: None,
-            color_anim: None,
-            scale_anim: None,
+            style_anim: None,
         }
     }
 }
@@ -76,6 +79,12 @@ fn now_ms() -> f64 {
         .unwrap()
         .as_secs_f64()
         * 1000.0
+}
+
+/// A wrapper component that applies declarative [`Style`] properties, pseudo-classes, and smooth property transitions to an inner view `V`.
+pub struct StyledView<V> {
+    pub(crate) inner: V,
+    pub(crate) style: Style,
 }
 
 impl<State, V: View<State>> View<State> for StyledView<V> {
@@ -91,10 +100,8 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
             let scroll = c.scroll;
             let flex_dir = self.style.flex_direction.unwrap_or(c.flex_direction);
             *c = self.style.base_constraints;
-
             c.flex_direction = flex_dir;
 
-            // ScrollView sets Overflow::Scroll before StyledView runs, preserve it if we didn't explicitly override it (assuming default Visible means no override for ScrollView)
             if self.style.base_constraints.overflow == Overflow::Visible
                 && overflow != Overflow::Visible
             {
@@ -116,28 +123,14 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
         }
 
         let mut view_state = StyledViewState::new();
-
-        for (target, _, _) in &self.style.transitions {
-            match target {
-                AnimationTarget::Padding => {
-                    view_state.padding_anim =
-                        Some(AnimatedValue::new(self.style.base_constraints.padding.top));
-                }
-                AnimationTarget::BackgroundColor => {
-                    view_state.color_anim =
-                        Some(AnimatedValue::new(self.style.base_effects.background_color));
-                }
-                AnimationTarget::Scale => {
-                    view_state.scale_anim = Some(AnimatedValue::new(self.style.base_effects.scale));
-                }
-            }
+        if !self.style.transitions.is_empty() {
+            view_state.style_anim = Some(AnimatedValue::new(self.style.clone()));
         }
 
         (child_el, view_state)
     }
 
     fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
-        // Rebuild child
         self.inner.rebuild(&prev.inner, ctx, &mut element.0);
         let node = self.inner.get_node(&element.0);
         element.1.is_animating = self.apply_style(ctx, &mut element.1, node);
@@ -179,26 +172,35 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
         event: Event,
         ctx: &mut Context,
     ) -> (EventResult, Option<Self::Message>) {
-        let mut hover_changed = false;
+        let mut state_changed = false;
+        let node = self.inner.get_node(&element.0);
 
-        if let Event::CursorMoved { hit_nodes, .. } = &event {
-            let node = self.inner.get_node(&element.0);
-            let newly_hovered = hit_nodes.contains(&node);
-            if element.1.is_hovered != newly_hovered {
-                element.1.is_hovered = newly_hovered;
-                hover_changed = true;
-
-                element.1.is_animating = true;
+        match &event {
+            Event::CursorMoved { hit_nodes, .. } => {
+                let newly_hovered = hit_nodes.contains(&node);
+                if element.1.is_hovered != newly_hovered {
+                    element.1.is_hovered = newly_hovered;
+                    state_changed = true;
+                }
             }
+            Event::MouseInput {
+                pressed, hit_nodes, ..
+            } => {
+                let is_hit = hit_nodes.contains(&node);
+                let new_active = *pressed && is_hit;
+                if element.1.is_active != new_active {
+                    element.1.is_active = new_active;
+                    state_changed = true;
+                }
+            }
+            _ => {}
         }
 
         let is_tick = matches!(event, Event::Tick { .. });
 
-        if hover_changed || (is_tick && element.1.is_animating) {
-            let node = self.inner.get_node(&element.0);
+        if state_changed || (is_tick && element.1.is_animating) {
             element.1.is_animating = self.apply_style(ctx, &mut element.1, node);
-
-            if hover_changed {
+            if state_changed {
                 ctx.request_frame();
             }
         }
@@ -208,124 +210,100 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
 }
 
 impl<V> StyledView<V> {
+    fn compute_target_style(&self, view_state: &StyledViewState) -> Style {
+        let mut target = self.style.clone();
+
+        if view_state.is_disabled {
+            if let Some(disabled) = &self.style.disabled {
+                target = target.merge((**disabled).clone());
+            }
+        }
+
+        if view_state.is_focused {
+            if let Some(focus) = &self.style.focus {
+                target = target.merge((**focus).clone());
+            }
+        }
+
+        if view_state.is_hovered {
+            if let Some(hover) = &self.style.hover {
+                target = target.merge((**hover).clone());
+            }
+        }
+
+        if view_state.is_active {
+            if let Some(active) = &self.style.active {
+                target = target.merge((**active).clone());
+            }
+        }
+
+        target
+    }
+
     fn apply_style(&self, ctx: &mut Context, view_state: &mut StyledViewState, node: Node) -> bool {
-        let target_constraints = if view_state.is_hovered {
-            self.style
-                .hover_constraints
-                .unwrap_or(self.style.base_constraints)
-        } else {
-            self.style.base_constraints
-        };
-
-        let target_effects = if view_state.is_hovered {
-            self.style
-                .hover_effects
-                .as_ref()
-                .unwrap_or(&self.style.base_effects)
-        } else {
-            &self.style.base_effects
-        };
-
+        let target_style = self.compute_target_style(view_state);
         let mut is_animating = false;
 
-        if let Some(padding_anim) = &mut view_state.padding_anim {
-            let transition = self
-                .style
-                .transitions
-                .iter()
-                .find(|t| t.0 == AnimationTarget::Padding);
+        let active_style = if !self.style.transitions.is_empty() {
+            let mut transition_duration = 200.0;
+            let mut transition_curve = Curve::ease_out();
 
-            if let Some((_, duration, curve)) = transition {
-                let target_pad = target_constraints.padding.top;
-                padding_anim.set_target(target_pad, now_ms(), *duration, *curve);
-            }
-
-            if padding_anim.tick(now_ms()) {
-                is_animating = true;
-                node.update_constraints(ctx, |c| c.padding = Edges::all(padding_anim.current));
-            } else {
-                node.update_constraints(ctx, |c| {
-                    c.padding = Edges::all(target_constraints.padding.top)
-                });
-            }
-        } else {
-            node.update_constraints(ctx, |c| {
-                let overflow = c.overflow;
-                let scroll = c.scroll;
-                let flex_dir = self.style.flex_direction.unwrap_or(c.flex_direction);
-                *c = target_constraints;
-
-                c.flex_direction = flex_dir;
-
-                if target_constraints.overflow == crate::style::Overflow::Visible
-                    && overflow != crate::style::Overflow::Visible
-                {
-                    c.overflow = overflow;
+            for t in &self.style.transitions {
+                if t.property == TransitionProperty::All || t.duration_ms > transition_duration {
+                    transition_duration = t.duration_ms;
+                    transition_curve = t.curve;
                 }
-                c.scroll = scroll;
-            });
-        }
-
-        let mut final_effects = target_effects.clone();
-
-        if let Some(color_anim) = &mut view_state.color_anim {
-            let transition = self
-                .style
-                .transitions
-                .iter()
-                .find(|t| t.0 == AnimationTarget::BackgroundColor);
-
-            if let Some((_, duration, curve)) = transition {
-                let target_color = target_effects.background_color;
-                color_anim.set_target(target_color, now_ms(), *duration, *curve);
             }
 
-            if color_anim.tick(now_ms()) {
+            if view_state.style_anim.is_none() {
+                view_state.style_anim = Some(AnimatedValue::new(target_style.clone()));
+            }
+
+            let anim = view_state.style_anim.as_mut().unwrap();
+            anim.set_target(
+                target_style.clone(),
+                now_ms(),
+                transition_duration,
+                transition_curve,
+            );
+
+            if anim.tick(now_ms()) {
                 is_animating = true;
-                final_effects.background_color = color_anim.current;
+                anim.current.clone()
             } else {
-                final_effects.background_color = target_effects.background_color;
+                target_style.clone()
             }
-        }
-
-        if let Some(scale_anim) = &mut view_state.scale_anim {
-            let transition = self
-                .style
-                .transitions
-                .iter()
-                .find(|t| t.0 == AnimationTarget::Scale);
-
-            if let Some((_, duration, curve)) = transition {
-                let target_scale = target_effects.scale;
-                scale_anim.set_target(target_scale, now_ms(), *duration, *curve);
-            }
-
-            if scale_anim.tick(now_ms()) {
-                is_animating = true;
-                final_effects.scale = scale_anim.current;
-            } else {
-                final_effects.scale = target_effects.scale;
-            }
-        }
-
-        node.set_effects(ctx, final_effects);
-
-        let target_text_style = if view_state.is_hovered {
-            self.style
-                .hover_text_style
-                .as_ref()
-                .unwrap_or(&self.style.base_text_style)
         } else {
-            &self.style.base_text_style
+            target_style.clone()
         };
 
+        // Apply constraints
+        node.update_constraints(ctx, |c| {
+            let overflow = c.overflow;
+            let scroll = c.scroll;
+            let flex_dir = active_style.flex_direction.unwrap_or(c.flex_direction);
+            *c = active_style.base_constraints;
+            c.flex_direction = flex_dir;
+
+            if active_style.base_constraints.overflow == Overflow::Visible
+                && overflow != Overflow::Visible
+            {
+                c.overflow = overflow;
+            }
+            c.scroll = scroll;
+        });
+
+        // Apply effects
+        node.set_effects(ctx, active_style.base_effects.clone());
+
+        // Apply text style
         if let Some(text) = node.get_text(ctx) {
             let text_owned = text.to_string();
             if let Some(mut info) = node.get_text_userdata::<TextRenderInfo>(ctx).cloned() {
-                info.style = target_text_style.clone();
+                info.style = active_style.base_text_style.clone();
                 node.set_text_with_userdata(ctx, &text_owned, info);
             } else {
-                node.set_text_with_userdata(ctx, &text_owned, target_text_style.clone());
+                node.set_text_with_userdata(ctx, &text_owned, active_style.base_text_style.clone());
             }
         }
 
@@ -333,13 +311,125 @@ impl<V> StyledView<V> {
             ctx.request_frame();
         }
 
-        return is_animating;
+        is_animating
+    }
+}
+
+/// A wrapper component that applies a [`Keyframes`] timeline animation sequence to an inner view `V`.
+pub struct KeyframedView<V> {
+    pub(crate) inner: V,
+    pub(crate) keyframes: Keyframes<Style>,
+}
+
+#[derive(Default)]
+pub struct KeyframedViewState {
+    pub start_time: f64,
+    pub is_active: bool,
+}
+
+impl<State, V: View<State>> View<State> for KeyframedView<V> {
+    type Element = (V::Element, KeyframedViewState);
+    type Message = V::Message;
+
+    fn build(&self, ctx: &mut Context) -> Self::Element {
+        let child_el = self.inner.build(ctx);
+        let node = self.inner.get_node(&child_el);
+        let start_time = now_ms();
+
+        let (style, is_active) = self.keyframes.evaluate(0.0);
+        self.apply_evaluated_style(ctx, node, &style);
+
+        if is_active {
+            ctx.request_frame();
+        }
+
+        (
+            child_el,
+            KeyframedViewState {
+                start_time,
+                is_active,
+            },
+        )
+    }
+
+    fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
+        self.inner.rebuild(&prev.inner, ctx, &mut element.0);
+        let node = self.inner.get_node(&element.0);
+        let elapsed = now_ms() - element.1.start_time;
+        let (style, is_active) = self.keyframes.evaluate(elapsed);
+        element.1.is_active = is_active;
+        self.apply_evaluated_style(ctx, node, &style);
+
+        if is_active {
+            ctx.request_frame();
+        }
+    }
+
+    fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
+        self.inner.teardown(ctx, &mut element.0);
+    }
+
+    fn get_node(&self, element: &Self::Element) -> Node {
+        self.inner.get_node(&element.0)
+    }
+
+    fn handle_event(
+        &self,
+        element: &mut Self::Element,
+        state: &State,
+        event: Event,
+        ctx: &mut Context,
+    ) -> (EventResult, Option<Self::Message>) {
+        if matches!(event, Event::Tick { .. }) && element.1.is_active {
+            let node = self.inner.get_node(&element.0);
+            let elapsed = now_ms() - element.1.start_time;
+            let (style, is_active) = self.keyframes.evaluate(elapsed);
+            element.1.is_active = is_active;
+            self.apply_evaluated_style(ctx, node, &style);
+
+            if is_active {
+                ctx.request_frame();
+            }
+        }
+
+        self.inner.handle_event(&mut element.0, state, event, ctx)
+    }
+}
+
+impl<V> KeyframedView<V> {
+    fn apply_evaluated_style(&self, ctx: &mut Context, node: Node, style: &Style) {
+        node.update_constraints(ctx, |c| {
+            let overflow = c.overflow;
+            let scroll = c.scroll;
+            let flex_dir = style.flex_direction.unwrap_or(c.flex_direction);
+            *c = style.base_constraints;
+            c.flex_direction = flex_dir;
+
+            if style.base_constraints.overflow == Overflow::Visible && overflow != Overflow::Visible
+            {
+                c.overflow = overflow;
+            }
+            c.scroll = scroll;
+        });
+
+        node.set_effects(ctx, style.base_effects.clone());
+
+        if let Some(text) = node.get_text(ctx) {
+            let text_owned = text.to_string();
+            if let Some(mut info) = node.get_text_userdata::<TextRenderInfo>(ctx).cloned() {
+                info.style = style.base_text_style.clone();
+                node.set_text_with_userdata(ctx, &text_owned, info);
+            } else {
+                node.set_text_with_userdata(ctx, &text_owned, style.base_text_style.clone());
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Edges;
     use crate::FlexDirection;
     use crate::ui::widgets::{column, row, text};
 
@@ -380,5 +470,17 @@ mod tests {
         let constraints = node.get_constraints(&ctx).unwrap();
 
         assert_eq!(constraints.flex_direction, FlexDirection::Column);
+    }
+
+    #[test]
+    fn test_style_merge_and_mixins() {
+        let base = Style::new().padding(10.0).corner_radius(12.0);
+        let mixin = |s: Style| s.scale(1.2).opacity(0.8);
+        let combined = base.apply(mixin).when(true, |s| s.gap(8.0));
+
+        assert_eq!(combined.base_constraints.padding, Edges::all(10.0));
+        assert_eq!(combined.base_effects.scale, 1.2);
+        assert_eq!(combined.base_effects.opacity, 0.8);
+        assert_eq!(combined.base_constraints.gap, 8.0);
     }
 }

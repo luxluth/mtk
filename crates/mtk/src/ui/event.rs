@@ -58,6 +58,7 @@ pub struct EventHandler<State, V, F> {
 pub struct EventElement<VEl> {
     pub(crate) inner_element: VEl,
     pub(crate) is_hovered: bool,
+    pub(crate) is_pressed: bool,
 }
 
 impl<State, V: View<State>, F> View<State> for EventHandler<State, V, F>
@@ -71,6 +72,7 @@ where
         EventElement {
             inner_element: self.inner.build(ctx),
             is_hovered: false,
+            is_pressed: false,
         }
     }
 
@@ -113,17 +115,32 @@ where
                     }
                 }
             }
-            Event::MouseInput { pressed, .. } => {
-                if element.is_hovered {
-                    if *pressed {
+            Event::MouseInput {
+                pressed, hit_nodes, ..
+            } => {
+                let node = self.get_node(element);
+                let is_hit = hit_nodes.contains(&node);
+                if *pressed {
+                    if is_hit {
+                        element.is_pressed = true;
                         if self.kind == EventKind::Press {
                             emitted_msg = (self.handler)(state);
                             handled = EventResult::Handled;
                         }
-                    } else {
-                        if self.kind == EventKind::Release || self.kind == EventKind::Click {
-                            emitted_msg = (self.handler)(state);
-                            handled = EventResult::Handled;
+                    }
+                } else {
+                    if element.is_pressed {
+                        element.is_pressed = false;
+                        if is_hit {
+                            if self.kind == EventKind::Click || self.kind == EventKind::Release {
+                                emitted_msg = (self.handler)(state);
+                                handled = EventResult::Handled;
+                            }
+                        } else {
+                            if self.kind == EventKind::Release {
+                                emitted_msg = (self.handler)(state);
+                                handled = EventResult::Handled;
+                            }
                         }
                     }
                 }

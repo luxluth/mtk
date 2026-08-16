@@ -13,15 +13,13 @@ use crate::{effects::Filter, render::RenderCommandKind, windowing::atlas};
 pub struct ImmediateData {
     pub color: [f32; 4],
     pub pos: [f32; 2],
-
     pub screen_size: [f32; 2],
-
     pub quad_size: [f32; 2],
-    pub src_offset: [f32; 2],
-    pub src_size: [f32; 2],
-
     pub border_radius: f32,
     pub alpha: f32,
+    pub border_color: [f32; 4],
+    pub shadow_color: [f32; 4],
+    pub border_widths: [f32; 4],
     pub shadow_spread: f32,
     pub shadow_power: f32,
     pub vibrancy: f32,
@@ -30,9 +28,9 @@ pub struct ImmediateData {
     pub _pad1: f32,
     pub _pad2: f32,
     pub _pad3: f32,
-    pub border_widths: [f32; 4],
-    pub border_color: [f32; 4],
 }
+
+const _: () = assert!(std::mem::size_of::<ImmediateData>() == 128);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -433,6 +431,7 @@ impl<'w> Renderer<'w> {
             underlines: Vec<[f32; 4]>,
             caret: Option<[f32; 4]>,
             style: TextStyle,
+            alpha: f32,
         }
         let mut text_ranges: HashMap<usize, RenderTextData> = HashMap::new();
         let mut focused_caret = None;
@@ -533,10 +532,16 @@ impl<'w> Renderer<'w> {
                                 let mut scaler_opt = None;
 
                                 for glyph in glyph_run.positioned_glyphs() {
+                                    let raw_x = text_x + glyph.x;
+                                    let raw_y = text_y + glyph.y;
+                                    let subpx =
+                                        ((raw_x.fract().rem_euclid(1.0) * 4.0).round() as u8) % 4;
+
                                     let cache_key = atlas::CacheKey {
                                         font_ptr,
                                         font_size: (font_size * 1000.0) as u32,
                                         glyph_id: glyph.id as u16,
+                                        subpx,
                                         coords_hash,
                                     };
 
@@ -555,7 +560,7 @@ impl<'w> Renderer<'w> {
                                                     .scale_cx
                                                     .builder(swash_font)
                                                     .size(font_size)
-                                                    .hint(false)
+                                                    .hint(true)
                                                     .normalized_coords(norm_coords)
                                                     .build(),
                                             );
@@ -569,18 +574,24 @@ impl<'w> Renderer<'w> {
                                     };
 
                                     if let Some(info) = info_opt {
-                                        let global_x = text_x + glyph.x + info.offset_x as f32;
-                                        // `glyph.y` is already positioned by `positioned_glyphs()`
-                                        let global_y = text_y + glyph.y + info.offset_y as f32;
+                                        if info.physical_w == 0 || info.physical_h == 0 {
+                                            continue;
+                                        }
+
+                                        let base_x = raw_x.floor();
+                                        let base_y = raw_y.floor();
+                                        let global_x = base_x + info.offset_x as f32;
+                                        let global_y = base_y + info.offset_y as f32;
 
                                         let dx = global_x - cx;
                                         let dy = global_y - cy;
 
-                                        let color = if info.is_color {
+                                        let mut color: [f32; 4] = if info.is_color {
                                             [1.0, 1.0, 1.0, brush.a as f32 / 255.0]
                                         } else {
                                             brush.into()
                                         };
+                                        color[3] *= effects.opacity;
 
                                         text_instances.push(TextInstance {
                                             pos: [
@@ -588,8 +599,8 @@ impl<'w> Renderer<'w> {
                                                 (cy + dy * scale).round(),
                                             ],
                                             size: [
-                                                info.physical_w as f32 * scale,
-                                                info.physical_h as f32 * scale,
+                                                (info.physical_w as f32 * scale).round(),
+                                                (info.physical_h as f32 * scale).round(),
                                             ],
                                             uv_pos: [info.uv_x, info.uv_y],
                                             uv_size: [info.uv_w, info.uv_h],
@@ -640,16 +651,71 @@ impl<'w> Renderer<'w> {
 
                         let mut strikethroughs = Vec::new();
                         if text_style.strikethrough {
-                            let thickness = (text_style.font_size * 0.08).max(1.5);
                             for line in layout.lines() {
-                                let line_w = line.metrics().advance;
-                                let line_y =
-                                    text_y + (actual_text_height * 0.52) - (thickness * 0.5);
-                                strikethroughs.push([text_x, line_y, line_w, thickness]);
+                                let mut line_baseline: Option<f32> = None;
+                                let mut min_x: Option<f32> = None;
+                                let mut line_font_size = text_style.font_size;
+
+                                for item in line.items() {
+                                    if let PositionedLayoutItem::GlyphRun(glyph_run) = item {
+                                        line_font_size = glyph_run.run().font_size();
+                                        for glyph in glyph_run.positioned_glyphs() {
+                                            if line_baseline.is_none() {
+                                                line_baseline = Some(glyph.y);
+                                            }
+                                            let gx = glyph.x;
+                                            min_x = Some(min_x.map_or(gx, |m| m.min(gx)));
+                                        }
+                                    }
+                                }
+
+                                if let Some(base_y) = line_baseline {
+                                    let thickness = (line_font_size * 0.08).max(1.5);
+                                    let line_w = line.metrics().advance;
+                                    let start_x = min_x.unwrap_or(0.0);
+                                    let line_y = text_y + base_y
+                                        - (line_font_size * 0.28)
+                                        - (thickness * 0.5);
+                                    strikethroughs.push([
+                                        text_x + start_x,
+                                        line_y,
+                                        line_w,
+                                        thickness,
+                                    ]);
+                                }
                             }
                         }
 
                         let mut underlines = Vec::new();
+                        if text_style.underline {
+                            for line in layout.lines() {
+                                let mut line_baseline: Option<f32> = None;
+                                let mut min_x: Option<f32> = None;
+                                let mut line_font_size = text_style.font_size;
+
+                                for item in line.items() {
+                                    if let PositionedLayoutItem::GlyphRun(glyph_run) = item {
+                                        line_font_size = glyph_run.run().font_size();
+                                        for glyph in glyph_run.positioned_glyphs() {
+                                            if line_baseline.is_none() {
+                                                line_baseline = Some(glyph.y);
+                                            }
+                                            let gx = glyph.x;
+                                            min_x = Some(min_x.map_or(gx, |m| m.min(gx)));
+                                        }
+                                    }
+                                }
+
+                                if let Some(base_y) = line_baseline {
+                                    let thickness = (line_font_size * 0.08).max(1.5);
+                                    let line_w = line.metrics().advance;
+                                    let start_x = min_x.unwrap_or(0.0);
+                                    let line_y = text_y + base_y + (line_font_size * 0.12);
+                                    underlines.push([text_x + start_x, line_y, line_w, thickness]);
+                                }
+                            }
+                        }
+
                         if let Some((start, end)) = preedit_range {
                             if start < end {
                                 let start_cursor =
@@ -684,6 +750,7 @@ impl<'w> Renderer<'w> {
                                 underlines,
                                 caret: caret_rect,
                                 style: text_style.clone(),
+                                alpha: effects.opacity,
                             },
                         );
                     }
@@ -1000,18 +1067,25 @@ impl<'w> Renderer<'w> {
 
                     let border_c = effects.border.color;
                     let border_color = border_c.into();
+                    let shadow_c = effects.shadow.color;
+                    let shadow_color = shadow_c.into();
 
                     let immediate_data = ImmediateData {
                         color,
-                        border_color,
                         pos: [
                             computed.x + (computed.w - computed.w * effects.scale) / 2.0,
                             computed.y + (computed.h - computed.h * effects.scale) / 2.0,
                         ],
                         screen_size: [self.size.width as f32, self.size.height as f32],
                         quad_size: [computed.w * effects.scale, computed.h * effects.scale],
-                        src_offset: [0.0, 0.0],
-                        src_size: [0.0, 0.0],
+                        border_color,
+                        shadow_color,
+                        border_widths: [
+                            constraints.border.top,
+                            constraints.border.right,
+                            constraints.border.bottom,
+                            constraints.border.left,
+                        ],
                         border_radius: effects.border.radius.tl,
                         alpha: effects.opacity,
                         shadow_spread: effects.shadow.spread,
@@ -1022,12 +1096,6 @@ impl<'w> Renderer<'w> {
                         _pad1: 0.0,
                         _pad2: 0.0,
                         _pad3: 0.0,
-                        border_widths: [
-                            constraints.border.top,
-                            constraints.border.right,
-                            constraints.border.bottom,
-                            constraints.border.left,
-                        ],
                     };
                     render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
                     render_pass.draw(0..6, 0..1);
@@ -1078,14 +1146,14 @@ impl<'w> Renderer<'w> {
                         for sel in &range.selections {
                             let immediate_data = ImmediateData {
                                 color: range.style.selection_bg.into(),
-                                border_color: [0.0; 4],
                                 pos: [sel[0], sel[1]],
                                 screen_size: [self.size.width as f32, self.size.height as f32],
                                 quad_size: [sel[2], sel[3]],
-                                src_offset: [0.0, 0.0],
-                                src_size: [0.0, 0.0],
+                                border_color: [0.0; 4],
+                                shadow_color: [0.0; 4],
+                                border_widths: [0.0; 4],
                                 border_radius: 0.0,
-                                alpha: 1.0,
+                                alpha: range.alpha,
                                 shadow_spread: 0.0,
                                 shadow_power: 0.0,
                                 vibrancy: 0.0,
@@ -1094,7 +1162,6 @@ impl<'w> Renderer<'w> {
                                 _pad1: 0.0,
                                 _pad2: 0.0,
                                 _pad3: 0.0,
-                                border_widths: [0.0; 4],
                             };
 
                             render_pass.set_pipeline(&self.pipelines.solid);
@@ -1119,14 +1186,14 @@ impl<'w> Renderer<'w> {
                         if let Some(c_rect) = &range.caret {
                             let immediate_data = ImmediateData {
                                 color: range.style.caret_color.into(),
-                                border_color: [0.0; 4],
                                 pos: [c_rect[0], c_rect[1]],
                                 screen_size: [self.size.width as f32, self.size.height as f32],
                                 quad_size: [c_rect[2], c_rect[3]],
-                                src_offset: [0.0, 0.0],
-                                src_size: [0.0, 0.0],
+                                border_color: [0.0; 4],
+                                shadow_color: [0.0; 4],
+                                border_widths: [0.0; 4],
                                 border_radius: 0.0,
-                                alpha: 1.0,
+                                alpha: range.alpha,
                                 shadow_spread: 0.0,
                                 shadow_power: 0.0,
                                 vibrancy: 0.0,
@@ -1135,7 +1202,6 @@ impl<'w> Renderer<'w> {
                                 _pad1: 0.0,
                                 _pad2: 0.0,
                                 _pad3: 0.0,
-                                border_widths: [0.0; 4],
                             };
 
                             render_pass.set_pipeline(&self.pipelines.solid);
@@ -1147,14 +1213,14 @@ impl<'w> Renderer<'w> {
                         for strike in &range.strikethroughs {
                             let immediate_data = ImmediateData {
                                 color: range.style.color.into(),
-                                border_color: [0.0; 4],
                                 pos: [strike[0], strike[1]],
                                 screen_size: [self.size.width as f32, self.size.height as f32],
                                 quad_size: [strike[2], strike[3]],
-                                src_offset: [0.0, 0.0],
-                                src_size: [0.0, 0.0],
+                                border_color: [0.0; 4],
+                                shadow_color: [0.0; 4],
+                                border_widths: [0.0; 4],
                                 border_radius: 0.0,
-                                alpha: 1.0,
+                                alpha: range.alpha,
                                 shadow_spread: 0.0,
                                 shadow_power: 0.0,
                                 vibrancy: 0.0,
@@ -1163,7 +1229,6 @@ impl<'w> Renderer<'w> {
                                 _pad1: 0.0,
                                 _pad2: 0.0,
                                 _pad3: 0.0,
-                                border_widths: [0.0; 4],
                             };
 
                             render_pass.set_pipeline(&self.pipelines.solid);
@@ -1175,14 +1240,14 @@ impl<'w> Renderer<'w> {
                         for u in &range.underlines {
                             let immediate_data = ImmediateData {
                                 color: range.style.color.into(),
-                                border_color: [0.0; 4],
                                 pos: [u[0], u[1]],
                                 screen_size: [self.size.width as f32, self.size.height as f32],
                                 quad_size: [u[2], u[3]],
-                                src_offset: [0.0, 0.0],
-                                src_size: [0.0, 0.0],
+                                border_color: [0.0; 4],
+                                shadow_color: [0.0; 4],
+                                border_widths: [0.0; 4],
                                 border_radius: 0.0,
-                                alpha: 1.0,
+                                alpha: range.alpha,
                                 shadow_spread: 0.0,
                                 shadow_power: 0.0,
                                 vibrancy: 0.0,
@@ -1191,7 +1256,6 @@ impl<'w> Renderer<'w> {
                                 _pad1: 0.0,
                                 _pad2: 0.0,
                                 _pad3: 0.0,
-                                border_widths: [0.0; 4],
                             };
 
                             render_pass.set_pipeline(&self.pipelines.solid);
@@ -1210,11 +1274,8 @@ impl<'w> Renderer<'w> {
                     let node = cmd.node();
                     let computed = cmd.computed();
                     let constraints = node.get_constraints(context).unwrap_or_default();
-                    let inner_h =
-                        (computed.h - constraints.padding.top - constraints.padding.bottom)
-                            .max(0.0);
                     let content_h = node.compute_content_height(context);
-                    let max_scroll_y = (content_h - inner_h).max(0.0);
+                    let max_scroll_y = (content_h - computed.h).max(0.0);
 
                     if max_scroll_y > 0.0 {
                         let track_top = computed.y + 4.0;
@@ -1225,12 +1286,12 @@ impl<'w> Renderer<'w> {
 
                         let scrollbar_data = ImmediateData {
                             color: [0.4, 0.4, 0.4, 0.85],
-                            border_color: [0.0; 4],
                             pos: [computed.x + computed.w - 10.0, thumb_top],
                             screen_size: [self.size.width as f32, self.size.height as f32],
                             quad_size: [6.0, thumb_h],
-                            src_offset: [0.0, 0.0],
-                            src_size: [0.0, 0.0],
+                            border_color: [0.0; 4],
+                            shadow_color: [0.0; 4],
+                            border_widths: [0.0; 4],
                             border_radius: 3.0,
                             alpha: 0.9,
                             shadow_spread: 0.0,
@@ -1241,7 +1302,6 @@ impl<'w> Renderer<'w> {
                             _pad1: 0.0,
                             _pad2: 0.0,
                             _pad3: 0.0,
-                            border_widths: [0.0; 4],
                         };
                         render_pass.set_immediates(0, bytemuck::bytes_of(&scrollbar_data));
                         render_pass.draw(0..6, 0..1);
@@ -1251,11 +1311,8 @@ impl<'w> Renderer<'w> {
                     let node = cmd.node();
                     let computed = cmd.computed();
                     let constraints = node.get_constraints(context).unwrap_or_default();
-                    let inner_w =
-                        (computed.w - constraints.padding.left - constraints.padding.right)
-                            .max(0.0);
-                    let content_w = computed.content_w.max(inner_w);
-                    let max_scroll_x = (content_w - inner_w).max(0.0);
+                    let content_w = computed.content_w.max(computed.w);
+                    let max_scroll_x = (content_w - computed.w).max(0.0);
 
                     if max_scroll_x > 0.0 {
                         let track_left = computed.x + 4.0;
@@ -1266,12 +1323,12 @@ impl<'w> Renderer<'w> {
 
                         let scrollbar_data_x = ImmediateData {
                             color: [0.4, 0.4, 0.4, 0.85],
-                            border_color: [0.0; 4],
                             pos: [thumb_left, computed.y + computed.h - 10.0],
                             screen_size: [self.size.width as f32, self.size.height as f32],
                             quad_size: [thumb_w, 6.0],
-                            src_offset: [0.0, 0.0],
-                            src_size: [0.0, 0.0],
+                            border_color: [0.0; 4],
+                            shadow_color: [0.0; 4],
+                            border_widths: [0.0; 4],
                             border_radius: 3.0,
                             alpha: 0.9,
                             shadow_spread: 0.0,
@@ -1282,7 +1339,6 @@ impl<'w> Renderer<'w> {
                             _pad1: 0.0,
                             _pad2: 0.0,
                             _pad3: 0.0,
-                            border_widths: [0.0; 4],
                         };
                         render_pass.set_immediates(0, bytemuck::bytes_of(&scrollbar_data_x));
                         render_pass.draw(0..6, 0..1);
@@ -1305,16 +1361,15 @@ impl<'w> Renderer<'w> {
                     let ring_thickness = 2.0;
                     let immediate_data = ImmediateData {
                         color: [0.0; 4],
-                        // TODO: make this customizable
-                        border_color: [0.0, 0.47, 1.0, 1.0], // Mac-like focus ring blue
                         pos: [computed.x - ring_thickness, computed.y - ring_thickness],
                         screen_size: [self.size.width as f32, self.size.height as f32],
                         quad_size: [
                             computed.w + ring_thickness * 2.0,
                             computed.h + ring_thickness * 2.0,
                         ],
-                        src_offset: [0.0, 0.0],
-                        src_size: [0.0, 0.0],
+                        border_color: [0.0, 0.47, 1.0, 1.0], // Mac-like focus ring blue
+                        shadow_color: [0.0; 4],
+                        border_widths: [ring_thickness; 4],
                         border_radius: effects.border.radius.tl + ring_thickness,
                         alpha: 1.0,
                         shadow_spread: 0.0,
@@ -1325,7 +1380,6 @@ impl<'w> Renderer<'w> {
                         _pad1: 0.0,
                         _pad2: 0.0,
                         _pad3: 0.0,
-                        border_widths: [ring_thickness; 4],
                     };
 
                     render_pass.set_pipeline(&self.pipelines.solid);

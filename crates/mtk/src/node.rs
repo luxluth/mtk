@@ -171,15 +171,13 @@ impl Node {
         list
     }
 
-    /// Computes the total inner content height of this node.
+    /// Computes the total content height of this node.
     pub fn compute_content_height(&self, ctxt: &Context) -> f32 {
-        let constraints = self.get_constraints(ctxt).unwrap_or_default();
         let computed = match self.get_computed(ctxt) {
             Some(c) => c,
             None => return 0.0,
         };
-        let inner_h = (computed.h - constraints.padding.top - constraints.padding.bottom).max(0.0);
-        computed.content_h.max(inner_h)
+        computed.content_h.max(computed.h)
     }
 
     /// Transform a node into a text element, making it partake in text sizing.

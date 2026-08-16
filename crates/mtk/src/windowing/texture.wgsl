@@ -3,10 +3,11 @@ struct ImmediateData {
     pos: vec2<f32>,
     screen_size: vec2<f32>,
     quad_size: vec2<f32>,
-    src_offset: vec2<f32>,
-    src_size: vec2<f32>,
     border_radius: f32,
     alpha: f32,
+    border_color: vec4<f32>,
+    shadow_color: vec4<f32>,
+    border_widths: vec4<f32>, // top, right, bottom, left
     shadow_spread: f32,
     shadow_power: f32,
     vibrancy: f32,
@@ -15,8 +16,6 @@ struct ImmediateData {
     _pad1: f32,
     _pad2: f32,
     _pad3: f32,
-    border_widths: vec4<f32>, // top, right, bottom, left
-    border_color: vec4<f32>,
 }
 var<immediate> imm: ImmediateData;
 
