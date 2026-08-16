@@ -31,7 +31,7 @@ fn main() {
         |state, msg: AppMsg| match msg {
             AppMsg::DrawPixel { x, y } => {
                 let mut pts = state.draw_points.lock().unwrap();
-                pts.push((x, y, Color::new(0, 255, 204, 255))); // Teal drawing color
+                pts.push((x, y, rgba!(0, 255, 204, 255))); // Teal drawing color
             }
         },
         |state| {
@@ -46,7 +46,7 @@ fn main() {
                         ..Default::default()
                     }),
                 ),
-                text("Click and drag on the canvas to draw!").style(
+                text("Move mouse on the canvas to draw!").style(
                     Style::new().padding(5.0).set_text_style(TextStyle {
                         font_size: 13.0,
                         color: rgba!(200, 200, 220, 200),

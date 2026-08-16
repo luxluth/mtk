@@ -5,7 +5,7 @@ use parley::style::{FontStyle, FontWeight, OverflowWrap};
 
 use crate::animation::Curve;
 use crate::colors::Color;
-use crate::effects::{Effects, Radius, Shadow};
+use crate::effects::{Effects, Filter, Radius, Shadow};
 use crate::{clr, sys};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1017,11 +1017,11 @@ impl Style {
     }
 
     pub fn blur(mut self, vibrancy: f32) -> Self {
-        self.base_effects.filters = vec![crate::effects::Filter::Blur {
+        self.base_effects.filters.push(Filter::Blur {
             vibrancy,
             vibrancy_darkness: 0.2,
             passes: 4.0,
-        }];
+        });
         self
     }
 

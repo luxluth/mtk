@@ -123,6 +123,7 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
         }
 
         let mut view_state = StyledViewState::new();
+        view_state.is_focused = Some(node) == ctx.focused_node();
         if !self.style.transitions.is_empty() {
             view_state.style_anim = Some(AnimatedValue::new(self.style.clone()));
         }
@@ -133,6 +134,7 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
     fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
         self.inner.rebuild(&prev.inner, ctx, &mut element.0);
         let node = self.inner.get_node(&element.0);
+        element.1.is_focused = Some(node) == ctx.focused_node();
         element.1.is_animating = self.apply_style(ctx, &mut element.1, node);
 
         if element.1.is_animating {
@@ -150,6 +152,7 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
         self.inner
             .rebuild_with_parent(&prev.inner, ctx, &mut element.0, parent);
         let node = self.inner.get_node(&element.0);
+        element.1.is_focused = Some(node) == ctx.focused_node();
         element.1.is_animating = self.apply_style(ctx, &mut element.1, node);
 
         if element.1.is_animating {
@@ -174,6 +177,12 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
     ) -> (EventResult, Option<Self::Message>) {
         let mut state_changed = false;
         let node = self.inner.get_node(&element.0);
+
+        let newly_focused = Some(node) == ctx.focused_node();
+        if element.1.is_focused != newly_focused {
+            element.1.is_focused = newly_focused;
+            state_changed = true;
+        }
 
         match &event {
             Event::CursorMoved { hit_nodes, .. } => {
@@ -205,7 +214,16 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
             }
         }
 
-        self.inner.handle_event(&mut element.0, state, event, ctx)
+        let res = self.inner.handle_event(&mut element.0, state, event, ctx);
+
+        let after_focused = Some(node) == ctx.focused_node();
+        if element.1.is_focused != after_focused {
+            element.1.is_focused = after_focused;
+            element.1.is_animating = self.apply_style(ctx, &mut element.1, node);
+            ctx.request_frame();
+        }
+
+        res
     }
 }
 
@@ -482,5 +500,133 @@ mod tests {
         assert_eq!(combined.base_effects.scale, 1.2);
         assert_eq!(combined.base_effects.opacity, 0.8);
         assert_eq!(combined.base_constraints.gap, 8.0);
+    }
+
+    #[test]
+    fn test_frosted_glass_layout() {
+        use crate::rgb;
+        use crate::style::{AlignItems, JustifyContent, Size, Style, TextStyle};
+        use crate::text_property::FontWeight;
+        use crate::ui::ViewStyleExt;
+        use crate::ui::widgets::{column, row, text};
+
+        let mut ctx = Context::new();
+        ctx.set_text_sizing_func(move |ctx, _node, text, userdata, avail_w, avail_h| {
+            let default_style = TextStyle::default();
+            let style = if let Some(info) =
+                userdata.and_then(|u| u.downcast_ref::<crate::TextRenderInfo>())
+            {
+                &info.style
+            } else if let Some(style) = userdata.and_then(|u| u.downcast_ref::<TextStyle>()) {
+                style
+            } else {
+                &default_style
+            };
+
+            let text_ctx = ctx.text_context.clone();
+            crate::text::measure_text(text, style, avail_w, avail_h, &text_ctx)
+        });
+
+        let view = row((column((
+            // Window Top Title Bar
+            row((
+                text::<_, ()>("Frosted Acrylic Glass Inspector").style(
+                    Style::new().set_text_style(TextStyle {
+                        font_size: 16.0,
+                        color: rgb!(15, 23, 42),
+                        font_weight: FontWeight::BOLD,
+                        ..Default::default()
+                    }),
+                ),
+                text::<_, ()>("Blur Active").style(
+                    Style::new()
+                        .padding_xy(10.0, 4.0)
+                        .set_text_style(TextStyle {
+                            font_size: 11.5,
+                            color: rgb!(5, 150, 105),
+                            ..Default::default()
+                        }),
+                ),
+            ))
+            .style(
+                Style::new()
+                    .width(Size::Percent(1.0))
+                    .align_items(AlignItems::Center)
+                    .justify_content(JustifyContent::SpaceBetween),
+            ),
+        ))
+        .style(
+            Style::new()
+                .width(Size::Fixed(720))
+                .padding(22.0)
+                .blur(0.65),
+        ),));
+
+        let element = View::<()>::build(&view, &mut ctx);
+        let root_node = View::<()>::get_node(&view, &element);
+        ctx.root_attach(root_node);
+        ctx.compute_layout(900.0, 720.0);
+        ctx.build_render_list(crate::style::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 900.0,
+            h: 720.0,
+        });
+
+        for (idx, cmd) in ctx.render_list().enumerate() {
+            println!(
+                "CMD {}: kind={:?}, node={:?}, computed={:?}, clip={:?}",
+                idx,
+                cmd.kind(),
+                cmd.node(),
+                cmd.computed(),
+                cmd.clip()
+            );
+            if let Some(txt) = cmd.node().get_text(&ctx) {
+                println!("   -> text: {:?}", txt);
+            }
+        }
+
+        println!(
+            "Node 3 text: {:?}",
+            crate::Node(crate::sys::muId {
+                numeral: 3,
+                generation: 0
+            })
+            .get_text(&ctx)
+        );
+        println!(
+            "Node 3 computed: {:?}",
+            crate::Node(crate::sys::muId {
+                numeral: 3,
+                generation: 0
+            })
+            .get_computed(&ctx)
+        );
+    }
+
+    #[test]
+    fn test_styled_view_focus_ring() {
+        let mut ctx = Context::new();
+        let view = crate::ui::widgets::input_text().style(
+            Style::new()
+                .border(1.0, crate::rgb!(100, 100, 100))
+                .on_focus(|s| s.border(3.0, crate::rgb!(0, 120, 255))),
+        );
+
+        let mut el = view.build(&mut ctx);
+        let node = view.get_node(&el);
+
+        // Before focus: border is 1.0
+        let cons_unfocused = node.get_constraints(&ctx).unwrap();
+        assert_eq!(cons_unfocused.border.top, 1.0);
+
+        // Request focus
+        ctx.request_focus(node);
+        view.rebuild(&view, &mut ctx, &mut el);
+
+        // After focus: on_focus applied, border becomes 3.0
+        let cons_focused = node.get_constraints(&ctx).unwrap();
+        assert_eq!(cons_focused.border.top, 3.0);
     }
 }

@@ -262,7 +262,7 @@ fn main() {
                         .align_items(AlignItems::Center)
                         .padding_xy(0.0, 6.0),
                 ),
-                text("Interactive 3D raymarched volumetric distance field with Fresnel rim bloom & specular lighting.")
+                text("Interactive 3D raymarched volumetric distance field with Fresnel rim bloom and specular lighting.")
                     .style(
                         Style::new().padding_xy(0.0, 6.0).set_text_style(TextStyle {
                             font_size: 13.0,

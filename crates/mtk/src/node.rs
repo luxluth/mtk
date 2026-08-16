@@ -101,11 +101,12 @@ impl Node {
     where
         F: FnOnce(&mut Constraints),
     {
-        let old_constraints = self.get_constraints(ctxt).unwrap_or_default();
+        let existing = self.get_constraints(ctxt);
+        let old_constraints = existing.unwrap_or_default();
         let mut new_constraints = old_constraints.clone();
 
         update_fn(&mut new_constraints);
-        if old_constraints != new_constraints {
+        if existing.is_none() || old_constraints != new_constraints {
             self.set_constraints(ctxt, new_constraints);
         }
     }

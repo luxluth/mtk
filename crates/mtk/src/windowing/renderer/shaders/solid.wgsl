@@ -19,6 +19,9 @@ struct ImmediateData {
 }
 var<immediate> imm: ImmediateData;
 
+@group(0) @binding(0) var blurred_texture: texture_2d<f32>;
+@group(0) @binding(1) var blurred_sampler: sampler;
+
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) fragP: vec2<f32>,
@@ -68,7 +71,22 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Outer edge alpha (smooth anti-aliasing)
     let outer_alpha = clamp(1.0 - smoothstep(-0.75, 0.75, dist), 0.0, 1.0);
 
-    var boxColor = imm.color;
+    var base_color = imm.color;
+
+    // Frosted Glass Vibrancy sampling
+    if (imm.vibrancy > 0.0) {
+        let screen_uv = in.clip_position.xy / imm.screen_size;
+        let bg_sample = textureSample(blurred_texture, blurred_sampler, screen_uv);
+
+        let luma = dot(bg_sample.rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+        let vibrant_rgb = mix(vec3<f32>(luma), bg_sample.rgb, 1.0 + imm.vibrancy * 0.75);
+        let dark_rgb = mix(vibrant_rgb, vibrant_rgb * (1.0 - imm.vibrancy_darkness), imm.vibrancy);
+        let tinted_rgb = mix(dark_rgb, imm.color.rgb, imm.color.a);
+
+        base_color = vec4<f32>(tinted_rgb, 1.0);
+    }
+
+    var boxColor = base_color;
 
     let has_border = imm.border_widths.x > 0.0 || imm.border_widths.y > 0.0 || imm.border_widths.z > 0.0 || imm.border_widths.w > 0.0;
     if has_border {
@@ -85,12 +103,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let c1 = min(inner_alpha, outer_alpha);
         let c2 = max(0.0, outer_alpha - inner_alpha);
 
-        let bg_a = imm.color.a * c1;
+        let bg_a = base_color.a * c1;
         let bd_a = imm.border_color.a * c2;
         let total_a = bg_a + bd_a;
 
         if total_a > 0.0 {
-            let rgb = (imm.color.rgb * bg_a + imm.border_color.rgb * bd_a) / total_a;
+            let rgb = (base_color.rgb * bg_a + imm.border_color.rgb * bd_a) / total_a;
             boxColor = vec4<f32>(rgb, total_a);
         } else {
             boxColor = vec4<f32>(0.0, 0.0, 0.0, 0.0);
