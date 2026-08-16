@@ -139,7 +139,7 @@ impl Default for WindowAttributes {
 
             transparent: true,
             blur: false,
-            decorations: true,
+            decorations: false,
 
             #[cfg(any(
                 target_os = "linux",
@@ -609,6 +609,8 @@ where
                     width: size.width,
                     height: size.height,
                 }));
+
+                window.request_redraw();
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let x = position.x as f32;

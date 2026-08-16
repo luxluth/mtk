@@ -96,6 +96,14 @@ impl<'w> Renderer<'w> {
         config.desired_maximum_frame_latency = 2;
         config.format = surface_format;
 
+        if cap.present_modes.contains(&wgpu::PresentMode::AutoVsync) {
+            config.present_mode = wgpu::PresentMode::AutoVsync;
+        } else if cap.present_modes.contains(&wgpu::PresentMode::FifoRelaxed) {
+            config.present_mode = wgpu::PresentMode::FifoRelaxed;
+        } else if cap.present_modes.contains(&wgpu::PresentMode::Mailbox) {
+            config.present_mode = wgpu::PresentMode::Mailbox;
+        }
+
         surface.configure(&device, &config);
 
         let pipelines = Pipelines::new(&device, &config);
@@ -136,19 +144,13 @@ impl<'w> Renderer<'w> {
 
     pub fn resize(&mut self, size: winit::dpi::PhysicalSize<u32>) {
         if size.width > 0 && size.height > 0 {
+            if self.config.width == size.width && self.config.height == size.height {
+                return;
+            }
             self.size = size;
             self.config.width = size.width;
             self.config.height = size.height;
             self.configure_surface();
-
-            self.scene.resize(
-                &self.device,
-                &self.pipelines.texture_bind_group_layout,
-                &self.pipelines.texture_sampler,
-                size.width,
-                size.height,
-            );
-            self.blur.resize(&self.device, size.width, size.height);
         }
     }
 
@@ -214,6 +216,17 @@ impl<'w> Renderer<'w> {
         });
 
         if let Some(split_idx) = first_vibrancy_index {
+            // Ensure offscreen scene target and blur pyramid match window size
+            self.scene.resize(
+                &self.device,
+                &self.pipelines.texture_bind_group_layout,
+                &self.pipelines.texture_sampler,
+                self.size.width,
+                self.size.height,
+            );
+            self.blur
+                .resize(&self.device, self.size.width, self.size.height);
+
             // MULTI-PASS FROSTED GLASS PIPELINE //
 
             // Pass 1: Render background scene into offscreen scene target
