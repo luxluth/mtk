@@ -1245,4 +1245,77 @@ pub(crate) mod tests {
         assert_eq!(bounds.w, 1024.0);
         assert_eq!(bounds.h, 768.0);
     }
+
+    #[test]
+    fn test_flex_shrink_distribution() {
+        let mut ctx = crate::Context::new();
+        let root = ctx.create_node();
+        root.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(100);
+            c.height = Size::Fixed(50);
+            c.flex_direction = FlexDirection::Row;
+        });
+
+        let child1 = ctx.create_node();
+        child1.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(80);
+            c.height = Size::Fixed(50);
+            c.flex_shrink = 1.0;
+        });
+
+        let child2 = ctx.create_node();
+        child2.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(40);
+            c.height = Size::Fixed(50);
+            c.flex_shrink = 1.0;
+        });
+
+        root.append(&mut ctx, child1);
+        root.append(&mut ctx, child2);
+        ctx.root_attach(root);
+        ctx.compute_layout(100.0, 50.0);
+
+        let c1_bounds = child1.get_computed(&ctx).unwrap();
+        let c2_bounds = child2.get_computed(&ctx).unwrap();
+
+        // 80 / 120 * 20 = 13.333... -> 80 - 13.333 = 66.666...
+        // 40 / 120 * 20 = 6.666... -> 40 - 6.666 = 33.333...
+        assert!((c1_bounds.w - 66.666).abs() < 0.1);
+        assert!((c2_bounds.w - 33.333).abs() < 0.1);
+        assert!(((c1_bounds.w + c2_bounds.w) - 100.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_flex_grow_distribution() {
+        let mut ctx = crate::Context::new();
+        let root = ctx.create_node();
+        root.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(200);
+            c.height = Size::Fixed(50);
+            c.flex_direction = FlexDirection::Row;
+        });
+
+        let child1 = ctx.create_node();
+        child1.update_constraints(&mut ctx, |c| {
+            c.flex_grow = 1.0;
+            c.height = Size::Fixed(50);
+        });
+
+        let child2 = ctx.create_node();
+        child2.update_constraints(&mut ctx, |c| {
+            c.flex_grow = 3.0;
+            c.height = Size::Fixed(50);
+        });
+
+        root.append(&mut ctx, child1);
+        root.append(&mut ctx, child2);
+        ctx.root_attach(root);
+        ctx.compute_layout(200.0, 50.0);
+
+        let c1_bounds = child1.get_computed(&ctx).unwrap();
+        let c2_bounds = child2.get_computed(&ctx).unwrap();
+
+        assert_eq!(c1_bounds.w, 50.0);
+        assert_eq!(c2_bounds.w, 150.0);
+    }
 }

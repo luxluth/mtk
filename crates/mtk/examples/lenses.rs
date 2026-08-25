@@ -56,11 +56,7 @@ fn toggle(is_on: bool) -> impl View<bool, Message = ToggleMsg> {
             .set_text_style(TextStyle {
                 font_size: 24.0,
                 alignment: text_property::Alignment::Center,
-                color: if is_on {
-                    clr!(white).into()
-                } else {
-                    clr!(black).into()
-                },
+                color: if is_on { clr!(white) } else { clr!(black) },
                 font_weight: text_property::FontWeight::BOLD,
                 font_family: "Maple Mono NF".into(),
                 ..Default::default()

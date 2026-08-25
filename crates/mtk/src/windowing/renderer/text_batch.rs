@@ -360,21 +360,20 @@ impl TextBatch {
                 }
 
                 // 6. Preedit underline geometry
-                if let Some((start, end)) = preedit_range {
-                    if start < end {
-                        let start_cursor =
-                            Cursor::from_byte_index(layout, start, Affinity::Downstream);
-                        let end_cursor = Cursor::from_byte_index(layout, end, Affinity::Upstream);
+                if let Some((start, end)) = preedit_range
+                    && start < end
+                {
+                    let start_cursor = Cursor::from_byte_index(layout, start, Affinity::Downstream);
+                    let end_cursor = Cursor::from_byte_index(layout, end, Affinity::Upstream);
 
-                        let selection_obj = Selection::new(start_cursor, end_cursor);
-                        let thickness = (text_style.font_size * 0.08).max(1.5);
-                        for rect in selection_obj.geometry(layout) {
-                            let u_x = text_x + rect.0.x0 as f32;
-                            let u_y = text_y + rect.0.y1 as f32 - (thickness * 0.5);
-                            let u_w = (rect.0.x1 - rect.0.x0) as f32;
-                            let u_h = thickness;
-                            underlines.push([u_x, u_y, u_w, u_h]);
-                        }
+                    let selection_obj = Selection::new(start_cursor, end_cursor);
+                    let thickness = (text_style.font_size * 0.08).max(1.5);
+                    for rect in selection_obj.geometry(layout) {
+                        let u_x = text_x + rect.0.x0 as f32;
+                        let u_y = text_y + rect.0.y1 as f32 - (thickness * 0.5);
+                        let u_w = (rect.0.x1 - rect.0.x0) as f32;
+                        let u_h = thickness;
+                        underlines.push([u_x, u_y, u_w, u_h]);
                     }
                 }
 

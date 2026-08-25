@@ -126,7 +126,7 @@ impl Color {
         let r = ((hex >> (8 * 3)) & 0xFF) as u8;
         let g = ((hex >> (8 * 2)) & 0xFF) as u8;
         let b = ((hex >> (8 * 1)) & 0xFF) as u8;
-        let a = ((hex >> (8 * 0)) & 0xFF) as u8;
+        let a = (hex & 0xFF) as u8;
 
         Color { r, g, b, a }
     }

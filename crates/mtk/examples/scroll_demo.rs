@@ -24,7 +24,7 @@ fn main() {
     let colors = [Color::blue, Color::red, Color::green, Color::ll_blue];
 
     for i in 1..=100 {
-        let color = colors[(i % colors.len()) as usize];
+        let color = colors[i % colors.len()];
 
         initial_rows.push(Rc::new(RowData {
             color,

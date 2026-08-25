@@ -635,12 +635,21 @@ fn render_command_slice<'a, I>(
             let computed = cmd.computed();
             let constraints = node.get_constraints(context).unwrap_or_default();
             let effects = context.effects.get(&node).cloned().unwrap_or_default();
+            let scale = effects.scale;
+
+            let cx = computed.x + computed.w / 2.0;
+            let cy = computed.y + computed.h / 2.0;
+
+            let scaled_w = computed.w * scale;
+            let scaled_h = computed.h * scale;
+            let scaled_x = cx - scaled_w / 2.0;
+            let scaled_y = cy - scaled_h / 2.0;
 
             let border_widths = [
-                constraints.border.top,
-                constraints.border.right,
-                constraints.border.bottom,
-                constraints.border.left,
+                constraints.border.top * scale,
+                constraints.border.right * scale,
+                constraints.border.bottom * scale,
+                constraints.border.left * scale,
             ];
 
             let mut vibrancy = 0.0;
@@ -660,15 +669,15 @@ fn render_command_slice<'a, I>(
 
             let mut immediate_data = ImmediateData {
                 color: effects.background_color.into(),
-                pos: [computed.x, computed.y],
+                pos: [scaled_x, scaled_y],
                 screen_size: [screen_width as f32, screen_height as f32],
-                quad_size: [computed.w, computed.h],
-                border_radius: effects.border.radius.tl,
+                quad_size: [scaled_w, scaled_h],
+                border_radius: effects.border.radius.tl * scale,
                 alpha: effects.opacity,
                 border_color: effects.border.color.into(),
                 shadow_color: effects.shadow.color.into(),
                 border_widths,
-                shadow_spread: effects.shadow.spread,
+                shadow_spread: effects.shadow.spread * scale,
                 shadow_power: effects.shadow.power,
                 vibrancy,
                 vibrancy_darkness: 0.0,
@@ -857,63 +866,113 @@ fn render_command_slice<'a, I>(
                 }
             }
 
-            if overflow_clipped {
-                if let Some(rect) = compute_scissor_rect(cmd.clip(), screen_width, screen_height) {
-                    render_pass.set_scissor_rect(rect.0, rect.1, rect.2, rect.3);
-                }
+            if overflow_clipped
+                && let Some(rect) = compute_scissor_rect(cmd.clip(), screen_width, screen_height)
+            {
+                render_pass.set_scissor_rect(rect.0, rect.1, rect.2, rect.3);
             }
         } else if cmd.kind() == RenderCommandKind::ScrollbarV {
-            let sb_rect = cmd.computed();
-            let immediate_data = ImmediateData {
-                color: [0.4, 0.4, 0.4, 0.6],
-                pos: [sb_rect.x, sb_rect.y],
-                screen_size: [screen_width as f32, screen_height as f32],
-                quad_size: [sb_rect.w, sb_rect.h],
-                border_radius: sb_rect.w / 2.0,
-                alpha: 1.0,
-                border_color: [0.0; 4],
-                shadow_color: [0.0; 4],
-                border_widths: [0.0; 4],
-                shadow_spread: 0.0,
-                shadow_power: 0.0,
-                vibrancy: 0.0,
-                vibrancy_darkness: 0.0,
-                passes: 0.0,
-                _pad1: 0.0,
-                _pad2: 0.0,
-                _pad3: 0.0,
-            };
+            let node = cmd.node();
+            let computed = cmd.computed();
+            let constraints = node.get_constraints(context).unwrap_or_default();
+            let content_h = node.compute_content_height(context).max(computed.h);
 
-            render_pass.set_pipeline(&pipelines.solid);
-            render_pass.set_bind_group(0, solid_bind_group, &[]);
-            render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
-            render_pass.draw(0..6, 0..1);
+            if content_h > computed.h + 0.5 {
+                let padding_top = constraints.padding.top + constraints.border.top;
+                let padding_bottom = constraints.padding.bottom + constraints.border.bottom;
+                let track_h = (computed.h - padding_top - padding_bottom).max(0.0);
+                if track_h > 0.0 {
+                    let ratio = (computed.h / content_h).clamp(0.0, 1.0);
+                    let thumb_h = (track_h * ratio).clamp(20.0, track_h);
+                    let max_scroll_y = (content_h - computed.h).max(0.0);
+                    let scroll_pct = if max_scroll_y > 0.0 {
+                        (constraints.scroll.y / max_scroll_y).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    let thumb_w = 4.0;
+                    let margin = 2.0;
+                    let thumb_x =
+                        computed.x + computed.w - constraints.border.right - thumb_w - margin;
+                    let thumb_y = computed.y + padding_top + scroll_pct * (track_h - thumb_h);
+
+                    let immediate_data = ImmediateData {
+                        color: [0.4, 0.4, 0.4, 0.5],
+                        pos: [thumb_x, thumb_y],
+                        screen_size: [screen_width as f32, screen_height as f32],
+                        quad_size: [thumb_w, thumb_h],
+                        border_radius: thumb_w / 2.0,
+                        alpha: 1.0,
+                        border_color: [0.0; 4],
+                        shadow_color: [0.0; 4],
+                        border_widths: [0.0; 4],
+                        shadow_spread: 0.0,
+                        shadow_power: 0.0,
+                        vibrancy: 0.0,
+                        vibrancy_darkness: 0.0,
+                        passes: 0.0,
+                        _pad1: 0.0,
+                        _pad2: 0.0,
+                        _pad3: 0.0,
+                    };
+
+                    render_pass.set_pipeline(&pipelines.solid);
+                    render_pass.set_bind_group(0, solid_bind_group, &[]);
+                    render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
+                    render_pass.draw(0..6, 0..1);
+                }
+            }
         } else if cmd.kind() == RenderCommandKind::ScrollbarH {
-            let sb_rect = cmd.computed();
-            let immediate_data = ImmediateData {
-                color: [0.4, 0.4, 0.4, 0.6],
-                pos: [sb_rect.x, sb_rect.y],
-                screen_size: [screen_width as f32, screen_height as f32],
-                quad_size: [sb_rect.w, sb_rect.h],
-                border_radius: sb_rect.h / 2.0,
-                alpha: 1.0,
-                border_color: [0.0; 4],
-                shadow_color: [0.0; 4],
-                border_widths: [0.0; 4],
-                shadow_spread: 0.0,
-                shadow_power: 0.0,
-                vibrancy: 0.0,
-                vibrancy_darkness: 0.0,
-                passes: 0.0,
-                _pad1: 0.0,
-                _pad2: 0.0,
-                _pad3: 0.0,
-            };
+            let node = cmd.node();
+            let computed = cmd.computed();
+            let constraints = node.get_constraints(context).unwrap_or_default();
+            let content_w = computed.content_w.max(computed.w);
 
-            render_pass.set_pipeline(&pipelines.solid);
-            render_pass.set_bind_group(0, solid_bind_group, &[]);
-            render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
-            render_pass.draw(0..6, 0..1);
+            if content_w > computed.w + 0.5 {
+                let padding_left = constraints.padding.left + constraints.border.left;
+                let padding_right = constraints.padding.right + constraints.border.right;
+                let track_w = (computed.w - padding_left - padding_right).max(0.0);
+                if track_w > 0.0 {
+                    let ratio = (computed.w / content_w).clamp(0.0, 1.0);
+                    let thumb_w = (track_w * ratio).clamp(20.0, track_w);
+                    let max_scroll_x = (content_w - computed.w).max(0.0);
+                    let scroll_pct = if max_scroll_x > 0.0 {
+                        (constraints.scroll.x / max_scroll_x).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    let thumb_h = 4.0;
+                    let margin = 2.0;
+                    let thumb_x = computed.x + padding_left + scroll_pct * (track_w - thumb_w);
+                    let thumb_y =
+                        computed.y + computed.h - constraints.border.bottom - thumb_h - margin;
+
+                    let immediate_data = ImmediateData {
+                        color: [0.4, 0.4, 0.4, 0.5],
+                        pos: [thumb_x, thumb_y],
+                        screen_size: [screen_width as f32, screen_height as f32],
+                        quad_size: [thumb_w, thumb_h],
+                        border_radius: thumb_h / 2.0,
+                        alpha: 1.0,
+                        border_color: [0.0; 4],
+                        shadow_color: [0.0; 4],
+                        border_widths: [0.0; 4],
+                        shadow_spread: 0.0,
+                        shadow_power: 0.0,
+                        vibrancy: 0.0,
+                        vibrancy_darkness: 0.0,
+                        passes: 0.0,
+                        _pad1: 0.0,
+                        _pad2: 0.0,
+                        _pad3: 0.0,
+                    };
+
+                    render_pass.set_pipeline(&pipelines.solid);
+                    render_pass.set_bind_group(0, solid_bind_group, &[]);
+                    render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
+                    render_pass.draw(0..6, 0..1);
+                }
+            }
         }
     }
 }
@@ -926,40 +985,40 @@ fn render_focus_ring<'a>(
     solid_bind_group: &'a wgpu::BindGroup,
     context: &crate::Context,
 ) {
-    if let Some(focused) = context.focused_node() {
-        if let Some(computed) = focused.get_computed(context) {
-            let effects = focused.get_effects(context).unwrap_or_default();
+    if let Some(focused) = context.focused_node()
+        && let Some(computed) = focused.get_computed(context)
+    {
+        let effects = focused.get_effects(context).unwrap_or_default();
 
-            render_pass.set_scissor_rect(0, 0, screen_width.max(1), screen_height.max(1));
+        render_pass.set_scissor_rect(0, 0, screen_width.max(1), screen_height.max(1));
 
-            let ring_thickness = 2.0;
-            let immediate_data = ImmediateData {
-                color: [0.0; 4],
-                pos: [computed.x - ring_thickness, computed.y - ring_thickness],
-                screen_size: [screen_width as f32, screen_height as f32],
-                quad_size: [
-                    computed.w + ring_thickness * 2.0,
-                    computed.h + ring_thickness * 2.0,
-                ],
-                border_color: [0.0, 0.47, 1.0, 1.0], // Accessible blue focus ring
-                shadow_color: [0.0; 4],
-                border_widths: [ring_thickness; 4],
-                border_radius: effects.border.radius.tl + ring_thickness,
-                alpha: 1.0,
-                shadow_spread: 0.0,
-                shadow_power: 0.0,
-                vibrancy: 0.0,
-                vibrancy_darkness: 0.0,
-                passes: 0.0,
-                _pad1: 0.0,
-                _pad2: 0.0,
-                _pad3: 0.0,
-            };
+        let ring_thickness = 2.0;
+        let immediate_data = ImmediateData {
+            color: [0.0; 4],
+            pos: [computed.x - ring_thickness, computed.y - ring_thickness],
+            screen_size: [screen_width as f32, screen_height as f32],
+            quad_size: [
+                computed.w + ring_thickness * 2.0,
+                computed.h + ring_thickness * 2.0,
+            ],
+            border_color: [0.0, 0.47, 1.0, 1.0], // Accessible blue focus ring
+            shadow_color: [0.0; 4],
+            border_widths: [ring_thickness; 4],
+            border_radius: effects.border.radius.tl + ring_thickness,
+            alpha: 1.0,
+            shadow_spread: 0.0,
+            shadow_power: 0.0,
+            vibrancy: 0.0,
+            vibrancy_darkness: 0.0,
+            passes: 0.0,
+            _pad1: 0.0,
+            _pad2: 0.0,
+            _pad3: 0.0,
+        };
 
-            render_pass.set_pipeline(&pipelines.solid);
-            render_pass.set_bind_group(0, solid_bind_group, &[]);
-            render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
-            render_pass.draw(0..6, 0..1);
-        }
+        render_pass.set_pipeline(&pipelines.solid);
+        render_pass.set_bind_group(0, solid_bind_group, &[]);
+        render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
+        render_pass.draw(0..6, 0..1);
     }
 }

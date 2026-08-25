@@ -89,6 +89,12 @@ pub struct Context {
     pub(crate) dt: f32,
 }
 
+impl Default for Context {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Context {
     /// Creates a new `Context` initialized with a zeroed C layout context, text context,
     /// and persistent system clipboard handle.
@@ -146,7 +152,7 @@ impl Context {
     /// Unregisters `node` from keyboard tab traversal. If `node` was currently focused, clears focus.
     pub fn unregister_focusable(&mut self, node: Node) {
         self.focusable_nodes.retain(|n| n != &node);
-        if self.focused_node == Some(node.clone()) {
+        if self.focused_node == Some(node) {
             self.clear_focus();
         }
     }
@@ -159,12 +165,12 @@ impl Context {
         if let Some(focused) = &self.focused_node {
             if let Some(idx) = self.focusable_nodes.iter().position(|n| n == focused) {
                 let next_idx = (idx + 1) % self.focusable_nodes.len();
-                self.focused_node = Some(self.focusable_nodes[next_idx].clone());
+                self.focused_node = Some(self.focusable_nodes[next_idx]);
             } else {
-                self.focused_node = Some(self.focusable_nodes[0].clone());
+                self.focused_node = Some(self.focusable_nodes[0]);
             }
         } else {
-            self.focused_node = Some(self.focusable_nodes[0].clone());
+            self.focused_node = Some(self.focusable_nodes[0]);
         }
     }
 
@@ -180,13 +186,12 @@ impl Context {
                 } else {
                     idx - 1
                 };
-                self.focused_node = Some(self.focusable_nodes[prev_idx].clone());
+                self.focused_node = Some(self.focusable_nodes[prev_idx]);
             } else {
-                self.focused_node =
-                    Some(self.focusable_nodes[self.focusable_nodes.len() - 1].clone());
+                self.focused_node = Some(self.focusable_nodes[self.focusable_nodes.len() - 1]);
             }
         } else {
-            self.focused_node = Some(self.focusable_nodes[self.focusable_nodes.len() - 1].clone());
+            self.focused_node = Some(self.focusable_nodes[self.focusable_nodes.len() - 1]);
         }
     }
 
@@ -210,12 +215,12 @@ impl Context {
     /// ctx.clipboard_copy(ClipboardData::Text("Hello, World!".to_string()));
     /// ```
     pub fn clipboard_copy(&self, data: ClipboardData) {
-        if let Ok(mut guard) = self.clipboard.lock() {
-            if let Some(cb) = guard.as_mut() {
-                match data {
-                    ClipboardData::Text(text) => {
-                        let _ = cb.set_text(text);
-                    }
+        if let Ok(mut guard) = self.clipboard.lock()
+            && let Some(cb) = guard.as_mut()
+        {
+            match data {
+                ClipboardData::Text(text) => {
+                    let _ = cb.set_text(text);
                 }
             }
         }
@@ -233,12 +238,11 @@ impl Context {
     /// }
     /// ```
     pub fn clipboard_get(&self) -> Option<ClipboardData> {
-        if let Ok(mut guard) = self.clipboard.lock() {
-            if let Some(cb) = guard.as_mut() {
-                if let Ok(text) = cb.get_text() {
-                    return Some(ClipboardData::Text(text));
-                }
-            }
+        if let Ok(mut guard) = self.clipboard.lock()
+            && let Some(cb) = guard.as_mut()
+            && let Ok(text) = cb.get_text()
+        {
+            return Some(ClipboardData::Text(text));
         }
         None
     }

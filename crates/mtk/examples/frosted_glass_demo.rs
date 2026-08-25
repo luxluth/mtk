@@ -62,7 +62,7 @@ fn main() {
     let mut window = Window::with(
         initial_state,
         |state, msg: Message| match msg {
-            Message::SetVibrancy(v) => state.vibrancy = (v as f32).clamp(0.0, 1.0),
+            Message::SetVibrancy(v) => state.vibrancy = v.clamp(0.0, 1.0),
             Message::SetTheme(t) => {
                 state.glass_theme = t;
                 match t {
