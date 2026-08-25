@@ -33,15 +33,23 @@ use crate::{
     ui::{Event, View, ViewSequence, event::EventResult},
 };
 
+pub use button::*;
 pub use canvas::*;
+pub use checkbox::*;
 pub use input_text::*;
 pub use scroll_view::*;
+pub use slider::*;
+pub use switch::*;
 pub use textarea::*;
 
+mod button;
 mod canvas;
+mod checkbox;
 mod editor;
 mod input_text;
 mod scroll_view;
+mod slider;
+mod switch;
 mod textarea;
 
 /// A simple widget that displays a string of text.
@@ -212,5 +220,182 @@ where
     ) -> (EventResult, Option<Self::Message>) {
         self.children
             .handle_event(&mut element.1, state, event, ctx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq)]
+    enum TestMsg {
+        Clicked,
+        Toggled(bool),
+        SliderChanged(f32),
+    }
+
+    #[test]
+    fn test_button_lifecycle_and_events() {
+        let mut ctx = Context::new();
+        let btn = button("Click Me").on_click(TestMsg::Clicked);
+
+        let mut element = View::<()>::build(&btn, &mut ctx);
+        let node = View::<()>::get_node(&btn, &element);
+        assert!(node.get_computed(&ctx).is_some() || node.get_constraints(&ctx).is_some());
+
+        // Press
+        let (res, msg) = View::<()>::handle_event(
+            &btn,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                pressed: true,
+                hit_nodes: vec![node],
+                x: 0.0,
+                y: 0.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(res, EventResult::Handled);
+        assert_eq!(msg, None);
+
+        // Release
+        let (res, msg) = View::<()>::handle_event(
+            &btn,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                pressed: false,
+                hit_nodes: vec![node],
+                x: 0.0,
+                y: 0.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(res, EventResult::Handled);
+        assert_eq!(msg, Some(TestMsg::Clicked));
+
+        // Rebuild with new label
+        let btn2 = button("Updated Label").on_click(TestMsg::Clicked);
+        View::<()>::rebuild(&btn2, &btn, &mut ctx, &mut element);
+        View::<()>::teardown(&btn2, &mut ctx, &mut element);
+    }
+
+    #[test]
+    fn test_checkbox_lifecycle_and_events() {
+        let mut ctx = Context::new();
+        let chk = checkbox(false)
+            .label("Accept Terms")
+            .on_toggle(TestMsg::Toggled);
+
+        let mut element = View::<()>::build(&chk, &mut ctx);
+        let node = View::<()>::get_node(&chk, &element);
+
+        // Click to toggle
+        let _ = View::<()>::handle_event(
+            &chk,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                pressed: true,
+                hit_nodes: vec![node],
+                x: 0.0,
+                y: 0.0,
+            },
+            &mut ctx,
+        );
+        let (res, msg) = View::<()>::handle_event(
+            &chk,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                pressed: false,
+                hit_nodes: vec![node],
+                x: 0.0,
+                y: 0.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(res, EventResult::Handled);
+        assert_eq!(msg, Some(TestMsg::Toggled(true)));
+
+        // Rebuild checked
+        let chk2 = checkbox(true)
+            .label("Accept Terms")
+            .on_toggle(TestMsg::Toggled);
+        View::<()>::rebuild(&chk2, &chk, &mut ctx, &mut element);
+        View::<()>::teardown(&chk2, &mut ctx, &mut element);
+    }
+
+    #[test]
+    fn test_switch_lifecycle_and_events() {
+        let mut ctx = Context::new();
+        let sw = switch(false).on_toggle(TestMsg::Toggled);
+
+        let mut element = View::<()>::build(&sw, &mut ctx);
+        let node = View::<()>::get_node(&sw, &element);
+
+        // Click to toggle
+        let _ = View::<()>::handle_event(
+            &sw,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                pressed: true,
+                hit_nodes: vec![node],
+                x: 0.0,
+                y: 0.0,
+            },
+            &mut ctx,
+        );
+        let (res, msg) = View::<()>::handle_event(
+            &sw,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                pressed: false,
+                hit_nodes: vec![node],
+                x: 0.0,
+                y: 0.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(res, EventResult::Handled);
+        assert_eq!(msg, Some(TestMsg::Toggled(true)));
+
+        let sw2 = switch(true).on_toggle(TestMsg::Toggled);
+        View::<()>::rebuild(&sw2, &sw, &mut ctx, &mut element);
+        View::<()>::teardown(&sw2, &mut ctx, &mut element);
+    }
+
+    #[test]
+    fn test_slider_lifecycle_and_events() {
+        let mut ctx = Context::new();
+        let sld = slider(50.0, 0.0, 100.0).on_change(TestMsg::SliderChanged);
+
+        let mut element = View::<()>::build(&sld, &mut ctx);
+        let node = View::<()>::get_node(&sld, &element);
+        ctx.root_attach(node);
+        ctx.compute_layout(200.0, 50.0);
+
+        // Click halfway
+        let (res, msg) = View::<()>::handle_event(
+            &sld,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                pressed: true,
+                hit_nodes: vec![node],
+                x: 100.0,
+                y: 10.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(res, EventResult::Handled);
+        assert!(msg.is_some());
+
+        let sld2 = slider(75.0, 0.0, 100.0).on_change(TestMsg::SliderChanged);
+        View::<()>::rebuild(&sld2, &sld, &mut ctx, &mut element);
+        View::<()>::teardown(&sld2, &mut ctx, &mut element);
     }
 }

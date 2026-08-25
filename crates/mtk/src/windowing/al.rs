@@ -419,6 +419,25 @@ where
                 view.handle_event(element, &self.state, mtk_event.clone(), &mut self.context);
 
             if result == EventResult::Ignored {
+                if let Event::KeyboardInput {
+                    event: ref k_event, ..
+                } = mtk_event
+                {
+                    if k_event.state.is_pressed()
+                        && k_event.logical_key
+                            == winit::keyboard::Key::Named(winit::keyboard::NamedKey::Tab)
+                    {
+                        if self.context.modifiers.shift_key() {
+                            self.context.focus_prev();
+                        } else {
+                            self.context.focus_next();
+                        }
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                    }
+                }
+
                 if let Event::MouseWheel {
                     delta_x,
                     delta_y,

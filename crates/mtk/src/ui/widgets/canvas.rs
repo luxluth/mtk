@@ -435,8 +435,11 @@ impl<State: 'static, Msg: 'static> View<State> for Canvas<State, Msg> {
         node
     }
 
-    fn rebuild(&self, _prev: &Self, _ctx: &mut Context, _element: &mut Self::Element) {
-        // Painter is persistent across rebuilds
+    fn rebuild(&self, _prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
+        let mut canvases = ctx.canvases.borrow_mut();
+        if let Some(canvas_data) = canvases.get_mut(element) {
+            canvas_data.painter = (self.painter_fn)();
+        }
     }
 
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {

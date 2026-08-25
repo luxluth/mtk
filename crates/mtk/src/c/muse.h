@@ -427,6 +427,7 @@ typedef struct muContext {
 
   MUSE_DA(muId) available_ids;
   muRenderList render_list;
+  muNodeList pick_list;
 
   muTextSizingFunc *text_sizing_func;
   size_t next_entity_numeral;
@@ -519,6 +520,7 @@ MUSEDEF bool muse_muid_eq(muId a, muId b) {
 MUSEDEF void muse_context_free(muContext *ctx) {
   muse_da_free(&ctx->available_ids);
   muse_da_free(&ctx->render_list);
+  muse_da_free(&ctx->pick_list);
 
   muse_sparse_free(&ctx->hierarchies);
   muse_sparse_free(&ctx->constraints);
@@ -1227,13 +1229,29 @@ static void muse__m_compute_flex_distribution(muContext *ctx, muNode node) {
           modified = true;
         }
 
-        if (c_cons->dimension.width.kind == MU_FILL && !is_row_dir) {
-          c_comp->w = inner_w;
-          modified = true;
+        if (!is_row_dir) {
+          if (c_cons->dimension.width.kind == MU_FILL) {
+            c_comp->w = inner_w;
+            modified = true;
+          } else if (c_cons->dimension.width.kind == MU_PERCENT) {
+            c_comp->w = inner_w * c_cons->dimension.width.percent;
+            modified = true;
+          }
+        } else {
+          if (c_cons->dimension.height.kind == MU_FILL) {
+            c_comp->h = inner_h;
+            modified = true;
+          } else if (c_cons->dimension.height.kind == MU_PERCENT) {
+            c_comp->h = inner_h * c_cons->dimension.height.percent;
+            modified = true;
+          }
         }
 
-        if (c_cons->dimension.height.kind == MU_FILL && is_row_dir) {
-          c_comp->h = inner_h;
+        if (is_row_dir && c_cons->dimension.width.kind == MU_PERCENT) {
+          c_comp->w = inner_w * c_cons->dimension.width.percent;
+          modified = true;
+        } else if (!is_row_dir && c_cons->dimension.height.kind == MU_PERCENT) {
+          c_comp->h = inner_h * c_cons->dimension.height.percent;
           modified = true;
         }
 
@@ -1242,7 +1260,9 @@ static void muse__m_compute_flex_distribution(muContext *ctx, muNode node) {
           muse__m_apply_aspect_ratio(c_comp, c_cons);
         }
       }
-    } else if (used_main_space > available_main && available_main > 0.0f) {
+    } else if (used_main_space > available_main && available_main > 0.0f &&
+               cons->overflow != MU_OVERFLOW_SCROLL &&
+               cons->overflow != MU_OVERFLOW_AUTO) {
       // C2) Assign shrink space (weighted by flex_shrink * basis_size)
       float overflow_space = used_main_space - available_main;
       float total_scaled_shrink = 0.0f;
@@ -1287,13 +1307,29 @@ static void muse__m_compute_flex_distribution(muContext *ctx, muNode node) {
           modified = true;
         }
 
-        if (c_cons->dimension.width.kind == MU_FILL && !is_row_dir) {
-          c_comp->w = inner_w;
-          modified = true;
+        if (!is_row_dir) {
+          if (c_cons->dimension.width.kind == MU_FILL) {
+            c_comp->w = inner_w;
+            modified = true;
+          } else if (c_cons->dimension.width.kind == MU_PERCENT) {
+            c_comp->w = inner_w * c_cons->dimension.width.percent;
+            modified = true;
+          }
+        } else {
+          if (c_cons->dimension.height.kind == MU_FILL) {
+            c_comp->h = inner_h;
+            modified = true;
+          } else if (c_cons->dimension.height.kind == MU_PERCENT) {
+            c_comp->h = inner_h * c_cons->dimension.height.percent;
+            modified = true;
+          }
         }
 
-        if (c_cons->dimension.height.kind == MU_FILL && is_row_dir) {
-          c_comp->h = inner_h;
+        if (is_row_dir && c_cons->dimension.width.kind == MU_PERCENT) {
+          c_comp->w = inner_w * c_cons->dimension.width.percent;
+          modified = true;
+        } else if (!is_row_dir && c_cons->dimension.height.kind == MU_PERCENT) {
+          c_comp->h = inner_h * c_cons->dimension.height.percent;
           modified = true;
         }
 
@@ -1314,13 +1350,29 @@ static void muse__m_compute_flex_distribution(muContext *ctx, muNode node) {
 
         bool modified = false;
 
-        if (c_cons->dimension.width.kind == MU_FILL && !is_row_dir) {
-          c_comp->w = inner_w;
-          modified = true;
+        if (!is_row_dir) {
+          if (c_cons->dimension.width.kind == MU_FILL) {
+            c_comp->w = inner_w;
+            modified = true;
+          } else if (c_cons->dimension.width.kind == MU_PERCENT) {
+            c_comp->w = inner_w * c_cons->dimension.width.percent;
+            modified = true;
+          }
+        } else {
+          if (c_cons->dimension.height.kind == MU_FILL) {
+            c_comp->h = inner_h;
+            modified = true;
+          } else if (c_cons->dimension.height.kind == MU_PERCENT) {
+            c_comp->h = inner_h * c_cons->dimension.height.percent;
+            modified = true;
+          }
         }
 
-        if (c_cons->dimension.height.kind == MU_FILL && is_row_dir) {
-          c_comp->h = inner_h;
+        if (is_row_dir && c_cons->dimension.width.kind == MU_PERCENT) {
+          c_comp->w = inner_w * c_cons->dimension.width.percent;
+          modified = true;
+        } else if (!is_row_dir && c_cons->dimension.height.kind == MU_PERCENT) {
+          c_comp->h = inner_h * c_cons->dimension.height.percent;
           modified = true;
         }
 
@@ -1903,10 +1955,10 @@ MUSEDEF void muse_build_render_list(muContext *ctx, muRect viewport) {
 }
 
 MUSEDEF muNodeList muse_node_pick(muContext *ctx, float x, float y) {
-  muNodeList hits = {0};
+  ctx->pick_list.count = 0;
 
   if (!ctx->rooted || ctx->render_list.count == 0)
-    return hits;
+    return ctx->pick_list;
 
   muNode last_checked = MUSE_UNDEFINED_MUID;
 
@@ -1932,10 +1984,10 @@ MUSEDEF muNodeList muse_node_pick(muContext *ctx, float x, float y) {
     }
 
     last_checked = node;
-    muse_da_append(&hits, node);
+    muse_da_append(&ctx->pick_list, node);
   }
 
-  return hits;
+  return ctx->pick_list;
 }
 
 #endif // MUSE_IMPLEMENTATION

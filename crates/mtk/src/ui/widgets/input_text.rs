@@ -164,7 +164,9 @@ impl View<String> for InputText {
             c.overflow = crate::style::Overflow::Hidden;
         });
 
-        InputInner::new(node, editor, caret)
+        let mut inner = InputInner::new(node, editor, caret);
+        self.sync_render_nodes(ctx, &mut inner);
+        inner
     }
 
     fn rebuild(&self, _prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
@@ -195,12 +197,12 @@ impl View<String> for InputText {
         let mut handled = EventResult::Ignored;
         let mut emitted_msg = None;
 
-        // Initialize editor state if this is the first tick and the text is not empty
-        if element.editor.text() != *state {
-            if let Event::Tick { dt: _ } = event {
-                element.editor.set_text(&state);
-                ctx.request_frame();
-            }
+        let is_focused = Some(element.node.clone()) == ctx.focused_node();
+
+        // Immediately sync editor state from incoming state if not actively editing with focus
+        if element.editor.text() != *state && !is_focused {
+            element.editor.set_text(state);
+            self.sync_render_nodes(ctx, element);
         }
 
         match event {
@@ -436,6 +438,22 @@ impl View<String> for InputText {
                                     text_changed = true;
                                 }
                             }
+                        }
+                        Key::Character(s) if ctrl_alt && (s == "z" || s == "Z") => {
+                            if shift {
+                                if element.editor.redo() {
+                                    text_changed = true;
+                                }
+                            } else if element.editor.undo() {
+                                text_changed = true;
+                            }
+                            ctx.request_frame();
+                        }
+                        Key::Character(s) if ctrl_alt && (s == "y" || s == "Y") => {
+                            if element.editor.redo() {
+                                text_changed = true;
+                            }
+                            ctx.request_frame();
                         }
                         Key::Character(s) if ctrl_alt && (s == "v" || s == "V") => {
                             if let Some(crate::ClipboardData::Text(pasted)) = ctx.clipboard_get() {

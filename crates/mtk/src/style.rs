@@ -504,7 +504,7 @@ impl Default for Constraints {
             gap: 0.0,
 
             flex_grow: 0.0,
-            flex_shrink: 1.0,
+            flex_shrink: 0.0,
             flex_basis: Size::Fit,
 
             padding: Edges::default(),
@@ -887,6 +887,9 @@ impl TextStyle {
         if other.underline {
             self.underline = other.underline;
         }
+        if other.caret_color != clr!(black) {
+            self.caret_color = other.caret_color;
+        }
     }
 }
 
@@ -957,6 +960,29 @@ impl Style {
     /// Applies a reusable style mixin function `f`.
     pub fn apply(self, f: impl FnOnce(Style) -> Style) -> Self {
         f(self)
+    }
+
+    /// Applies this style's base constraints, effects, and text style directly to a layout node.
+    pub fn apply_to_node(&self, ctx: &mut crate::Context, node: crate::Node) {
+        node.update_constraints(ctx, |c| {
+            let overflow = c.overflow;
+            let scroll = c.scroll;
+            let flex_dir = self.flex_direction.unwrap_or(c.flex_direction);
+            *c = self.base_constraints;
+            c.flex_direction = flex_dir;
+            if self.base_constraints.overflow == Overflow::Visible && overflow != Overflow::Visible
+            {
+                c.overflow = overflow;
+            }
+            c.scroll = scroll;
+        });
+
+        node.set_effects(ctx, self.base_effects.clone());
+
+        if let Some(text) = node.get_text(ctx) {
+            let text_owned = text.to_string();
+            node.set_text_with_userdata(ctx, &text_owned, self.base_text_style.clone());
+        }
     }
 
     /// Conditionally applies style modifications when `condition` is `true`.

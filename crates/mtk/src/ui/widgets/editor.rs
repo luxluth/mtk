@@ -1,3 +1,10 @@
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EditSnapshot {
+    text: String,
+    cursor: usize,
+    selection_anchor: Option<usize>,
+}
+
 /// A headless text editor abstraction that manages the state of a single-line or multi-line text input.
 ///
 /// It handles UTF-8 safe cursor navigation, text selection via an anchor system, and text mutations
@@ -15,6 +22,12 @@ pub struct Editor {
     ime_preedit: Option<(String, Option<(usize, usize)>)>,
     /// Target column offset preserved when navigating vertically across lines of varying length.
     preferred_col: Option<usize>,
+    /// Undo history stack.
+    undo_stack: Vec<EditSnapshot>,
+    /// Redo history stack.
+    redo_stack: Vec<EditSnapshot>,
+    /// Tracks if continuous typing is being grouped into a single undo step.
+    in_typing_group: bool,
 }
 
 impl Default for Editor {
@@ -32,7 +45,93 @@ impl Editor {
             selection_anchor: None,
             ime_preedit: None,
             preferred_col: None,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            in_typing_group: false,
         }
+    }
+
+    /// Pushes an undo checkpoint before mutating state.
+    fn push_undo_checkpoint(&mut self) {
+        let snapshot = EditSnapshot {
+            text: self.text.clone(),
+            cursor: self.cursor,
+            selection_anchor: self.selection_anchor,
+        };
+        if self.undo_stack.last() != Some(&snapshot) {
+            self.undo_stack.push(snapshot);
+            if self.undo_stack.len() > 128 {
+                self.undo_stack.remove(0);
+            }
+            self.redo_stack.clear();
+        }
+    }
+
+    /// Reverts the text buffer to the previous undo checkpoint.
+    /// Returns `true` if an undo was performed, or `false` if the undo stack was empty.
+    pub fn undo(&mut self) -> bool {
+        self.in_typing_group = false;
+        if let Some(prev) = self.undo_stack.pop() {
+            let current = EditSnapshot {
+                text: self.text.clone(),
+                cursor: self.cursor,
+                selection_anchor: self.selection_anchor,
+            };
+            self.redo_stack.push(current);
+            self.text = prev.text;
+            self.cursor = prev.cursor.min(self.text.len());
+            self.selection_anchor = prev.selection_anchor.map(|a| a.min(self.text.len()));
+            self.preferred_col = None;
+            self.ime_preedit = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Reapplies a previously undone change from the redo stack.
+    /// Returns `true` if a redo was performed, or `false` if the redo stack was empty.
+    pub fn redo(&mut self) -> bool {
+        self.in_typing_group = false;
+        if let Some(next) = self.redo_stack.pop() {
+            let current = EditSnapshot {
+                text: self.text.clone(),
+                cursor: self.cursor,
+                selection_anchor: self.selection_anchor,
+            };
+            self.undo_stack.push(current);
+            self.text = next.text;
+            self.cursor = next.cursor.min(self.text.len());
+            self.selection_anchor = next.selection_anchor.map(|a| a.min(self.text.len()));
+            self.preferred_col = None;
+            self.ime_preedit = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Returns `true` if there are undo steps available in the history stack.
+    pub fn can_undo(&self) -> bool {
+        !self.undo_stack.is_empty()
+    }
+
+    /// Returns `true` if there are redo steps available in the history stack.
+    pub fn can_redo(&self) -> bool {
+        !self.redo_stack.is_empty()
+    }
+
+    /// Clears both the undo and redo history stacks.
+    pub fn clear_history(&mut self) {
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        self.in_typing_group = false;
+    }
+
+    /// Explicitly breaks typing grouping and forces the next mutation to create a new undo step.
+    pub fn push_checkpoint(&mut self) {
+        self.push_undo_checkpoint();
+        self.in_typing_group = false;
     }
 
     /// Returns the underlying text buffer without any temporary IME composition.
@@ -157,6 +256,8 @@ impl Editor {
     /// Inserts a string at the current cursor position.
     /// If there is an active selection, the selected text is deleted first.
     pub fn insert(&mut self, text: &str) {
+        self.push_undo_checkpoint();
+        self.in_typing_group = false;
         self.delete_selection();
         self.text.insert_str(self.cursor, text);
         self.cursor += text.len();
@@ -165,7 +266,19 @@ impl Editor {
     /// Inserts a single character at the current cursor position.
     /// If there is an active selection, the selected text is deleted first.
     pub fn insert_char(&mut self, ch: char) {
-        self.delete_selection();
+        if self.selection_anchor.is_some() {
+            self.push_undo_checkpoint();
+            self.in_typing_group = false;
+            self.delete_selection();
+        } else if ch.is_alphanumeric() {
+            if !self.in_typing_group {
+                self.push_undo_checkpoint();
+                self.in_typing_group = true;
+            }
+        } else {
+            self.push_undo_checkpoint();
+            self.in_typing_group = false;
+        }
         self.text.insert(self.cursor, ch);
         self.cursor += ch.len_utf8();
     }
@@ -173,6 +286,8 @@ impl Editor {
     /// Deletes the character immediately preceding the cursor (Backspace).
     /// If there is an active selection, deletes the selection instead.
     pub fn delete_backward(&mut self) {
+        self.push_undo_checkpoint();
+        self.in_typing_group = false;
         if self.delete_selection() {
             return;
         }
@@ -187,6 +302,8 @@ impl Editor {
     /// Deletes the character immediately following the cursor (Delete).
     /// If there is an active selection, deletes the selection instead.
     pub fn delete_forward(&mut self) {
+        self.push_undo_checkpoint();
+        self.in_typing_group = false;
         if self.delete_selection() {
             return;
         }
@@ -198,6 +315,8 @@ impl Editor {
     /// Deletes the word immediately preceding the cursor (Ctrl+Backspace).
     /// If there is an active selection, deletes the selection instead.
     pub fn delete_word_backward(&mut self) {
+        self.push_undo_checkpoint();
+        self.in_typing_group = false;
         if self.delete_selection() {
             return;
         }
@@ -212,6 +331,8 @@ impl Editor {
     /// Deletes the word immediately following the cursor (Ctrl+Delete).
     /// If there is an active selection, deletes the selection instead.
     pub fn delete_word_forward(&mut self) {
+        self.push_undo_checkpoint();
+        self.in_typing_group = false;
         if self.delete_selection() {
             return;
         }
@@ -241,6 +362,7 @@ impl Editor {
 
     /// Selects the entire text buffer.
     pub fn select_all(&mut self) {
+        self.in_typing_group = false;
         self.selection_anchor = Some(0);
         self.cursor = self.text.len();
     }
@@ -249,6 +371,7 @@ impl Editor {
     /// If `shift` is true, extends the selection.
     /// If `shift` is false and there is a selection, jumps to the start of the selection.
     pub fn move_left(&mut self, shift: bool) {
+        self.in_typing_group = false;
         if shift {
             if self.selection_anchor.is_none() {
                 self.selection_anchor = Some(self.cursor);
@@ -754,5 +877,77 @@ mod tests {
         editor.move_down(false);
         assert_eq!(editor.current_line_info(), (1, 10));
         assert_eq!(editor.cursor(), 21);
+    }
+
+    #[test]
+    fn test_editor_undo_redo_basic() {
+        let mut editor = Editor::new();
+        assert!(!editor.can_undo());
+        assert!(!editor.can_redo());
+
+        editor.insert("hello");
+        assert_eq!(editor.text(), "hello");
+        assert!(editor.can_undo());
+        assert!(!editor.can_redo());
+
+        editor.insert(" world");
+        assert_eq!(editor.text(), "hello world");
+
+        assert!(editor.undo());
+        assert_eq!(editor.text(), "hello");
+        assert!(editor.can_redo());
+
+        assert!(editor.undo());
+        assert_eq!(editor.text(), "");
+        assert!(!editor.can_undo());
+
+        assert!(editor.redo());
+        assert_eq!(editor.text(), "hello");
+
+        assert!(editor.redo());
+        assert_eq!(editor.text(), "hello world");
+        assert!(!editor.can_redo());
+    }
+
+    #[test]
+    fn test_editor_undo_typing_grouping() {
+        let mut editor = Editor::new();
+        for ch in "hello".chars() {
+            editor.insert_char(ch);
+        }
+        assert_eq!(editor.text(), "hello");
+
+        // Single undo should revert the entire alphanumeric continuous word "hello"
+        assert!(editor.undo());
+        assert_eq!(editor.text(), "");
+
+        assert!(editor.redo());
+        assert_eq!(editor.text(), "hello");
+
+        // Type space and another word
+        editor.insert_char(' ');
+        for ch in "world".chars() {
+            editor.insert_char(ch);
+        }
+        assert_eq!(editor.text(), "hello world");
+
+        // Undo "world"
+        assert!(editor.undo());
+        assert_eq!(editor.text(), "hello ");
+
+        // Undo space
+        assert!(editor.undo());
+        assert_eq!(editor.text(), "hello");
+    }
+
+    #[test]
+    fn test_editor_undo_deletion() {
+        let mut editor = Editor::new();
+        editor.insert("testing");
+        editor.delete_backward();
+        assert_eq!(editor.text(), "testin");
+
+        assert!(editor.undo());
+        assert_eq!(editor.text(), "testing");
     }
 }

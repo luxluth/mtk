@@ -39,6 +39,35 @@ impl TextArea {
         self.captures_tab = captures;
         self
     }
+
+    fn sync_render_nodes(&self, ctx: &mut Context, element: &mut TextAreaInner) {
+        let mut text_style = TextStyle::default();
+        if let Some(info) = element.node.get_text_userdata::<TextRenderInfo>(ctx) {
+            text_style = info.style.clone();
+        } else if let Some(style) = element.node.get_text_userdata::<TextStyle>(ctx) {
+            text_style = style.clone();
+        }
+
+        let is_focused = Some(element.node.clone()) == ctx.focused_node();
+
+        let render_info = TextRenderInfo {
+            style: text_style,
+            cursor: if is_focused {
+                Some(element.editor.display_cursor())
+            } else {
+                None
+            },
+            selection: if is_focused {
+                element.editor.selection()
+            } else {
+                None
+            },
+            preedit_range: element.editor.preedit_range(),
+        };
+        element
+            .node
+            .set_text_with_userdata(ctx, &element.editor.display_text(), render_info);
+    }
 }
 
 pub struct TextAreaInner {
@@ -81,36 +110,13 @@ impl View<String> for TextArea {
             c.overflow = Overflow::Scroll;
         });
 
-        TextAreaInner::new(node, editor, caret)
+        let mut inner = TextAreaInner::new(node, editor, caret);
+        self.sync_render_nodes(ctx, &mut inner);
+        inner
     }
 
     fn rebuild(&self, _prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
-        let mut text_style = TextStyle::default();
-        if let Some(info) = element.node.get_text_userdata::<TextRenderInfo>(ctx) {
-            text_style = info.style.clone();
-        } else if let Some(style) = element.node.get_text_userdata::<TextStyle>(ctx) {
-            text_style = style.clone();
-        }
-
-        let is_focused = Some(element.node.clone()) == ctx.focused_node();
-
-        let render_info = TextRenderInfo {
-            style: text_style,
-            cursor: if is_focused {
-                Some(element.editor.display_cursor())
-            } else {
-                None
-            },
-            selection: if is_focused {
-                element.editor.selection()
-            } else {
-                None
-            },
-            preedit_range: element.editor.preedit_range(),
-        };
-        element
-            .node
-            .set_text_with_userdata(ctx, &element.editor.display_text(), render_info);
+        self.sync_render_nodes(ctx, element);
     }
 
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
@@ -137,11 +143,11 @@ impl View<String> for TextArea {
         let mut handled = EventResult::Ignored;
         let mut emitted_msg: Option<String> = None;
 
-        if element.editor.text() != *state {
-            if let Event::Tick { dt: _ } = event {
-                element.editor.set_text(state);
-                ctx.request_frame();
-            }
+        let is_focused = Some(element.node.clone()) == ctx.focused_node();
+
+        if element.editor.text() != *state && !is_focused {
+            element.editor.set_text(state);
+            self.sync_render_nodes(ctx, element);
         }
 
         match event {
@@ -443,6 +449,24 @@ impl View<String> for TextArea {
                             handled = EventResult::Handled;
                             ctx.request_frame();
                         }
+                        Key::Character(s) if ctrl_alt && (s == "z" || s == "Z") => {
+                            if shift {
+                                if element.editor.redo() {
+                                    emitted_msg = Some(element.editor.display_text().to_string());
+                                }
+                            } else if element.editor.undo() {
+                                emitted_msg = Some(element.editor.display_text().to_string());
+                            }
+                            handled = EventResult::Handled;
+                            ctx.request_frame();
+                        }
+                        Key::Character(s) if ctrl_alt && (s == "y" || s == "Y") => {
+                            if element.editor.redo() {
+                                emitted_msg = Some(element.editor.display_text().to_string());
+                            }
+                            handled = EventResult::Handled;
+                            ctx.request_frame();
+                        }
                         Key::Character(s) if ctrl_alt && (s == "v" || s == "V") => {
                             if let Some(crate::ClipboardData::Text(pasted)) = ctx.clipboard_get() {
                                 element.editor.insert(&pasted);
@@ -470,32 +494,7 @@ impl View<String> for TextArea {
             _ => {}
         }
 
-        let mut text_style = TextStyle::default();
-        if let Some(info) = element.node.get_text_userdata::<TextRenderInfo>(ctx) {
-            text_style = info.style.clone();
-        } else if let Some(style) = element.node.get_text_userdata::<TextStyle>(ctx) {
-            text_style = style.clone();
-        }
-
-        let is_focused = Some(element.node.clone()) == ctx.focused_node();
-
-        let render_info = TextRenderInfo {
-            style: text_style,
-            cursor: if is_focused {
-                Some(element.editor.display_cursor())
-            } else {
-                None
-            },
-            selection: if is_focused {
-                element.editor.selection()
-            } else {
-                None
-            },
-            preedit_range: element.editor.preedit_range(),
-        };
-        element
-            .node
-            .set_text_with_userdata(ctx, &element.editor.display_text(), render_info);
+        self.sync_render_nodes(ctx, element);
 
         let cursor_after = element.editor.cursor();
         if cursor_before != cursor_after || emitted_msg.is_some() {

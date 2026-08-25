@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::animation::{AnimatedValue, Curve, Keyframes};
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
-use crate::{Context, Node, Overflow, Style, TextRenderInfo, TransitionProperty};
+use crate::{Context, Node, Overflow, Style, TextRenderInfo, TextStyle, TransitionProperty};
 
 /// Extension trait for [`View`] that enables fluid `.style(...)` and `.animate_keyframes(...)` method chaining.
 pub trait ViewStyleExt: Sized {
@@ -114,11 +114,17 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
 
         if let Some(text) = node.get_text(ctx) {
             let text_owned = text.to_string();
-            if let Some(mut info) = node.get_text_userdata::<TextRenderInfo>(ctx).cloned() {
-                info.style = self.style.base_text_style.clone();
-                node.set_text_with_userdata(ctx, &text_owned, info);
-            } else {
-                node.set_text_with_userdata(ctx, &text_owned, self.style.base_text_style.clone());
+            if self.style.base_text_style != TextStyle::default() {
+                if let Some(mut info) = node.get_text_userdata::<TextRenderInfo>(ctx).cloned() {
+                    info.style = self.style.base_text_style.clone();
+                    node.set_text_with_userdata(ctx, &text_owned, info);
+                } else {
+                    node.set_text_with_userdata(
+                        ctx,
+                        &text_owned,
+                        self.style.base_text_style.clone(),
+                    );
+                }
             }
         }
 
@@ -317,11 +323,17 @@ impl<V> StyledView<V> {
         // Apply text style
         if let Some(text) = node.get_text(ctx) {
             let text_owned = text.to_string();
-            if let Some(mut info) = node.get_text_userdata::<TextRenderInfo>(ctx).cloned() {
-                info.style = active_style.base_text_style.clone();
-                node.set_text_with_userdata(ctx, &text_owned, info);
-            } else {
-                node.set_text_with_userdata(ctx, &text_owned, active_style.base_text_style.clone());
+            if active_style.base_text_style != TextStyle::default() {
+                if let Some(mut info) = node.get_text_userdata::<TextRenderInfo>(ctx).cloned() {
+                    info.style = active_style.base_text_style.clone();
+                    node.set_text_with_userdata(ctx, &text_owned, info);
+                } else {
+                    node.set_text_with_userdata(
+                        ctx,
+                        &text_owned,
+                        active_style.base_text_style.clone(),
+                    );
+                }
             }
         }
 
