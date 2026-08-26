@@ -318,6 +318,12 @@ typedef enum {
   MU_OVERFLOW_AUTO
 } muOverflow;
 
+typedef enum {
+  MUSE_FLEX_NO_WRAP = 0,
+  MUSE_FLEX_WRAP = 1,
+  MUSE_FLEX_WRAP_REVERSE = 2,
+} muFlexWrap;
+
 typedef struct {
   struct {
     muSize width;
@@ -333,6 +339,7 @@ typedef struct {
 
   muPositionStrategy positioning;
   muFlexDirection flex_direction;
+  muFlexWrap flex_wrap;
 
   muJustifyContent justify_content;
   muAlignItems align_items;
@@ -465,6 +472,8 @@ MUSEDEF bool muse_node_put_before(muContext *ctx, muNode sibling, muNode node);
 MUSEDEF muNode muse_node_create(muContext *ctx);
 // Destroy a node from the tree removing it children at the same time
 MUSEDEF void muse_node_destroy(muContext *ctx, muNode node);
+// Get the parent of a node, or MUSE_UNDEFINED_MUID if detached or root
+MUSEDEF muNode muse_node_parent(muContext *ctx, muNode node);
 // Mark a node as dirty
 MUSEDEF void muse_node_set_dirty(muContext *ctx, muNode node);
 // Returns a list of nodes intersecting the X/Y coordinates, ordered
@@ -618,6 +627,13 @@ MUSEDEF bool muse_node_remove(muContext *ctx, muNode node) {
 
   muse_node_set_dirty(ctx, parent);
   return true;
+}
+
+MUSEDEF muNode muse_node_parent(muContext *ctx, muNode node) {
+  if (!muse_muid_is_valid(node) || !muse_sparse_has(&ctx->hierarchies, node))
+    return MUSE_UNDEFINED_MUID;
+  muHierarchy *hrc = muse_sparse_get(&ctx->hierarchies, node);
+  return (hrc != NULL) ? hrc->parent : MUSE_UNDEFINED_MUID;
 }
 
 MUSEDEF bool muse_node_append(muContext *ctx, muNode parent, muNode child) {
@@ -1088,41 +1104,106 @@ static void muse__m_compute_bottom_up(muContext *ctx, muNode node) {
         intrinsic_w = text_size.computed_width;
         intrinsic_h = text_size.computed_height;
       } else {
-        float sum_main = 0.0f;
-        float max_cross = 0.0f;
-        int child_count = 0;
-
         bool is_row_dir = muse__is_row(cons->flex_direction);
+        bool is_wrapping = (cons->flex_wrap == MUSE_FLEX_WRAP ||
+                            cons->flex_wrap == MUSE_FLEX_WRAP_REVERSE);
 
-        muse_foreach_child(child, ctx, node) {
-          muConstraints *c_cons = muse_sparse_get(&ctx->constraints, child);
-          if (c_cons &&
-              c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE)
-            continue;
+        if (!is_wrapping) {
+          float sum_main = 0.0f;
+          float max_cross = 0.0f;
+          int child_count = 0;
 
-          muComputed *c_comp = muse_sparse_get(&ctx->computed, child);
-          if (!c_comp)
-            continue;
+          muse_foreach_child(child, ctx, node) {
+            muConstraints *c_cons = muse_sparse_get(&ctx->constraints, child);
+            if (c_cons &&
+                c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE)
+              continue;
 
-          child_count += 1;
+            muComputed *c_comp = muse_sparse_get(&ctx->computed, child);
+            if (!c_comp)
+              continue;
 
-          if (is_row_dir) {
-            sum_main += c_comp->w;
-            if (c_comp->h > max_cross)
-              max_cross = c_comp->h;
-          } else {
-            sum_main += c_comp->h;
-            if (c_comp->w > max_cross)
-              max_cross = c_comp->w;
+            child_count += 1;
+
+            if (is_row_dir) {
+              sum_main += c_comp->w;
+              if (c_comp->h > max_cross)
+                max_cross = c_comp->h;
+            } else {
+              sum_main += c_comp->h;
+              if (c_comp->w > max_cross)
+                max_cross = c_comp->w;
+            }
           }
-        }
 
-        if (child_count > 1) {
-          sum_main += cons->gap * (child_count - 1);
-        }
+          if (child_count > 1) {
+            sum_main += cons->gap * (child_count - 1);
+          }
 
-        intrinsic_w = is_row_dir ? sum_main : max_cross;
-        intrinsic_h = !is_row_dir ? sum_main : max_cross;
+          intrinsic_w = is_row_dir ? sum_main : max_cross;
+          intrinsic_h = !is_row_dir ? sum_main : max_cross;
+        } else {
+          float off_w = cons->padding.left + cons->border.left +
+                        cons->padding.right + cons->border.right;
+          float off_h = cons->padding.top + cons->border.top +
+                        cons->padding.bottom + cons->border.bottom;
+          float max_line_main =
+              is_row_dir ? (comp->w - off_w) : (comp->h - off_h);
+          if (max_line_main <= 0.0f)
+            max_line_main = INFINITY;
+
+          float cur_line_main = 0.0f;
+          float cur_line_cross = 0.0f;
+          int cur_line_count = 0;
+          float total_cross = 0.0f;
+          float max_main_used = 0.0f;
+          int line_count = 0;
+
+          muse_foreach_child(child, ctx, node) {
+            muConstraints *c_cons = muse_sparse_get(&ctx->constraints, child);
+            if (c_cons &&
+                c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE)
+              continue;
+
+            muComputed *c_comp = muse_sparse_get(&ctx->computed, child);
+            if (!c_comp)
+              continue;
+
+            float child_main = is_row_dir ? c_comp->w : c_comp->h;
+            float child_cross = is_row_dir ? c_comp->h : c_comp->w;
+
+            float needed = child_main + (cur_line_count > 0 ? cons->gap : 0.0f);
+            if (cur_line_count > 0 && cur_line_main + needed > max_line_main) {
+              total_cross += cur_line_cross;
+              line_count++;
+              if (cur_line_main > max_main_used)
+                max_main_used = cur_line_main;
+
+              cur_line_main = child_main;
+              cur_line_cross = child_cross;
+              cur_line_count = 1;
+            } else {
+              cur_line_main += needed;
+              if (child_cross > cur_line_cross)
+                cur_line_cross = child_cross;
+              cur_line_count++;
+            }
+          }
+
+          if (cur_line_count > 0) {
+            total_cross += cur_line_cross;
+            line_count++;
+            if (cur_line_main > max_main_used)
+              max_main_used = cur_line_main;
+          }
+
+          if (line_count > 1) {
+            total_cross += cons->gap * (line_count - 1);
+          }
+
+          intrinsic_w = is_row_dir ? max_main_used : total_cross;
+          intrinsic_h = !is_row_dir ? max_main_used : total_cross;
+        }
       }
 
       float off_w = cons->padding.left + cons->border.left +
@@ -1292,8 +1373,10 @@ static void muse__m_compute_flex_distribution(muContext *ctx, muNode node) {
         bool modified = false;
         float child_main = is_row_dir ? c_comp->w : c_comp->h;
 
-        if (c_cons->flex_shrink > 0.0f && child_main > 0.0f && total_scaled_shrink > 0.0f) {
-          float shrink_ratio = (c_cons->flex_shrink * child_main) / total_scaled_shrink;
+        if (c_cons->flex_shrink > 0.0f && child_main > 0.0f &&
+            total_scaled_shrink > 0.0f) {
+          float shrink_ratio =
+              (c_cons->flex_shrink * child_main) / total_scaled_shrink;
           float shrink_amount = shrink_ratio * overflow_space;
           float new_main = child_main - shrink_amount;
           if (new_main < 0.0f)
@@ -1357,6 +1440,19 @@ static void muse__m_compute_flex_distribution(muContext *ctx, muNode node) {
           } else if (c_cons->dimension.width.kind == MU_PERCENT) {
             c_comp->w = inner_w * c_cons->dimension.width.percent;
             modified = true;
+          } else if (muse_sparse_has(&ctx->texts, child) &&
+                     c_comp->w > inner_w) {
+            if (ctx->text_sizing_func != NULL) {
+              muTextComputedOutput text_size =
+                  muse__m_get_text_size(ctx, child, inner_w, INFINITY);
+              if (text_size.computed_height > c_comp->h) {
+                c_comp->w = (text_size.computed_width > inner_w)
+                                ? inner_w
+                                : text_size.computed_width;
+                c_comp->h = text_size.computed_height;
+                modified = true;
+              }
+            }
           }
         } else {
           if (c_cons->dimension.height.kind == MU_FILL) {
@@ -1382,6 +1478,69 @@ static void muse__m_compute_flex_distribution(muContext *ctx, muNode node) {
         }
       }
     }
+
+    // D) Resolve percent and fill dimensions for absolute positioned children
+    muse_foreach_child(child, ctx, node) {
+      muConstraints *c_cons = muse_sparse_get(&ctx->constraints, child);
+      muComputed *c_comp = muse_sparse_get(&ctx->computed, child);
+      if (c_cons != NULL && c_comp != NULL &&
+          c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE) {
+        if (c_cons->dimension.width.kind == MU_PERCENT) {
+          c_comp->w = inner_w * c_cons->dimension.width.percent;
+        } else if (c_cons->dimension.width.kind == MU_FILL) {
+          c_comp->w = inner_w;
+        }
+        if (c_cons->dimension.height.kind == MU_PERCENT) {
+          c_comp->h = inner_h * c_cons->dimension.height.percent;
+        } else if (c_cons->dimension.height.kind == MU_FILL) {
+          c_comp->h = inner_h;
+        }
+        muse__m_clamp_min_max(c_comp, c_cons);
+        muse__m_apply_aspect_ratio(c_comp, c_cons);
+      }
+    }
+
+    // E) Recompute wrapping container cross dimension once inner_w is resolved
+    if ((cons->flex_wrap == MUSE_FLEX_WRAP ||
+         cons->flex_wrap == MUSE_FLEX_WRAP_REVERSE) &&
+        is_row_dir && cons->dimension.height.kind == MU_FIT && inner_w > 0.0f) {
+      float line_w = 0.0f;
+      float line_max_h = 0.0f;
+      float total_wrap_h = 0.0f;
+      int line_items = 0;
+      int lines = 0;
+      muse_foreach_child(c, ctx, node) {
+        muConstraints *c_cons = muse_sparse_get(&ctx->constraints, c);
+        if (c_cons &&
+            c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE)
+          continue;
+        muComputed *c_comp = muse_sparse_get(&ctx->computed, c);
+        if (!c_comp)
+          continue;
+        float needed = c_comp->w + (line_items > 0 ? cons->gap : 0.0f);
+        if (line_items > 0 && line_w + needed > inner_w) {
+          total_wrap_h += line_max_h;
+          lines++;
+          line_w = c_comp->w;
+          line_max_h = c_comp->h;
+          line_items = 1;
+        } else {
+          line_w += needed;
+          if (c_comp->h > line_max_h)
+            line_max_h = c_comp->h;
+          line_items++;
+        }
+      }
+      if (line_items > 0) {
+        total_wrap_h += line_max_h;
+        lines++;
+      }
+      if (lines > 1) {
+        total_wrap_h += cons->gap * (lines - 1);
+      }
+      comp->h = total_wrap_h + off_h;
+      muse__m_clamp_min_max(comp, cons);
+    }
   }
 
   muse_foreach_child(child, ctx, node) {
@@ -1398,10 +1557,8 @@ static void muse__m_compute_positional_alignment(muContext *ctx, muNode node,
   muComputed *comp = muse_sparse_get(&ctx->computed, node);
 
   if (cons != NULL && comp != NULL) {
-    if (cons->positioning.strategy != MUSE_POSITION_STRATEGY_ABSOLUTE) {
-      comp->x = start_x;
-      comp->y = start_y;
-    }
+    comp->x = start_x;
+    comp->y = start_y;
 
     float off_l = cons->padding.left + cons->border.left;
     float off_t = cons->padding.top + cons->border.top;
@@ -1415,9 +1572,195 @@ static void muse__m_compute_positional_alignment(muContext *ctx, muNode node,
 
     bool is_row_dir = muse__is_row(cons->flex_direction);
     bool is_rev = muse__is_reverse(cons->flex_direction);
+    bool is_wrapping = (cons->flex_wrap == MUSE_FLEX_WRAP ||
+                        cons->flex_wrap == MUSE_FLEX_WRAP_REVERSE);
 
     float inner_main = is_row_dir ? inner_w : inner_h;
     float inner_cross = is_row_dir ? inner_h : inner_w;
+
+    float base_x = comp->x - cons->scroll.x;
+    float base_y = comp->y - cons->scroll.y;
+    float cross_start =
+        (is_row_dir ? base_y : base_x) + (is_row_dir ? off_t : off_l);
+
+    if (is_wrapping) {
+      muNode child_nodes[256];
+      int total_inflow = 0;
+      muse_foreach_child(c, ctx, node) {
+        muConstraints *c_cons = muse_sparse_get(&ctx->constraints, c);
+        if (c_cons &&
+            c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE) {
+          muComputed *c_comp = muse_sparse_get(&ctx->computed, c);
+          float abs_x = base_x;
+          float abs_y = base_y;
+          if (c_comp) {
+            if (!isnan(c_cons->positioning.absolute.left)) {
+              abs_x = base_x + c_cons->positioning.absolute.left;
+            } else if (!isnan(c_cons->positioning.absolute.right)) {
+              abs_x = base_x + comp->w - c_comp->w -
+                      c_cons->positioning.absolute.right;
+            }
+            if (!isnan(c_cons->positioning.absolute.top)) {
+              abs_y = base_y + c_cons->positioning.absolute.top;
+            } else if (!isnan(c_cons->positioning.absolute.bottom)) {
+              abs_y = base_y + comp->h - c_comp->h -
+                      c_cons->positioning.absolute.bottom;
+            }
+          }
+          muse__m_compute_positional_alignment(ctx, c, abs_x, abs_y);
+        } else if (total_inflow < 256) {
+          child_nodes[total_inflow++] = c;
+        }
+      }
+
+      int line_start = 0;
+      float cur_cross_start = cross_start;
+
+      while (line_start < total_inflow) {
+        int line_end = line_start;
+        float line_main_used = 0.0f;
+        float line_cross_max = 0.0f;
+        int line_child_count = 0;
+
+        while (line_end < total_inflow) {
+          muNode c = child_nodes[line_end];
+          muComputed *c_comp = muse_sparse_get(&ctx->computed, c);
+          if (!c_comp) {
+            line_end++;
+            continue;
+          }
+
+          float child_main = is_row_dir ? c_comp->w : c_comp->h;
+          float child_cross = is_row_dir ? c_comp->h : c_comp->w;
+          float needed = child_main + (line_child_count > 0 ? cons->gap : 0.0f);
+
+          if (line_child_count > 0 && line_main_used + needed > inner_main) {
+            break;
+          }
+
+          line_main_used += needed;
+          if (child_cross > line_cross_max)
+            line_cross_max = child_cross;
+          line_child_count++;
+          line_end++;
+        }
+
+        float remaining_main = inner_main - line_main_used;
+        if (remaining_main < 0.0f)
+          remaining_main = 0.0f;
+        float start_main_offset = 0.0f;
+        float space_between = cons->gap;
+
+        switch (cons->justify_content) {
+        case MUSE_JUSTIFY_CENTER:
+          start_main_offset = remaining_main / 2.0f;
+          break;
+        case MUSE_JUSTIFY_END:
+          start_main_offset = remaining_main;
+          break;
+        case MUSE_JUSTIFY_SPACE_BETWEEN:
+          if (line_child_count > 1)
+            space_between = remaining_main / (line_child_count - 1) + cons->gap;
+          break;
+        case MUSE_JUSTIFY_SPACE_AROUND:
+          if (line_child_count > 0) {
+            space_between = remaining_main / line_child_count + cons->gap;
+            start_main_offset = (space_between - cons->gap) / 2.0f;
+          }
+          break;
+        case MUSE_JUSTIFY_SPACE_EVENLY:
+          if (line_child_count > 0) {
+            space_between = remaining_main / (line_child_count + 1) + cons->gap;
+            start_main_offset = space_between - cons->gap;
+          }
+          break;
+        default:
+          break;
+        }
+
+        float cursor_main = 0.0f;
+        if (is_row_dir) {
+          cursor_main = is_rev ? (base_x + comp->w - off_r - start_main_offset)
+                               : (base_x + off_l + start_main_offset);
+        } else {
+          cursor_main = is_rev ? (base_y + comp->h - off_b - start_main_offset)
+                               : (base_y + off_t + start_main_offset);
+        }
+
+        for (int i = line_start; i < line_end; i++) {
+          muNode c = child_nodes[i];
+          muConstraints *c_cons = muse_sparse_get(&ctx->constraints, c);
+          muComputed *c_comp = muse_sparse_get(&ctx->computed, c);
+          if (!c_cons || !c_comp)
+            continue;
+
+          float child_cross = is_row_dir ? c_comp->h : c_comp->w;
+          float cross_offset = 0.0f;
+          muAlignItems effective_align = cons->align_items;
+          if (c_cons->align_self != MUSE_ALIGN_SELF_AUTO) {
+            switch (c_cons->align_self) {
+            case MUSE_ALIGN_SELF_START:
+              effective_align = MUSE_ALIGN_START;
+              break;
+            case MUSE_ALIGN_SELF_CENTER:
+              effective_align = MUSE_ALIGN_CENTER;
+              break;
+            case MUSE_ALIGN_SELF_END:
+              effective_align = MUSE_ALIGN_END;
+              break;
+            case MUSE_ALIGN_SELF_STRETCH:
+              effective_align = MUSE_ALIGN_STRETCH;
+              break;
+            default:
+              break;
+            }
+          }
+
+          switch (effective_align) {
+          case MUSE_ALIGN_CENTER:
+            cross_offset = (line_cross_max - child_cross) / 2.0f;
+            break;
+          case MUSE_ALIGN_END:
+            cross_offset = line_cross_max - child_cross;
+            break;
+          case MUSE_ALIGN_STRETCH:
+            if (is_row_dir && c_cons->dimension.height.kind != MU_FIXED) {
+              c_comp->h = line_cross_max;
+            } else if (!is_row_dir &&
+                       c_cons->dimension.width.kind != MU_FIXED) {
+              c_comp->w = line_cross_max;
+            }
+            break;
+          default:
+            break;
+          }
+
+          if (is_row_dir) {
+            float child_x = is_rev ? (cursor_main - c_comp->w) : cursor_main;
+            muse__m_compute_positional_alignment(
+                ctx, c, child_x, cur_cross_start + cross_offset);
+            if (is_rev) {
+              cursor_main -= c_comp->w + space_between;
+            } else {
+              cursor_main += c_comp->w + space_between;
+            }
+          } else {
+            float child_y = is_rev ? (cursor_main - c_comp->h) : cursor_main;
+            muse__m_compute_positional_alignment(
+                ctx, c, cur_cross_start + cross_offset, child_y);
+            if (is_rev) {
+              cursor_main -= c_comp->h + space_between;
+            } else {
+              cursor_main += c_comp->h + space_between;
+            }
+          }
+        }
+
+        cur_cross_start += line_cross_max + cons->gap;
+        line_start = line_end;
+      }
+      return;
+    }
 
     float total_main = 0.0f;
     int child_count = 0;
@@ -1471,9 +1814,6 @@ static void muse__m_compute_positional_alignment(muContext *ctx, muNode node,
       break;
     }
 
-    float base_x = comp->x - cons->scroll.x;
-    float base_y = comp->y - cons->scroll.y;
-
     float cursor_main = 0.0f;
     if (is_row_dir) {
       if (is_rev) {
@@ -1489,9 +1829,6 @@ static void muse__m_compute_positional_alignment(muContext *ctx, muNode node,
       }
     }
 
-    float cross_start =
-        (is_row_dir ? base_y : base_x) + (is_row_dir ? off_t : off_l);
-
     // macro to layout a single child
 #define MUSE_LAYOUT_CHILD(child_node)                                          \
   do {                                                                         \
@@ -1499,8 +1836,21 @@ static void muse__m_compute_positional_alignment(muContext *ctx, muNode node,
     muComputed *c_comp = muse_sparse_get(&ctx->computed, (child_node));        \
     if (c_cons != NULL && c_comp != NULL) {                                    \
       if (c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE) {   \
-        muse__m_compute_positional_alignment(ctx, (child_node), base_x,        \
-                                             base_y);                          \
+        float abs_x = base_x;                                                  \
+        float abs_y = base_y;                                                  \
+        if (!isnan(c_cons->positioning.absolute.left)) {                       \
+          abs_x = base_x + c_cons->positioning.absolute.left;                  \
+        } else if (!isnan(c_cons->positioning.absolute.right)) {               \
+          abs_x = base_x + comp->w - c_comp->w -                               \
+                  c_cons->positioning.absolute.right;                          \
+        }                                                                      \
+        if (!isnan(c_cons->positioning.absolute.top)) {                        \
+          abs_y = base_y + c_cons->positioning.absolute.top;                   \
+        } else if (!isnan(c_cons->positioning.absolute.bottom)) {              \
+          abs_y = base_y + comp->h - c_comp->h -                               \
+                  c_cons->positioning.absolute.bottom;                         \
+        }                                                                      \
+        muse__m_compute_positional_alignment(ctx, (child_node), abs_x, abs_y); \
       } else {                                                                 \
         float child_cross = is_row_dir ? c_comp->h : c_comp->w;                \
         float cross_offset = 0.0f;                                             \
@@ -1761,12 +2111,14 @@ typedef MUSE_DA(muse__m_SortItem) muse__m_SortList;
 
 static void muse__m_flatten_recursive(muContext *ctx, muNode node,
                                       muse__m_SortList *list, size_t *seq,
-                                      muRect current_clip, bool has_clip) {
+                                      muRect current_clip, bool has_clip,
+                                      int32_t inherited_z) {
   if (!muse_muid_is_valid(node))
     return;
 
   muConstraints *cons = muse_sparse_get(&ctx->constraints, node);
-  int32_t z = cons != NULL ? cons->z_index : 0;
+  int32_t z =
+      (cons != NULL && cons->z_index != 0) ? cons->z_index : inherited_z;
   muComputed *comp = muse_sparse_get(&ctx->computed, node);
 
   muRect new_clip = current_clip;
@@ -1826,7 +2178,7 @@ static void muse__m_flatten_recursive(muContext *ctx, muNode node,
   }
 
   muse_foreach_child(child, ctx, node) {
-    muse__m_flatten_recursive(ctx, child, list, seq, new_clip, new_has_clip);
+    muse__m_flatten_recursive(ctx, child, list, seq, new_clip, new_has_clip, z);
   }
 
   // Shadow subnodes: Emit shadow scrollbar items after all children are
@@ -1882,7 +2234,8 @@ MUSEDEF void muse_build_render_list(muContext *ctx, muRect viewport) {
 
   muse__m_SortList temp_list = {0};
   size_t seq = 0;
-  muse__m_flatten_recursive(ctx, ctx->root, &temp_list, &seq, viewport, true);
+  muse__m_flatten_recursive(ctx, ctx->root, &temp_list, &seq, viewport, true,
+                            0);
   if (temp_list.count > 0) {
     qsort(temp_list.items, temp_list.count, sizeof(muse__m_SortItem),
           muse__m_render_cmp);

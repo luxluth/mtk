@@ -3,6 +3,7 @@
 pub mod animation;
 pub mod colors;
 pub mod effects;
+pub mod layer;
 pub(crate) mod node;
 pub mod render;
 pub mod style;
@@ -17,6 +18,7 @@ pub use mtk_macro::Lens;
 
 pub use crate::colors::Color;
 use crate::effects::Effects;
+pub use crate::layer::*;
 pub use crate::node::Node;
 use crate::render::RenderCommand;
 pub use crate::style::*;
@@ -65,13 +67,10 @@ pub enum ClipboardData {
 ///
 /// // Compute layout for an 800x600 window viewport
 /// ctx.compute_layout(800.0, 600.0);
-///
-/// // Generate clipping render commands
-/// ctx.build_render_list(Rect { x: 0.0, y: 0.0, w: 800.0, h: 600.0 });
-/// for cmd in ctx.render_list() {
-///     // Process render commands for WGPU / Canvas
-/// }
 /// ```
+///
+/// `Context` acts as the primary bridge between high-level Rust [`View`](crate::ui::View) declarations
+/// and the low-level C layout engine ([`muse.h`](crate::sys)), GPU text rasterizers, and event systems.
 pub struct Context {
     pub(crate) ctx: *mut sys::muContext,
     pub(crate) texts: HashMap<Node, CString>,
@@ -87,6 +86,13 @@ pub struct Context {
     pub(crate) clipboard: Arc<Mutex<Option<arboard::Clipboard>>>,
     pub(crate) canvases: RefCell<HashMap<Node, crate::ui::widgets::CanvasData>>,
     pub(crate) dt: f32,
+
+    // Core-level Super Layers and User Intermediate Layers
+    pub base_layer: InternalLayer,
+    pub intermediate_layers: Vec<UserLayer>,
+    pub overlay_layer: InternalLayer,
+    pub modal_layer: InternalLayer,
+    pub active_layer: ActiveLayerId,
 }
 
 impl Default for Context {
@@ -116,6 +122,54 @@ impl Context {
             clipboard,
             canvases: RefCell::new(HashMap::new()),
             dt: 0.016,
+
+            base_layer: InternalLayer::new(true),
+            intermediate_layers: Vec::new(),
+            overlay_layer: InternalLayer::new(false),
+            modal_layer: InternalLayer::new(false),
+            active_layer: ActiveLayerId::Base,
+        }
+    }
+
+    /// Returns the currently active layer receiving input events.
+    pub fn active_layer(&self) -> ActiveLayerId {
+        if self.modal_layer.state.visible {
+            ActiveLayerId::Modal
+        } else if let Some(last_inter) = self
+            .intermediate_layers
+            .iter()
+            .rfind(|l| l.state.visible && l.blocking)
+        {
+            ActiveLayerId::Intermediate(last_inter.id)
+        } else if self.overlay_layer.state.visible {
+            ActiveLayerId::Overlay
+        } else {
+            ActiveLayerId::Base
+        }
+    }
+
+    /// Sets the currently active layer.
+    pub fn set_active_layer(&mut self, layer: ActiveLayerId) {
+        self.active_layer = layer;
+    }
+
+    /// Clears any focus belonging to a specific layer and restores focus if available.
+    pub fn clear_layer_focus(&mut self, layer: ActiveLayerId) {
+        let root = match layer {
+            ActiveLayerId::Base => self.base_layer.state.root_node,
+            ActiveLayerId::Modal => self.modal_layer.state.root_node,
+            ActiveLayerId::Overlay => self.overlay_layer.state.root_node,
+            ActiveLayerId::Intermediate(id) => self
+                .intermediate_layers
+                .iter()
+                .find(|l| l.id == id)
+                .and_then(|l| l.state.root_node),
+        };
+
+        if let (Some(root_node), Some(focused)) = (root, self.focused_node) {
+            if focused.is_descendant_of(self, root_node) {
+                self.clear_focus();
+            }
         }
     }
 
@@ -157,41 +211,112 @@ impl Context {
         }
     }
 
-    /// Advances keyboard focus to the next registered focusable node in order.
-    pub fn focus_next(&mut self) {
-        if self.focusable_nodes.is_empty() {
-            return;
-        }
-        if let Some(focused) = &self.focused_node {
-            if let Some(idx) = self.focusable_nodes.iter().position(|n| n == focused) {
-                let next_idx = (idx + 1) % self.focusable_nodes.len();
-                self.focused_node = Some(self.focusable_nodes[next_idx]);
-            } else {
-                self.focused_node = Some(self.focusable_nodes[0]);
+    /// Returns the ordered list of focusable nodes belonging to the currently active layer.
+    pub fn active_focusable_nodes(&self) -> Vec<Node> {
+        let active = self.active_layer();
+        match active {
+            ActiveLayerId::Modal => {
+                if let Some(modal_root) = self.modal_layer.state.root_node {
+                    self.focusable_nodes
+                        .iter()
+                        .copied()
+                        .filter(|n| n.is_descendant_of(self, modal_root))
+                        .collect()
+                } else {
+                    Vec::new()
+                }
             }
-        } else {
-            self.focused_node = Some(self.focusable_nodes[0]);
+            ActiveLayerId::Intermediate(id) => {
+                if let Some(inter_root) = self
+                    .intermediate_layers
+                    .iter()
+                    .find(|l| l.id == id)
+                    .and_then(|l| l.state.root_node)
+                {
+                    self.focusable_nodes
+                        .iter()
+                        .copied()
+                        .filter(|n| n.is_descendant_of(self, inter_root))
+                        .collect()
+                } else {
+                    Vec::new()
+                }
+            }
+            ActiveLayerId::Overlay => {
+                if let Some(overlay_root) = self.overlay_layer.state.root_node {
+                    self.focusable_nodes
+                        .iter()
+                        .copied()
+                        .filter(|n| n.is_descendant_of(self, overlay_root))
+                        .collect()
+                } else {
+                    Vec::new()
+                }
+            }
+            ActiveLayerId::Base => {
+                let mut layer_roots = Vec::new();
+                if let Some(r) = self.modal_layer.state.root_node {
+                    layer_roots.push(r);
+                }
+                for l in &self.intermediate_layers {
+                    if let Some(r) = l.state.root_node {
+                        layer_roots.push(r);
+                    }
+                }
+                if let Some(r) = self.overlay_layer.state.root_node {
+                    layer_roots.push(r);
+                }
+
+                self.focusable_nodes
+                    .iter()
+                    .copied()
+                    .filter(|n| !layer_roots.iter().any(|r| n.is_descendant_of(self, *r)))
+                    .collect()
+            }
         }
     }
 
-    /// Reverses keyboard focus to the previous registered focusable node in order.
-    pub fn focus_prev(&mut self) {
-        if self.focusable_nodes.is_empty() {
+    /// Advances keyboard focus to the next registered focusable node in the active layer.
+    pub fn focus_next(&mut self) {
+        let active_nodes = self.active_focusable_nodes();
+        if active_nodes.is_empty() {
+            self.clear_focus();
             return;
         }
-        if let Some(focused) = &self.focused_node {
-            if let Some(idx) = self.focusable_nodes.iter().position(|n| n == focused) {
+
+        if let Some(focused) = self.focused_node {
+            if let Some(idx) = active_nodes.iter().position(|n| *n == focused) {
+                let next_idx = (idx + 1) % active_nodes.len();
+                self.request_focus(active_nodes[next_idx]);
+            } else {
+                self.request_focus(active_nodes[0]);
+            }
+        } else {
+            self.request_focus(active_nodes[0]);
+        }
+    }
+
+    /// Reverses keyboard focus to the previous registered focusable node in the active layer.
+    pub fn focus_prev(&mut self) {
+        let active_nodes = self.active_focusable_nodes();
+        if active_nodes.is_empty() {
+            self.clear_focus();
+            return;
+        }
+
+        if let Some(focused) = self.focused_node {
+            if let Some(idx) = active_nodes.iter().position(|n| *n == focused) {
                 let prev_idx = if idx == 0 {
-                    self.focusable_nodes.len() - 1
+                    active_nodes.len() - 1
                 } else {
                     idx - 1
                 };
-                self.focused_node = Some(self.focusable_nodes[prev_idx]);
+                self.request_focus(active_nodes[prev_idx]);
             } else {
-                self.focused_node = Some(self.focusable_nodes[self.focusable_nodes.len() - 1]);
+                self.request_focus(active_nodes[active_nodes.len() - 1]);
             }
         } else {
-            self.focused_node = Some(self.focusable_nodes[self.focusable_nodes.len() - 1]);
+            self.request_focus(active_nodes[active_nodes.len() - 1]);
         }
     }
 
@@ -249,7 +374,12 @@ impl Context {
 
     /// Allocates a new layout node in the C engine. The node is independent until appended to a parent.
     pub fn create_node(&mut self) -> Node {
-        Node(unsafe { sys::muse_node_create(self.ctx) })
+        let node = Node(unsafe { sys::muse_node_create(self.ctx) });
+        unsafe {
+            let default_cons: sys::muConstraints = Constraints::default().into();
+            sys::muse_constraints_set(self.ctx, node.0, default_cons);
+        }
+        node
     }
 
     /// Requests a new frame redraw on the associated window.
@@ -279,6 +409,7 @@ impl Context {
 
     /// Attaches `node` as the root node of the layout tree.
     pub fn root_attach(&mut self, node: Node) {
+        self.base_layer.state.root_node = Some(node);
         unsafe {
             sys::muse_root_attach(self.ctx, node.0);
         }
@@ -286,6 +417,7 @@ impl Context {
 
     /// Detaches the current root node from the layout tree without destroying it.
     pub fn root_drop(&mut self) {
+        self.base_layer.state.root_node = None;
         unsafe {
             sys::muse_root_drop(self.ctx);
         }

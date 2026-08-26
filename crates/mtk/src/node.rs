@@ -71,6 +71,31 @@ impl Node {
         unsafe { sys::muse_muid_is_valid(self.0) }
     }
 
+    /// Returns the parent of this node in the layout hierarchy, if any.
+    pub fn parent(&self, ctxt: &Context) -> Option<Node> {
+        let p = unsafe { sys::muse_node_parent(ctxt.ctx, self.0) };
+        if unsafe { sys::muse_muid_is_valid(p) } {
+            Some(Node(p))
+        } else {
+            None
+        }
+    }
+
+    /// Returns true if this node is equal to or a descendant of `ancestor`.
+    pub fn is_descendant_of(&self, ctxt: &Context, ancestor: Node) -> bool {
+        if *self == ancestor {
+            return true;
+        }
+        let mut curr = *self;
+        while let Some(p) = curr.parent(ctxt) {
+            if p == ancestor {
+                return true;
+            }
+            curr = p;
+        }
+        false
+    }
+
     /// Append a child node to the end of the parent node tree.
     pub fn append(&self, ctxt: &mut Context, child: Node) -> bool {
         if !self.is_valid() || !child.is_valid() {

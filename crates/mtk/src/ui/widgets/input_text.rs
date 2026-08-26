@@ -15,6 +15,7 @@ pub struct InputText {
     pub(crate) captures_tab: bool,
     pub(crate) placeholder: Option<String>,
     pub(crate) text_style: Option<TextStyle>,
+    pub(crate) custom_style: Option<crate::style::Style>,
 }
 
 /// Creates a new `InputText` widget.
@@ -32,6 +33,7 @@ pub fn input_text() -> InputText {
         captures_tab: false,
         placeholder: None,
         text_style: None,
+        custom_style: None,
     }
 }
 
@@ -57,27 +59,48 @@ impl InputText {
         self
     }
 
-    fn sync_render_nodes(&self, ctx: &mut Context, element: &mut InputInner) {
-        let text_style = if let Some(ref style) = self.text_style {
-            style.clone()
-        } else if let Some(info) = element.node.get_text_userdata::<TextRenderInfo>(ctx) {
-            info.style.clone()
-        } else if let Some(style) = element.node.get_text_userdata::<TextStyle>(ctx) {
-            style.clone()
-        } else {
-            TextStyle {
-                vertical_alignment: crate::style::VerticalAlignment::Center,
-                ..TextStyle::default()
-            }
-        };
+    /// Applies custom layout, visual effects, and typography styling to this input field.
+    pub fn style(mut self, style: crate::style::Style) -> Self {
+        self.custom_style = Some(style);
+        self
+    }
 
-        let is_focused = Some(element.node.clone()) == ctx.focused_node();
+    fn apply_custom_style(&self, ctx: &mut Context, node: Node) {
+        if let Some(style) = &self.custom_style {
+            let is_focused = Some(node) == ctx.focused_node();
+            let mut target = style.clone();
+            if is_focused {
+                if let Some(focus) = &style.focus {
+                    target = target.merge((**focus).clone());
+                }
+            }
+            target.apply_to_node(ctx, node);
+        }
+    }
+
+    fn sync_render_nodes(&self, ctx: &mut Context, element: &mut InputInner) {
         let display_text = element.editor.display_text();
         let show_placeholder = display_text.is_empty() && self.placeholder.is_some();
 
+        let base_text_style = if let Some(ref style) = self.custom_style {
+            let is_focused = Some(element.node.clone()) == ctx.focused_node();
+            if is_focused && let Some(focus) = &style.focus {
+                focus.base_text_style.clone()
+            } else {
+                style.base_text_style.clone()
+            }
+        } else if let Some(ref style) = self.text_style {
+            style.clone()
+        } else {
+            element.base_text_style.clone()
+        };
+        element.base_text_style = base_text_style.clone();
+
+        let is_focused = Some(element.node.clone()) == ctx.focused_node();
+
         let (text_to_render, final_text_style) = if show_placeholder {
             let ph = self.placeholder.as_ref().unwrap();
-            let mut ph_style = text_style.clone();
+            let mut ph_style = base_text_style.clone();
             let base_alpha = if ph_style.color.a == 0 {
                 255
             } else {
@@ -86,7 +109,7 @@ impl InputText {
             ph_style.color.a = (base_alpha as f32 * 0.45) as u8;
             (ph.clone(), ph_style)
         } else {
-            (display_text, text_style)
+            (display_text, base_text_style)
         };
 
         let render_info = TextRenderInfo {
@@ -128,6 +151,7 @@ pub struct InputInner {
     node: Node,
     editor: Editor,
     caret: Node,
+    base_text_style: TextStyle,
     is_dragging: bool,
     last_click: Option<Instant>,
     click_count: u8,
@@ -139,6 +163,11 @@ impl InputInner {
             node,
             editor,
             caret,
+            base_text_style: TextStyle {
+                vertical_alignment: crate::style::VerticalAlignment::Center,
+                wrap: false,
+                ..TextStyle::default()
+            },
             is_dragging: false,
             last_click: None,
             click_count: 0,
@@ -164,12 +193,15 @@ impl View<String> for InputText {
             c.overflow = crate::style::Overflow::Hidden;
         });
 
+        self.apply_custom_style(ctx, node.clone());
+
         let mut inner = InputInner::new(node, editor, caret);
         self.sync_render_nodes(ctx, &mut inner);
         inner
     }
 
     fn rebuild(&self, _prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
+        self.apply_custom_style(ctx, element.node.clone());
         self.sync_render_nodes(ctx, element);
     }
 
@@ -578,6 +610,9 @@ impl View<String> for InputText {
                 }
             }
         }
+
+        self.apply_custom_style(ctx, element.node.clone());
+        self.sync_render_nodes(ctx, element);
 
         (handled, emitted_msg)
     }

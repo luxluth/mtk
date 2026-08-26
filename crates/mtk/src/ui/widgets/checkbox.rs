@@ -122,6 +122,7 @@ where
                 alignment: Alignment::Center,
                 vertical_alignment: VerticalAlignment::Center,
                 color: clr!(white),
+                wrap: false,
                 ..Default::default()
             },
         );
@@ -141,6 +142,7 @@ where
                     } else {
                         rgb!(15, 23, 42)
                     },
+                    wrap: false,
                     ..Default::default()
                 },
             );
@@ -200,6 +202,7 @@ where
                     alignment: Alignment::Center,
                     vertical_alignment: VerticalAlignment::Center,
                     color: clr!(white),
+                    wrap: false,
                     ..Default::default()
                 },
             );

@@ -15,6 +15,7 @@ use winit::keyboard::{Key, NamedKey};
 /// or modifies the text.
 pub struct TextArea {
     pub(crate) captures_tab: bool,
+    pub(crate) custom_style: Option<crate::style::Style>,
 }
 
 /// Creates a new `TextArea` widget.
@@ -28,7 +29,10 @@ pub struct TextArea {
 /// )
 /// ```
 pub fn text_area() -> TextArea {
-    TextArea { captures_tab: true }
+    TextArea {
+        captures_tab: true,
+        custom_style: None,
+    }
 }
 
 impl TextArea {
@@ -40,13 +44,40 @@ impl TextArea {
         self
     }
 
-    fn sync_render_nodes(&self, ctx: &mut Context, element: &mut TextAreaInner) {
-        let mut text_style = TextStyle::default();
-        if let Some(info) = element.node.get_text_userdata::<TextRenderInfo>(ctx) {
-            text_style = info.style.clone();
-        } else if let Some(style) = element.node.get_text_userdata::<TextStyle>(ctx) {
-            text_style = style.clone();
+    /// Applies custom layout, visual effects, and typography styling to this text area.
+    pub fn style(mut self, style: crate::style::Style) -> Self {
+        self.custom_style = Some(style);
+        self
+    }
+
+    fn apply_custom_style(&self, ctx: &mut Context, node: Node) {
+        if let Some(style) = &self.custom_style {
+            let is_focused = Some(node) == ctx.focused_node();
+            let mut target = style.clone();
+            if is_focused {
+                if let Some(focus) = &style.focus {
+                    target = target.merge((**focus).clone());
+                }
+            }
+            target.apply_to_node(ctx, node);
         }
+    }
+
+    fn sync_render_nodes(&self, ctx: &mut Context, element: &mut TextAreaInner) {
+        let text_style = if let Some(ref style) = self.custom_style {
+            let is_focused = Some(element.node.clone()) == ctx.focused_node();
+            if is_focused && let Some(focus) = &style.focus {
+                focus.base_text_style.clone()
+            } else {
+                style.base_text_style.clone()
+            }
+        } else if let Some(info) = element.node.get_text_userdata::<TextRenderInfo>(ctx) {
+            info.style.clone()
+        } else if let Some(style) = element.node.get_text_userdata::<TextStyle>(ctx) {
+            style.clone()
+        } else {
+            TextStyle::default()
+        };
 
         let is_focused = Some(element.node.clone()) == ctx.focused_node();
 
@@ -110,12 +141,15 @@ impl View<String> for TextArea {
             c.overflow = Overflow::Scroll;
         });
 
+        self.apply_custom_style(ctx, node.clone());
+
         let mut inner = TextAreaInner::new(node, editor, caret);
         self.sync_render_nodes(ctx, &mut inner);
         inner
     }
 
     fn rebuild(&self, _prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
+        self.apply_custom_style(ctx, element.node.clone());
         self.sync_render_nodes(ctx, element);
     }
 
@@ -564,6 +598,9 @@ impl View<String> for TextArea {
                 }
             }
         }
+
+        self.apply_custom_style(ctx, element.node.clone());
+        self.sync_render_nodes(ctx, element);
 
         (handled, emitted_msg)
     }

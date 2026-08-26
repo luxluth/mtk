@@ -27,6 +27,11 @@ pub trait ViewStyleExt: Sized {
 
     /// Attaches a [`Keyframes`] timeline animation sequence to this view.
     fn animate_keyframes(self, keyframes: Keyframes<Style>) -> KeyframedView<Self>;
+
+    /// Wraps this view with a hover [`Tooltip`].
+    fn tooltip(self, text: impl Into<String>) -> crate::ui::widgets::Tooltip<Self> {
+        crate::ui::widgets::tooltip(self, text)
+    }
 }
 
 impl<V> ViewStyleExt for V {
@@ -324,10 +329,7 @@ impl<V> StyledView<V> {
         if let Some(text) = node.get_text(ctx) {
             let text_owned = text.to_string();
             if active_style.base_text_style != TextStyle::default() {
-                if let Some(mut info) = node.get_text_userdata::<TextRenderInfo>(ctx).cloned() {
-                    info.style = active_style.base_text_style.clone();
-                    node.set_text_with_userdata(ctx, &text_owned, info);
-                } else {
+                if node.get_text_userdata::<TextRenderInfo>(ctx).is_none() {
                     node.set_text_with_userdata(
                         ctx,
                         &text_owned,
@@ -446,10 +448,7 @@ impl<V> KeyframedView<V> {
 
         if let Some(text) = node.get_text(ctx) {
             let text_owned = text.to_string();
-            if let Some(mut info) = node.get_text_userdata::<TextRenderInfo>(ctx).cloned() {
-                info.style = style.base_text_style.clone();
-                node.set_text_with_userdata(ctx, &text_owned, info);
-            } else {
+            if node.get_text_userdata::<TextRenderInfo>(ctx).is_none() {
                 node.set_text_with_userdata(ctx, &text_owned, style.base_text_style.clone());
             }
         }

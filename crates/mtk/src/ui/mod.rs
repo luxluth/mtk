@@ -7,15 +7,19 @@ use crate::{Context, Node, ui::event::EventResult, windowing::WindowDimension};
 
 pub mod adapter;
 pub mod event;
+pub mod layer;
 pub mod lens;
 pub mod memoize;
 pub mod style;
+pub mod transition;
 pub mod widgets;
 
 pub use adapter::{ViewAdaptExt, adapt};
 pub use event::{EventKind, ViewEventExt};
+pub use layer::{Layer, ViewLayerExt, layer};
 pub use lens::Lens;
 pub use style::ViewStyleExt;
+pub use transition::Transition;
 
 /// Represents user interaction, layout lifecycle, and system input events dispatched down the view tree.
 #[derive(Clone, Debug)]
@@ -178,11 +182,12 @@ macro_rules! impl_view_tuple {
                 event: Event,
                 ctx: &mut Context,
             ) -> (EventResult, Option<Self::Message>) {
+                let is_tick = matches!(event, Event::Tick { .. });
                 let mut handled = EventResult::Ignored;
                 let mut emitted_msg = None;
 
                 $(
-                    if handled == EventResult::Ignored && emitted_msg.is_none() {
+                    if (is_tick || handled == EventResult::Ignored) && emitted_msg.is_none() {
                         let (res, msg) = self.$idx.handle_event(
                             &mut elements.$idx,
                             state,
@@ -190,7 +195,9 @@ macro_rules! impl_view_tuple {
                             ctx
                         );
                         handled = handled.or(res);
-                        emitted_msg = msg;
+                        if msg.is_some() {
+                            emitted_msg = msg;
+                        }
                     }
                 )*
 
@@ -267,14 +274,17 @@ where
         event: Event,
         ctx: &mut Context,
     ) -> (EventResult, Option<Self::Message>) {
+        let is_tick = matches!(event, Event::Tick { .. });
         let mut handled = EventResult::Ignored;
         let mut emitted_msg = None;
 
         for (i, v) in self.iter().enumerate() {
-            if handled == EventResult::Ignored && emitted_msg.is_none() {
+            if (is_tick || handled == EventResult::Ignored) && emitted_msg.is_none() {
                 let (res, msg) = v.handle_event(&mut elements[i], state, event.clone(), ctx);
                 handled = handled.or(res);
-                emitted_msg = msg;
+                if msg.is_some() {
+                    emitted_msg = msg;
+                }
             }
         }
 

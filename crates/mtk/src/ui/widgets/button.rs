@@ -51,6 +51,39 @@ impl<Msg: Clone> Button<Msg> {
         self.custom_style = Some(style);
         self
     }
+
+    /// Sets the button to a secondary light/neutral style.
+    pub fn secondary(mut self) -> Self {
+        self.custom_style = Some(
+            Style::new()
+                .corner_radius(6.0)
+                .bg_color(rgb!(241, 245, 249))
+                .border(1.0, rgb!(203, 213, 225))
+                .set_text_style(TextStyle {
+                    color: rgb!(51, 65, 85),
+                    font_size: 14.0,
+                    font_weight: FontWeight::MEDIUM,
+                    ..Default::default()
+                }),
+        );
+        self
+    }
+
+    /// Sets the button to a danger red style.
+    pub fn danger(mut self) -> Self {
+        self.custom_style = Some(
+            Style::new()
+                .corner_radius(6.0)
+                .bg_color(rgb!(239, 68, 68))
+                .set_text_style(TextStyle {
+                    color: rgb!(255, 255, 255),
+                    font_size: 14.0,
+                    font_weight: FontWeight::MEDIUM,
+                    ..Default::default()
+                }),
+        );
+        self
+    }
 }
 
 pub struct ButtonElement {
@@ -76,6 +109,7 @@ impl<State, Msg: Clone> View<State> for Button<Msg> {
             } else {
                 rgb!(255, 255, 255)
             },
+            wrap: false,
             ..Default::default()
         };
 
@@ -130,6 +164,7 @@ impl<State, Msg: Clone> View<State> for Button<Msg> {
                 } else {
                     rgb!(255, 255, 255)
                 },
+                wrap: false,
                 ..Default::default()
             };
 

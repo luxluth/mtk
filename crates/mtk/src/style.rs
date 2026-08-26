@@ -364,6 +364,35 @@ impl From<sys::muAlignSelf> for AlignSelf {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum FlexWrap {
+    #[default]
+    NoWrap,
+    Wrap,
+    WrapReverse,
+}
+
+impl Into<sys::muFlexWrap> for FlexWrap {
+    fn into(self) -> sys::muFlexWrap {
+        match self {
+            FlexWrap::NoWrap => sys::muFlexWrap_MUSE_FLEX_NO_WRAP,
+            FlexWrap::Wrap => sys::muFlexWrap_MUSE_FLEX_WRAP,
+            FlexWrap::WrapReverse => sys::muFlexWrap_MUSE_FLEX_WRAP_REVERSE,
+        }
+    }
+}
+
+impl From<sys::muFlexWrap> for FlexWrap {
+    fn from(w: sys::muFlexWrap) -> Self {
+        match w {
+            sys::muFlexWrap_MUSE_FLEX_NO_WRAP => FlexWrap::NoWrap,
+            sys::muFlexWrap_MUSE_FLEX_WRAP => FlexWrap::Wrap,
+            sys::muFlexWrap_MUSE_FLEX_WRAP_REVERSE => FlexWrap::WrapReverse,
+            _ => FlexWrap::NoWrap,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Overflow {
     Visible,
@@ -468,6 +497,7 @@ pub struct Constraints {
 
     pub positioning: PositionStrategy,
     pub flex_direction: FlexDirection,
+    pub flex_wrap: FlexWrap,
     pub justify_content: JustifyContent,
     pub align_items: AlignItems,
     pub align_self: AlignSelf,
@@ -498,6 +528,7 @@ impl Default for Constraints {
 
             positioning: PositionStrategy::Inflow,
             flex_direction: FlexDirection::Column,
+            flex_wrap: FlexWrap::NoWrap,
             justify_content: JustifyContent::Start,
             align_items: AlignItems::Start,
             align_self: AlignSelf::Auto,
@@ -531,6 +562,7 @@ impl Into<sys::muConstraints> for Constraints {
             },
             positioning: self.positioning.into(),
             flex_direction: self.flex_direction.into(),
+            flex_wrap: self.flex_wrap.into(),
             justify_content: self.justify_content.into(),
             align_items: self.align_items.into(),
             align_self: self.align_self.into(),
@@ -560,6 +592,7 @@ impl From<sys::muConstraints> for Constraints {
 
             positioning: c.positioning.into(),
             flex_direction: c.flex_direction.into(),
+            flex_wrap: c.flex_wrap.into(),
             justify_content: c.justify_content.into(),
             align_items: c.align_items.into(),
             align_self: c.align_self.into(),
@@ -833,8 +866,11 @@ impl Effects {
         if other.background_color != Color::transparent {
             self.background_color = other.background_color;
         }
-        if other.border != crate::effects::Border::default() {
-            self.border = other.border;
+        if other.border.color != Color::transparent {
+            self.border.color = other.border.color;
+        }
+        if other.border.radius != crate::effects::Radius::all(0.0) {
+            self.border.radius = other.border.radius;
         }
         if other.shadow != Shadow::default() {
             self.shadow = other.shadow;
@@ -981,7 +1017,13 @@ impl Style {
 
         if let Some(text) = node.get_text(ctx) {
             let text_owned = text.to_string();
-            node.set_text_with_userdata(ctx, &text_owned, self.base_text_style.clone());
+            if node
+                .get_text_userdata::<crate::TextRenderInfo>(ctx)
+                .is_none()
+                && node.get_text_userdata::<TextStyle>(ctx).is_none()
+            {
+                node.set_text_with_userdata(ctx, &text_owned, self.base_text_style.clone());
+            }
         }
     }
 
@@ -1015,6 +1057,15 @@ impl Style {
         self.base_constraints.border = Edges::all(width);
         self.base_effects.border.color = color;
         self
+    }
+
+    pub fn flex_wrap(mut self, wrap: FlexWrap) -> Self {
+        self.base_constraints.flex_wrap = wrap;
+        self
+    }
+
+    pub fn wrap(self) -> Self {
+        self.flex_wrap(FlexWrap::Wrap)
     }
 
     pub fn border_edges(mut self, edges: Edges, color: Color) -> Self {
@@ -1081,8 +1132,18 @@ impl Style {
         self
     }
 
+    pub fn min_width(mut self, min_w: f32) -> Self {
+        self.base_constraints.min_width = min_w;
+        self
+    }
+
     pub fn height(mut self, size: Size) -> Self {
         self.base_constraints.height = size;
+        self
+    }
+
+    pub fn min_height(mut self, min_h: f32) -> Self {
+        self.base_constraints.min_height = min_h;
         self
     }
 
@@ -1171,6 +1232,17 @@ impl Style {
     pub fn update_text_style(mut self, f: impl FnOnce(&mut TextStyle)) -> Self {
         f(&mut self.base_text_style);
         self
+    }
+
+    /// Sets whether text should wrap across multiple lines when width is constrained.
+    pub fn text_wrap(mut self, wrap: bool) -> Self {
+        self.base_text_style.wrap = wrap;
+        self
+    }
+
+    /// Disables text wrapping, forcing text to render on a single line.
+    pub fn text_nowrap(self) -> Self {
+        self.text_wrap(false)
     }
 
     /// Declares style overrides applied when the mouse cursor hovers over the element.
@@ -1343,5 +1415,58 @@ pub(crate) mod tests {
 
         assert_eq!(c1_bounds.w, 50.0);
         assert_eq!(c2_bounds.w, 150.0);
+    }
+
+    #[test]
+    fn test_flex_wrap_layout() {
+        let mut ctx = crate::Context::new();
+        let root = ctx.create_node();
+        root.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(120);
+            c.height = Size::Fit;
+            c.flex_direction = FlexDirection::Row;
+            c.flex_wrap = FlexWrap::Wrap;
+            c.gap = 10.0;
+        });
+
+        let child1 = ctx.create_node();
+        child1.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(50);
+            c.height = Size::Fixed(30);
+        });
+
+        let child2 = ctx.create_node();
+        child2.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(50);
+            c.height = Size::Fixed(30);
+        });
+
+        let child3 = ctx.create_node();
+        child3.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(50);
+            c.height = Size::Fixed(30);
+        });
+
+        root.append(&mut ctx, child1);
+        root.append(&mut ctx, child2);
+        root.append(&mut ctx, child3);
+        ctx.root_attach(root);
+        ctx.compute_layout(120.0, 100.0);
+
+        let c1_bounds = child1.get_computed(&ctx).unwrap();
+        let c2_bounds = child2.get_computed(&ctx).unwrap();
+        let c3_bounds = child3.get_computed(&ctx).unwrap();
+        let root_bounds = root.get_computed(&ctx).unwrap();
+
+        assert_eq!(c1_bounds.x, 0.0);
+        assert_eq!(c1_bounds.y, 0.0);
+
+        assert_eq!(c2_bounds.x, 60.0);
+        assert_eq!(c2_bounds.y, 0.0);
+
+        assert_eq!(c3_bounds.x, 0.0);
+        assert_eq!(c3_bounds.y, 40.0);
+
+        assert_eq!(root_bounds.h, 70.0);
     }
 }

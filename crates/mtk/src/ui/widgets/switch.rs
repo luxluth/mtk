@@ -4,14 +4,18 @@ use winit::keyboard::{Key, NamedKey};
 
 use crate::animation::{Animatable, AnimatedValue, Curve};
 use crate::colors::Color;
-use crate::style::{AlignItems, FlexDirection, JustifyContent, Size, Style};
+use crate::style::{
+    AlignItems, FlexDirection, JustifyContent, Size, Style, TextStyle, VerticalAlignment,
+};
+use crate::text_property::FontWeight;
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
 use crate::{Context, Node, clr, rgb, rgba};
 
-/// A smooth pill-shaped toggle switch widget with fluid animation.
+/// A smooth pill-shaped toggle switch widget with fluid animation and optional label.
 pub struct Switch<Msg, F = fn(bool) -> Msg> {
     pub(crate) is_on: bool,
+    pub(crate) label: Option<String>,
     pub(crate) on_toggle: Option<F>,
     pub(crate) disabled: bool,
     _marker: PhantomData<Msg>,
@@ -21,11 +25,14 @@ pub struct Switch<Msg, F = fn(bool) -> Msg> {
 ///
 /// # Examples
 /// ```rust,ignore
-/// switch(state.notifications_enabled).on_toggle(|on| AppMsg::SetNotifications(on))
+/// switch(state.notifications_enabled)
+///     .label("Notifications")
+///     .on_toggle(|on| AppMsg::SetNotifications(on))
 /// ```
 pub fn switch<Msg>(is_on: bool) -> Switch<Msg, fn(bool) -> Msg> {
     Switch {
         is_on,
+        label: None,
         on_toggle: None,
         disabled: false,
         _marker: PhantomData,
@@ -33,10 +40,17 @@ pub fn switch<Msg>(is_on: bool) -> Switch<Msg, fn(bool) -> Msg> {
 }
 
 impl<Msg, F> Switch<Msg, F> {
+    /// Sets a text label next to the switch.
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
     /// Sets the callback invoked when the switch is toggled.
     pub fn on_toggle<NewF: Fn(bool) -> Msg>(self, on_toggle: NewF) -> Switch<Msg, NewF> {
         Switch {
             is_on: self.is_on,
+            label: self.label,
             on_toggle: Some(on_toggle),
             disabled: self.disabled,
             _marker: PhantomData,
@@ -51,8 +65,10 @@ impl<Msg, F> Switch<Msg, F> {
 }
 
 pub struct SwitchElement {
+    container_node: Node,
     track_node: Node,
     knob_node: Node,
+    label_node: Option<Node>,
     is_pressed: bool,
     anim_progress: AnimatedValue<f32>,
     anim_start: Instant,
@@ -66,8 +82,15 @@ where
     type Message = Msg;
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
+        let container_node = ctx.create_node();
         let track_node = ctx.create_node();
         let knob_node = ctx.create_node();
+
+        Style::new()
+            .flex_direction(FlexDirection::Row)
+            .align_items(AlignItems::Center)
+            .gap(10.0)
+            .apply_to_node(ctx, container_node);
 
         let initial_progress = if self.is_on { 1.0f32 } else { 0.0f32 };
         let anim_progress = AnimatedValue::new(initial_progress);
@@ -109,14 +132,40 @@ where
             .apply_to_node(ctx, knob_node);
 
         track_node.append(ctx, knob_node);
+        container_node.append(ctx, track_node);
+
+        let label_node = if let Some(ref text_str) = self.label {
+            let l_node = ctx.create_node();
+            l_node.set_text_with_userdata(
+                ctx,
+                text_str,
+                TextStyle {
+                    font_size: 14.0,
+                    font_weight: FontWeight::MEDIUM,
+                    vertical_alignment: VerticalAlignment::Center,
+                    color: if self.disabled {
+                        rgb!(148, 163, 184)
+                    } else {
+                        rgb!(15, 23, 42)
+                    },
+                    ..Default::default()
+                },
+            );
+            container_node.append(ctx, l_node);
+            Some(l_node)
+        } else {
+            None
+        };
 
         if !self.disabled {
             ctx.register_focusable(track_node);
         }
 
         SwitchElement {
+            container_node,
             track_node,
             knob_node,
+            label_node,
             is_pressed: false,
             anim_progress,
             anim_start,
@@ -131,6 +180,12 @@ where
                 .anim_progress
                 .set_target(target, now, 160.0, Curve::ease_out());
             ctx.request_frame();
+        }
+
+        if self.label != prev.label {
+            if let (Some(l_node), Some(text_str)) = (element.label_node, &self.label) {
+                l_node.set_text(ctx, text_str);
+            }
         }
 
         if self.disabled != prev.disabled {
@@ -152,14 +207,20 @@ where
 
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
         ctx.unregister_focusable(element.track_node);
+        if let Some(l_node) = element.label_node {
+            l_node.remove(ctx);
+            ctx.destroy_node(l_node);
+        }
         element.knob_node.remove(ctx);
         ctx.destroy_node(element.knob_node);
         element.track_node.remove(ctx);
         ctx.destroy_node(element.track_node);
+        element.container_node.remove(ctx);
+        ctx.destroy_node(element.container_node);
     }
 
     fn get_node(&self, element: &Self::Element) -> Node {
-        element.track_node
+        element.container_node
     }
 
     fn handle_event(
@@ -201,8 +262,13 @@ where
             Event::MouseInput {
                 pressed, hit_nodes, ..
             } => {
-                let is_hit = hit_nodes.contains(&element.track_node)
-                    || hit_nodes.contains(&element.knob_node);
+                let is_hit = hit_nodes.contains(&element.container_node)
+                    || hit_nodes.contains(&element.track_node)
+                    || hit_nodes.contains(&element.knob_node)
+                    || element
+                        .label_node
+                        .map(|l| hit_nodes.contains(&l))
+                        .unwrap_or(false);
 
                 if is_hit && pressed {
                     element.is_pressed = true;

@@ -438,7 +438,18 @@ impl<State: 'static, Msg: 'static> View<State> for Canvas<State, Msg> {
     fn rebuild(&self, _prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
         let mut canvases = ctx.canvases.borrow_mut();
         if let Some(canvas_data) = canvases.get_mut(element) {
-            canvas_data.painter = (self.painter_fn)();
+            match (&mut canvas_data.painter, (self.painter_fn)()) {
+                (CanvasPainterKind::Pixel(_), new_p @ CanvasPainterKind::Pixel(_)) => {
+                    canvas_data.painter = new_p;
+                }
+                (CanvasPainterKind::Wgpu(_), CanvasPainterKind::Wgpu(_)) => {
+                    // Retain the initialized GPU pipeline, bind groups, and buffers for the active canvas
+                }
+                (_, new_p) => {
+                    canvas_data.painter = new_p;
+                    canvas_data.initialized = false;
+                }
+            }
         }
     }
 

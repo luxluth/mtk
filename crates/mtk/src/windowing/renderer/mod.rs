@@ -985,9 +985,30 @@ fn render_focus_ring<'a>(
     solid_bind_group: &'a wgpu::BindGroup,
     context: &crate::Context,
 ) {
-    if let Some(focused) = context.focused_node()
-        && let Some(computed) = focused.get_computed(context)
+    let Some(focused) = context.focused_node() else {
+        return;
+    };
+
+    // If modal is active, focus must belong to modal
+    if context.modal_layer.state.visible {
+        if let Some(modal_root) = context.modal_layer.state.root_node {
+            if !focused.is_descendant_of(context, modal_root) && focused != modal_root {
+                return;
+            }
+        }
+    } else if let Some(inter) = context
+        .intermediate_layers
+        .iter()
+        .rfind(|l| l.state.visible && l.blocking)
     {
+        if let Some(inter_root) = inter.state.root_node {
+            if !focused.is_descendant_of(context, inter_root) && focused != inter_root {
+                return;
+            }
+        }
+    }
+
+    if let Some(computed) = focused.get_computed(context) {
         let effects = focused.get_effects(context).unwrap_or_default();
 
         render_pass.set_scissor_rect(0, 0, screen_width.max(1), screen_height.max(1));

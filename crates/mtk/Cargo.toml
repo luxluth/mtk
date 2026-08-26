@@ -20,4 +20,4 @@ mtk-macro = { path = "../mtk-macro" }
 
 [build-dependencies]
 bindgen = "0.72.1"
-cc = "1.2.66"
+cc = "1.4.4"
