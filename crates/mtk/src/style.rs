@@ -1469,4 +1469,80 @@ pub(crate) mod tests {
 
         assert_eq!(root_bounds.h, 70.0);
     }
+
+    #[test]
+    fn test_flex_basis_with_grow() {
+        let mut ctx = crate::Context::new();
+        let root = ctx.create_node();
+        root.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(200);
+            c.height = Size::Fixed(50);
+            c.flex_direction = FlexDirection::Row;
+        });
+
+        let child1 = ctx.create_node();
+        child1.update_constraints(&mut ctx, |c| {
+            c.flex_basis = Size::Fixed(40);
+            c.flex_grow = 1.0;
+            c.height = Size::Fixed(50);
+        });
+
+        let child2 = ctx.create_node();
+        child2.update_constraints(&mut ctx, |c| {
+            c.flex_basis = Size::Fixed(60);
+            c.flex_grow = 1.0;
+            c.height = Size::Fixed(50);
+        });
+
+        root.append(&mut ctx, child1);
+        root.append(&mut ctx, child2);
+        ctx.root_attach(root);
+        ctx.compute_layout(200.0, 50.0);
+
+        // Total basis = 40 + 60 = 100. Free space = 200 - 100 = 100.
+        // Child 1 = 40 + (1/2)*100 = 90.
+        // Child 2 = 60 + (1/2)*100 = 110.
+        let c1_bounds = child1.get_computed(&ctx).unwrap();
+        let c2_bounds = child2.get_computed(&ctx).unwrap();
+
+        assert_eq!(c1_bounds.w, 90.0);
+        assert_eq!(c2_bounds.w, 110.0);
+    }
+
+    #[test]
+    fn test_pre_distribution_cross_axis_stretch() {
+        let mut ctx = crate::Context::new();
+        let root = ctx.create_node();
+        root.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(300);
+            c.height = Size::Fixed(400);
+            c.flex_direction = FlexDirection::Column;
+            c.align_items = AlignItems::Stretch;
+        });
+
+        let card = ctx.create_node();
+        card.update_constraints(&mut ctx, |c| {
+            c.height = Size::Fixed(80);
+            c.flex_direction = FlexDirection::Row;
+        });
+
+        let card_inner_fill = ctx.create_node();
+        card_inner_fill.update_constraints(&mut ctx, |c| {
+            c.width = Size::Percent(1.0);
+            c.height = Size::Fixed(30);
+        });
+
+        card.append(&mut ctx, card_inner_fill);
+        root.append(&mut ctx, card);
+        ctx.root_attach(root);
+        ctx.compute_layout(300.0, 400.0);
+
+        // Card is stretched by root column to 300px width.
+        // Inner fill child resolves its 100% width against card's 300px width!
+        let card_bounds = card.get_computed(&ctx).unwrap();
+        let inner_bounds = card_inner_fill.get_computed(&ctx).unwrap();
+
+        assert_eq!(card_bounds.w, 300.0);
+        assert_eq!(inner_bounds.w, 300.0);
+    }
 }

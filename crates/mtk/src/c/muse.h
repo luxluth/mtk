@@ -1095,8 +1095,14 @@ static void muse__m_compute_bottom_up(muContext *ctx, muNode node) {
       float intrinsic_h = 0.0f;
 
       if (muse_sparse_has(&ctx->texts, node) && ctx->text_sizing_func != NULL) {
-        float avail_w = fit_w ? INFINITY : comp->w;
-        float avail_h = fit_h ? INFINITY : comp->h;
+        float off_w = cons->padding.left + cons->border.left +
+                      cons->padding.right + cons->border.right;
+        float off_h = cons->padding.top + cons->border.top +
+                      cons->padding.bottom + cons->border.bottom;
+        float avail_w =
+            fit_w ? INFINITY : (comp->w > off_w ? comp->w - off_w : comp->w);
+        float avail_h =
+            fit_h ? INFINITY : (comp->h > off_h ? comp->h - off_h : comp->h);
 
         muTextComputedOutput text_size =
             muse__m_get_text_size(ctx, node, avail_w, avail_h);
@@ -1222,6 +1228,33 @@ static void muse__m_compute_bottom_up(muContext *ctx, muNode node) {
   }
 }
 
+static inline float muse__m_get_flex_basis(muConstraints *c_cons,
+                                            muComputed *c_comp,
+                                            bool is_row_dir,
+                                            float inner_main) {
+  if (c_cons->flex_basis.kind == MU_PERCENT) {
+    return inner_main * c_cons->flex_basis.percent;
+  } else if (c_cons->flex_basis.kind == MU_FIXED) {
+    return (float)c_cons->flex_basis.px;
+  } else if (is_row_dir && c_cons->dimension.width.kind == MU_PERCENT) {
+    return inner_main * c_cons->dimension.width.percent;
+  } else if (!is_row_dir && c_cons->dimension.height.kind == MU_PERCENT) {
+    return inner_main * c_cons->dimension.height.percent;
+  } else if (is_row_dir && c_cons->dimension.width.kind == MU_FIXED) {
+    return (float)c_cons->dimension.width.px;
+  } else if (!is_row_dir && c_cons->dimension.height.kind == MU_FIXED) {
+    return (float)c_cons->dimension.height.px;
+  } else {
+    bool is_main_fill = is_row_dir
+                            ? (c_cons->dimension.width.kind == MU_FILL)
+                            : (c_cons->dimension.height.kind == MU_FILL);
+    if (c_cons->flex_grow > 0.0f || is_main_fill) {
+      return 0.0f;
+    }
+    return is_row_dir ? c_comp->w : c_comp->h;
+  }
+}
+
 static void muse__m_compute_flex_distribution(muContext *ctx, muNode node) {
   if (!muse_muid_is_valid(node))
     return;
@@ -1230,7 +1263,6 @@ static void muse__m_compute_flex_distribution(muContext *ctx, muNode node) {
   muComputed *comp = muse_sparse_get(&ctx->computed, node);
 
   if (cons != NULL && comp != NULL) {
-
     float off_w = cons->padding.left + cons->border.left + cons->padding.right +
                   cons->border.right;
     float off_h = cons->padding.top + cons->border.top + cons->padding.bottom +
@@ -1243,238 +1275,217 @@ static void muse__m_compute_flex_distribution(muContext *ctx, muNode node) {
     if (inner_h < 0.0f)
       inner_h = 0.0f;
 
-    float total_flex_grow = 0.0f;
-    int valid_child_count = 0;
-    float used_main_space = 0.0f;
     bool is_row_dir = muse__is_row(cons->flex_direction);
+    float available_main = is_row_dir ? inner_w : inner_h;
 
-    // A) Measure space used by non-grow / fixed children
+    // A) Pre-resolve cross-axis dimensions (Stretch, Fill, Percent) and main-axis percentages
     muse_foreach_child(child, ctx, node) {
       muConstraints *c_cons = muse_sparse_get(&ctx->constraints, child);
       muComputed *c_comp = muse_sparse_get(&ctx->computed, child);
-
       if (c_cons == NULL || c_comp == NULL ||
           c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE)
         continue;
 
-      valid_child_count += 1;
+      muAlignItems effective_align = cons->align_items;
+      if (c_cons->align_self != MUSE_ALIGN_SELF_AUTO) {
+        switch (c_cons->align_self) {
+        case MUSE_ALIGN_SELF_START:
+          effective_align = MUSE_ALIGN_START;
+          break;
+        case MUSE_ALIGN_SELF_CENTER:
+          effective_align = MUSE_ALIGN_CENTER;
+          break;
+        case MUSE_ALIGN_SELF_END:
+          effective_align = MUSE_ALIGN_END;
+          break;
+        case MUSE_ALIGN_SELF_STRETCH:
+          effective_align = MUSE_ALIGN_STRETCH;
+          break;
+        default:
+          break;
+        }
+      }
+
+      bool modified = false;
+      if (!is_row_dir) {
+        // Parent is Column. Cross-axis is Width.
+        if (c_cons->dimension.width.kind == MU_FILL ||
+            effective_align == MUSE_ALIGN_STRETCH) {
+          if (c_cons->dimension.width.kind != MU_FIXED) {
+            c_comp->w = inner_w;
+            modified = true;
+          }
+        } else if (c_cons->dimension.width.kind == MU_PERCENT) {
+          c_comp->w = inner_w * c_cons->dimension.width.percent;
+          modified = true;
+        }
+
+        // Main-axis percentage for Column (Height)
+        if (c_cons->dimension.height.kind == MU_PERCENT) {
+          c_comp->h = inner_h * c_cons->dimension.height.percent;
+          modified = true;
+        }
+      } else {
+        // Parent is Row. Cross-axis is Height.
+        if (c_cons->dimension.height.kind == MU_FILL ||
+            effective_align == MUSE_ALIGN_STRETCH) {
+          if (c_cons->dimension.height.kind != MU_FIXED) {
+            c_comp->h = inner_h;
+            modified = true;
+          }
+        } else if (c_cons->dimension.height.kind == MU_PERCENT) {
+          c_comp->h = inner_h * c_cons->dimension.height.percent;
+          modified = true;
+        }
+
+        // Main-axis percentage for Row (Width)
+        if (c_cons->dimension.width.kind == MU_PERCENT) {
+          c_comp->w = inner_w * c_cons->dimension.width.percent;
+          modified = true;
+        }
+      }
+
+      if (modified) {
+        muse__m_clamp_min_max(c_comp, c_cons);
+        muse__m_apply_aspect_ratio(c_comp, c_cons);
+      }
+
+      // Re-measure wrapped text with resolved available width including padding and border
+      if (muse_sparse_has(&ctx->texts, child) &&
+          ctx->text_sizing_func != NULL) {
+        float c_off_w = c_cons->padding.left + c_cons->border.left +
+                        c_cons->padding.right + c_cons->border.right;
+        float c_off_h = c_cons->padding.top + c_cons->border.top +
+                        c_cons->padding.bottom + c_cons->border.bottom;
+        float c_avail_w =
+            (c_comp->w > c_off_w) ? (c_comp->w - c_off_w) : INFINITY;
+        float c_avail_h =
+            (c_comp->h > c_off_h) ? (c_comp->h - c_off_h) : INFINITY;
+
+        if (c_cons->dimension.width.kind == MU_FIT) {
+          c_avail_w = INFINITY;
+        }
+
+        muTextComputedOutput text_size =
+            muse__m_get_text_size(ctx, child, c_avail_w, c_avail_h);
+
+        float needed_w = text_size.computed_width + c_off_w;
+        float needed_h = text_size.computed_height + c_off_h;
+
+        if (c_cons->dimension.width.kind == MU_FIT) {
+          c_comp->w = needed_w;
+        }
+        if (c_cons->dimension.height.kind == MU_FIT || needed_h > c_comp->h) {
+          c_comp->h = needed_h;
+        }
+        muse__m_clamp_min_max(c_comp, c_cons);
+      }
+    }
+
+    // B) Calculate total flex basis and flex grow/shrink sums
+    float total_basis = 0.0f;
+    float total_flex_grow = 0.0f;
+    int in_flow_count = 0;
+
+    muse_foreach_child(child, ctx, node) {
+      muConstraints *c_cons = muse_sparse_get(&ctx->constraints, child);
+      muComputed *c_comp = muse_sparse_get(&ctx->computed, child);
+      if (c_cons == NULL || c_comp == NULL ||
+          c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE)
+        continue;
+
+      in_flow_count += 1;
+      float basis =
+          muse__m_get_flex_basis(c_cons, c_comp, is_row_dir, available_main);
+      total_basis += basis;
 
       bool is_main_fill = is_row_dir
                               ? (c_cons->dimension.width.kind == MU_FILL)
                               : (c_cons->dimension.height.kind == MU_FILL);
-
       float grow = (c_cons->flex_grow > 0.0f) ? c_cons->flex_grow
                                               : (is_main_fill ? 1.0f : 0.0f);
-
-      if (grow > 0.0f) {
-        total_flex_grow += grow;
-      } else {
-        used_main_space += is_row_dir ? c_comp->w : c_comp->h;
-      }
+      total_flex_grow += grow;
     }
 
-    if (valid_child_count > 1) {
-      used_main_space += cons->gap * (valid_child_count - 1);
+    if (in_flow_count > 1) {
+      total_basis += cons->gap * (in_flow_count - 1);
     }
 
-    // B) Calculate distribution size
-    float available_main = is_row_dir ? inner_w : inner_h;
-    float remaining_space = available_main - used_main_space;
+    float free_space = available_main - total_basis;
 
-    if (total_flex_grow > 0.0f && remaining_space > 0.0f) {
-      // C1) Assign grow space
+    if (total_flex_grow > 0.0f && free_space > 0.0f) {
+      // C1) Distribute free space
       muse_foreach_child(child, ctx, node) {
         muConstraints *c_cons = muse_sparse_get(&ctx->constraints, child);
         muComputed *c_comp = muse_sparse_get(&ctx->computed, child);
-
         if (c_cons == NULL || c_comp == NULL ||
-            c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE)
-          continue;
+          c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE)
+        continue;
 
         bool is_main_fill = is_row_dir
                                 ? (c_cons->dimension.width.kind == MU_FILL)
                                 : (c_cons->dimension.height.kind == MU_FILL);
-
         float grow = (c_cons->flex_grow > 0.0f) ? c_cons->flex_grow
                                                 : (is_main_fill ? 1.0f : 0.0f);
-
-        bool modified = false;
-
         if (grow > 0.0f) {
-          float allocated = (grow / total_flex_grow) * remaining_space;
+          float basis =
+              muse__m_get_flex_basis(c_cons, c_comp, is_row_dir, available_main);
+          float allocated = basis + (grow / total_flex_grow) * free_space;
           if (is_row_dir) {
             c_comp->w = allocated;
           } else {
             c_comp->h = allocated;
           }
-          modified = true;
-        }
-
-        if (!is_row_dir) {
-          if (c_cons->dimension.width.kind == MU_FILL) {
-            c_comp->w = inner_w;
-            modified = true;
-          } else if (c_cons->dimension.width.kind == MU_PERCENT) {
-            c_comp->w = inner_w * c_cons->dimension.width.percent;
-            modified = true;
-          }
-        } else {
-          if (c_cons->dimension.height.kind == MU_FILL) {
-            c_comp->h = inner_h;
-            modified = true;
-          } else if (c_cons->dimension.height.kind == MU_PERCENT) {
-            c_comp->h = inner_h * c_cons->dimension.height.percent;
-            modified = true;
-          }
-        }
-
-        if (is_row_dir && c_cons->dimension.width.kind == MU_PERCENT) {
-          c_comp->w = inner_w * c_cons->dimension.width.percent;
-          modified = true;
-        } else if (!is_row_dir && c_cons->dimension.height.kind == MU_PERCENT) {
-          c_comp->h = inner_h * c_cons->dimension.height.percent;
-          modified = true;
-        }
-
-        if (modified) {
           muse__m_clamp_min_max(c_comp, c_cons);
           muse__m_apply_aspect_ratio(c_comp, c_cons);
         }
       }
-    } else if (used_main_space > available_main && available_main > 0.0f &&
+    } else if (free_space < 0.0f && available_main > 0.0f &&
                cons->overflow != MU_OVERFLOW_SCROLL &&
                cons->overflow != MU_OVERFLOW_AUTO) {
-      // C2) Assign shrink space (weighted by flex_shrink * basis_size)
-      float overflow_space = used_main_space - available_main;
+      // C2) Shrink space weighted by flex_shrink * basis
+      float overflow_space = -free_space;
       float total_scaled_shrink = 0.0f;
 
       muse_foreach_child(child, ctx, node) {
         muConstraints *c_cons = muse_sparse_get(&ctx->constraints, child);
         muComputed *c_comp = muse_sparse_get(&ctx->computed, child);
-
         if (c_cons == NULL || c_comp == NULL ||
             c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE)
           continue;
 
-        float child_main = is_row_dir ? c_comp->w : c_comp->h;
-        if (c_cons->flex_shrink > 0.0f && child_main > 0.0f) {
-          total_scaled_shrink += c_cons->flex_shrink * child_main;
+        float basis =
+            muse__m_get_flex_basis(c_cons, c_comp, is_row_dir, available_main);
+        if (c_cons->flex_shrink > 0.0f && basis > 0.0f) {
+          total_scaled_shrink += c_cons->flex_shrink * basis;
         }
       }
 
-      muse_foreach_child(child, ctx, node) {
-        muConstraints *c_cons = muse_sparse_get(&ctx->constraints, child);
-        muComputed *c_comp = muse_sparse_get(&ctx->computed, child);
+      if (total_scaled_shrink > 0.0f) {
+        muse_foreach_child(child, ctx, node) {
+          muConstraints *c_cons = muse_sparse_get(&ctx->constraints, child);
+          muComputed *c_comp = muse_sparse_get(&ctx->computed, child);
+          if (c_cons == NULL || c_comp == NULL ||
+              c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE)
+            continue;
 
-        if (c_cons == NULL || c_comp == NULL ||
-            c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE)
-          continue;
-
-        bool modified = false;
-        float child_main = is_row_dir ? c_comp->w : c_comp->h;
-
-        if (c_cons->flex_shrink > 0.0f && child_main > 0.0f &&
-            total_scaled_shrink > 0.0f) {
-          float shrink_ratio =
-              (c_cons->flex_shrink * child_main) / total_scaled_shrink;
-          float shrink_amount = shrink_ratio * overflow_space;
-          float new_main = child_main - shrink_amount;
-          if (new_main < 0.0f)
-            new_main = 0.0f;
-
-          if (is_row_dir) {
-            c_comp->w = new_main;
-          } else {
-            c_comp->h = new_main;
-          }
-          modified = true;
-        }
-
-        if (!is_row_dir) {
-          if (c_cons->dimension.width.kind == MU_FILL) {
-            c_comp->w = inner_w;
-            modified = true;
-          } else if (c_cons->dimension.width.kind == MU_PERCENT) {
-            c_comp->w = inner_w * c_cons->dimension.width.percent;
-            modified = true;
-          }
-        } else {
-          if (c_cons->dimension.height.kind == MU_FILL) {
-            c_comp->h = inner_h;
-            modified = true;
-          } else if (c_cons->dimension.height.kind == MU_PERCENT) {
-            c_comp->h = inner_h * c_cons->dimension.height.percent;
-            modified = true;
-          }
-        }
-
-        if (is_row_dir && c_cons->dimension.width.kind == MU_PERCENT) {
-          c_comp->w = inner_w * c_cons->dimension.width.percent;
-          modified = true;
-        } else if (!is_row_dir && c_cons->dimension.height.kind == MU_PERCENT) {
-          c_comp->h = inner_h * c_cons->dimension.height.percent;
-          modified = true;
-        }
-
-        if (modified) {
-          muse__m_clamp_min_max(c_comp, c_cons);
-          muse__m_apply_aspect_ratio(c_comp, c_cons);
-        }
-      }
-    } else {
-      // C3) Cross-axis fill resolution for children without grow or shrink
-      muse_foreach_child(child, ctx, node) {
-        muConstraints *c_cons = muse_sparse_get(&ctx->constraints, child);
-        muComputed *c_comp = muse_sparse_get(&ctx->computed, child);
-
-        if (c_cons == NULL || c_comp == NULL ||
-            c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE)
-          continue;
-
-        bool modified = false;
-
-        if (!is_row_dir) {
-          if (c_cons->dimension.width.kind == MU_FILL) {
-            c_comp->w = inner_w;
-            modified = true;
-          } else if (c_cons->dimension.width.kind == MU_PERCENT) {
-            c_comp->w = inner_w * c_cons->dimension.width.percent;
-            modified = true;
-          } else if (muse_sparse_has(&ctx->texts, child) &&
-                     c_comp->w > inner_w) {
-            if (ctx->text_sizing_func != NULL) {
-              muTextComputedOutput text_size =
-                  muse__m_get_text_size(ctx, child, inner_w, INFINITY);
-              if (text_size.computed_height > c_comp->h) {
-                c_comp->w = (text_size.computed_width > inner_w)
-                                ? inner_w
-                                : text_size.computed_width;
-                c_comp->h = text_size.computed_height;
-                modified = true;
-              }
+          float basis =
+              muse__m_get_flex_basis(c_cons, c_comp, is_row_dir, available_main);
+          if (c_cons->flex_shrink > 0.0f && basis > 0.0f) {
+            float shrink_ratio =
+                (c_cons->flex_shrink * basis) / total_scaled_shrink;
+            float shrink_amount = shrink_ratio * overflow_space;
+            float new_main = basis - shrink_amount;
+            if (new_main < 0.0f)
+              new_main = 0.0f;
+            if (is_row_dir) {
+              c_comp->w = new_main;
+            } else {
+              c_comp->h = new_main;
             }
+            muse__m_clamp_min_max(c_comp, c_cons);
+            muse__m_apply_aspect_ratio(c_comp, c_cons);
           }
-        } else {
-          if (c_cons->dimension.height.kind == MU_FILL) {
-            c_comp->h = inner_h;
-            modified = true;
-          } else if (c_cons->dimension.height.kind == MU_PERCENT) {
-            c_comp->h = inner_h * c_cons->dimension.height.percent;
-            modified = true;
-          }
-        }
-
-        if (is_row_dir && c_cons->dimension.width.kind == MU_PERCENT) {
-          c_comp->w = inner_w * c_cons->dimension.width.percent;
-          modified = true;
-        } else if (!is_row_dir && c_cons->dimension.height.kind == MU_PERCENT) {
-          c_comp->h = inner_h * c_cons->dimension.height.percent;
-          modified = true;
-        }
-
-        if (modified) {
-          muse__m_clamp_min_max(c_comp, c_cons);
-          muse__m_apply_aspect_ratio(c_comp, c_cons);
         }
       }
     }
