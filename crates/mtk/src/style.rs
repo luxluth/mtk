@@ -1545,4 +1545,55 @@ pub(crate) mod tests {
         assert_eq!(card_bounds.w, 300.0);
         assert_eq!(inner_bounds.w, 300.0);
     }
+
+    #[test]
+    fn test_incremental_dirty_layout_speed() {
+        let mut ctx = crate::Context::new();
+        let root = ctx.create_node();
+        root.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(1000);
+            c.height = Size::Fixed(1000);
+            c.flex_direction = FlexDirection::Column;
+        });
+
+        let mut leaf_nodes = Vec::new();
+        for _ in 0..10 {
+            let row = ctx.create_node();
+            row.update_constraints(&mut ctx, |c| {
+                c.width = Size::Percent(1.0);
+                c.height = Size::Fixed(50);
+                c.flex_direction = FlexDirection::Row;
+            });
+            for _ in 0..10 {
+                let leaf = ctx.create_node();
+                leaf.update_constraints(&mut ctx, |c| {
+                    c.width = Size::Fixed(50);
+                    c.height = Size::Fixed(50);
+                });
+                row.append(&mut ctx, leaf);
+                leaf_nodes.push(leaf);
+            }
+            root.append(&mut ctx, row);
+        }
+
+        ctx.root_attach(root);
+        ctx.compute_layout(1000.0, 1000.0);
+
+        // Initial layout complete. Now modify only one single leaf
+        let target_leaf = leaf_nodes[42];
+        target_leaf.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(80);
+        });
+
+        // Incremental re-layout
+        ctx.compute_layout(1000.0, 1000.0);
+
+        let target_bounds = target_leaf.get_computed(&ctx).unwrap();
+        assert_eq!(target_bounds.w, 80.0);
+
+        // Untouched leaf retains its computed size
+        let untouched_leaf = leaf_nodes[0];
+        let untouched_bounds = untouched_leaf.get_computed(&ctx).unwrap();
+        assert_eq!(untouched_bounds.w, 50.0);
+    }
 }

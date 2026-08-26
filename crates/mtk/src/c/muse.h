@@ -2033,54 +2033,47 @@ MUSEDEF void muse_compute_layout(muContext *ctx, float viewport_width,
     if (constraints == NULL || hrc == NULL)
       continue;
 
-    // A) Pull : If my size changed, does my parent care ?
+    // A) Pull : If my size/position changed, notify parent
     muNode curr_parent = hrc->parent;
     while (muse_muid_is_valid(curr_parent)) {
-      // Parent already dirty we move on
       if (muse_sparse_has(&ctx->dirties, curr_parent))
         break;
 
       muConstraints *p_cons = muse_sparse_get(&ctx->constraints, curr_parent);
-      if (p_cons != NULL && (p_cons->dimension.width.kind == MU_FIT ||
-                             p_cons->dimension.height.kind == MU_FIT)) {
-        // Parent is FIT so it cares about the children size
+      if (p_cons != NULL) {
         muse_node_set_dirty(ctx, curr_parent);
 
-        // Walking up
-        muHierarchy *p_hrc = muse_sparse_get(&ctx->hierarchies, curr_parent);
-        curr_parent = (p_hrc != NULL) ? p_hrc->parent : MUSE_UNDEFINED_MUID;
+        if (p_cons->dimension.width.kind == MU_FIT ||
+            p_cons->dimension.height.kind == MU_FIT) {
+          // FIT parent walks up
+          muHierarchy *p_hrc = muse_sparse_get(&ctx->hierarchies, curr_parent);
+          curr_parent = (p_hrc != NULL) ? p_hrc->parent : MUSE_UNDEFINED_MUID;
+        } else {
+          break;
+        }
       } else {
-        // Parent doesn't care dimension is FIXED, PERCENT or FILL
         break;
       }
     }
 
-    // B) Push: If my size changed, do my children care ?
+    // B) Push: If parent changed, notify immediate children
     muse_foreach_child(child, ctx, dirty_node) {
       if (muse_sparse_has(&ctx->dirties, child))
         continue;
 
-      muConstraints *c_cons = muse_sparse_get(&ctx->constraints, child);
-      if (c_cons != NULL && (c_cons->dimension.width.kind == MU_PERCENT ||
-                             c_cons->dimension.height.kind == MU_PERCENT ||
-                             c_cons->dimension.width.kind == MU_FILL ||
-                             c_cons->dimension.height.kind == MU_FILL)) {
-        // Child relies on a fraction of my available space
-        muse_node_set_dirty(ctx, child);
-
-        // NOTE: We don't recurse manually here. By inserting it into
-        // the array, the main `for` loop will eventually reach this
-        // child and process its sub-tree automaticly.
-      }
+      muse_node_set_dirty(ctx, child);
     }
   }
 
   muComputed viewport_bounds = {
       .x = 0.0f, .y = 0.0f, .w = viewport_width, .h = viewport_height};
 
-  // PASS 2: Available Space (Top-Down Flat Pre-Order Loop)
+  // PASS 2: Available Space (Top-Down Flat Pre-Order Loop with Subtree Skipping)
   for (size_t i = 0; i < ctx->layout_order.count; i++) {
     muNode node = ctx->layout_order.items[i];
+    if (!muse_sparse_has(&ctx->dirties, node))
+      continue;
+
     muHierarchy *hrc = muse_sparse_get(&ctx->hierarchies, node);
     muComputed parent_bounds = viewport_bounds;
 
@@ -2111,17 +2104,25 @@ MUSEDEF void muse_compute_layout(muContext *ctx, float viewport_width,
     muse__m_compute_top_down_node(ctx, node, parent_bounds);
   }
 
-  // PASS 3: Intrinsic Sizing (Bottom-Up Flat Reverse Loop)
+  // PASS 3: Intrinsic Sizing (Bottom-Up Flat Reverse Loop with Subtree Skipping)
   for (size_t i = ctx->layout_order.count; i-- > 0;) {
-    muse__m_compute_bottom_up_node(ctx, ctx->layout_order.items[i]);
+    muNode node = ctx->layout_order.items[i];
+    if (!muse_sparse_has(&ctx->dirties, node))
+      continue;
+
+    muse__m_compute_bottom_up_node(ctx, node);
   }
 
-  // PASS 4: Flex Distribution (Top-Down Flat Pre-Order Loop)
+  // PASS 4: Flex Distribution (Top-Down Flat Pre-Order Loop with Subtree Skipping)
   for (size_t i = 0; i < ctx->layout_order.count; i++) {
-    muse__m_compute_flex_distribution_node(ctx, ctx->layout_order.items[i]);
+    muNode node = ctx->layout_order.items[i];
+    if (!muse_sparse_has(&ctx->dirties, node))
+      continue;
+
+    muse__m_compute_flex_distribution_node(ctx, node);
   }
 
-  // PASS 5: Positional Alignment (Top-Down Flat Pre-Order Loop)
+  // PASS 5: Positional Alignment (Top-Down Flat Pre-Order Loop with Subtree Skipping)
   if (ctx->rooted && muse_muid_is_valid(ctx->root)) {
     muComputed *r_comp = muse_sparse_get(&ctx->computed, ctx->root);
     if (r_comp) {
@@ -2130,12 +2131,20 @@ MUSEDEF void muse_compute_layout(muContext *ctx, float viewport_width,
     }
   }
   for (size_t i = 0; i < ctx->layout_order.count; i++) {
-    muse__m_compute_positional_alignment_node(ctx, ctx->layout_order.items[i]);
+    muNode node = ctx->layout_order.items[i];
+    if (!muse_sparse_has(&ctx->dirties, node))
+      continue;
+
+    muse__m_compute_positional_alignment_node(ctx, node);
   }
 
-  // PASS 5.5: Content Bounds Calculation (Bottom-Up Flat Reverse Loop)
+  // PASS 5.5: Content Bounds Calculation (Bottom-Up Flat Reverse Loop with Subtree Skipping)
   for (size_t i = ctx->layout_order.count; i-- > 0;) {
-    muse__m_compute_content_bounds_node(ctx, ctx->layout_order.items[i]);
+    muNode node = ctx->layout_order.items[i];
+    if (!muse_sparse_has(&ctx->dirties, node))
+      continue;
+
+    muse__m_compute_content_bounds_node(ctx, node);
   }
 
   // PASS 6: Clear Dirties
