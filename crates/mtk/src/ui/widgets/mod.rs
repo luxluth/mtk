@@ -66,12 +66,15 @@ mod switch;
 mod textarea;
 mod tooltip;
 
+use crate::debugger::SourceLocation;
+
 /// A simple widget that displays a string of text.
 ///
 /// The `Text` widget takes a string-like value and creates a node with that text.
 /// If the text changes during a rebuild, the underlying node's text is automatically updated.
 pub struct Text<Msg> {
     pub(crate) label: String,
+    pub(crate) source_loc: Option<SourceLocation>,
     _marker: PhantomData<Msg>,
 }
 
@@ -82,9 +85,11 @@ pub struct Text<Msg> {
 /// text("Hello, World!")
 /// text(format!("Counter: {}", state.count))
 /// ```
+#[track_caller]
 pub fn text<S: ToString, Msg>(label: S) -> Text<Msg> {
     Text {
         label: label.to_string(),
+        source_loc: Some(SourceLocation::here("Text")),
         _marker: PhantomData,
     }
 }
@@ -95,6 +100,9 @@ impl<State, Msg> View<State> for Text<Msg> {
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let node = ctx.create_node();
+        if let Some(loc) = self.source_loc {
+            ctx.set_node_source(node, loc);
+        }
         node.set_text(ctx, &self.label);
 
         node
@@ -137,13 +145,16 @@ impl<State, Msg> View<State> for Text<Msg> {
 pub struct Container<Children> {
     pub(crate) children: Children,
     pub(crate) direction: Option<FlexDirection>,
+    pub(crate) source_loc: Option<SourceLocation>,
 }
 
 /// Creates a new `Container` widget with the given children and no default flex direction.
+#[track_caller]
 pub fn container<Children>(children: Children) -> Container<Children> {
     Container {
         children,
         direction: None,
+        source_loc: Some(SourceLocation::here("Container")),
     }
 }
 
@@ -158,10 +169,12 @@ pub fn container<Children>(children: Children) -> Container<Children> {
 ///     text("Bottom"),
 /// ))
 /// ```
+#[track_caller]
 pub fn column<Children>(children: Children) -> Container<Children> {
     Container {
         children,
         direction: Some(FlexDirection::Column),
+        source_loc: Some(SourceLocation::here("Column")),
     }
 }
 
@@ -176,10 +189,12 @@ pub fn column<Children>(children: Children) -> Container<Children> {
 ///     text("Right"),
 /// ))
 /// ```
+#[track_caller]
 pub fn row<Children>(children: Children) -> Container<Children> {
     Container {
         children,
         direction: Some(FlexDirection::Row),
+        source_loc: Some(SourceLocation::here("Row")),
     }
 }
 
@@ -193,6 +208,9 @@ where
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let parent = ctx.create_node();
+        if let Some(loc) = self.source_loc {
+            ctx.set_node_source(parent, loc);
+        }
 
         if let Some(direction) = self.direction {
             parent.update_constraints(ctx, |c| {

@@ -2,6 +2,7 @@
 
 pub mod animation;
 pub mod colors;
+pub mod debugger;
 pub mod effects;
 pub mod layer;
 pub(crate) mod node;
@@ -17,6 +18,7 @@ use ::winit::window::Window;
 pub use mtk_macro::Lens;
 
 pub use crate::colors::Color;
+use crate::debugger::{LayoutSnapshot, NodeDebugInfo, SourceLocation};
 use crate::effects::Effects;
 pub use crate::layer::*;
 pub use crate::node::Node;
@@ -86,6 +88,8 @@ pub struct Context {
     pub(crate) clipboard: Arc<Mutex<Option<arboard::Clipboard>>>,
     pub(crate) canvases: RefCell<HashMap<Node, crate::ui::widgets::CanvasData>>,
     pub(crate) dt: f32,
+    pub(crate) node_sources: HashMap<Node, SourceLocation>,
+    pub(crate) highlight_node: Option<Node>,
 
     // Core-level Super Layers and User Intermediate Layers
     pub base_layer: InternalLayer,
@@ -122,6 +126,8 @@ impl Context {
             clipboard,
             canvases: RefCell::new(HashMap::new()),
             dt: 0.016,
+            node_sources: HashMap::new(),
+            highlight_node: None,
 
             base_layer: InternalLayer::new(true),
             intermediate_layers: Vec::new(),
@@ -474,6 +480,124 @@ impl Context {
 
         let slice = unsafe { std::slice::from_raw_parts(list.items, list.count) };
         slice.iter().map(|sys_node| Node(*sys_node)).collect()
+    }
+
+    /// Records the Rust source code location for a layout node.
+    pub fn set_node_source(&mut self, node: Node, loc: SourceLocation) {
+        self.node_sources.insert(node, loc);
+    }
+
+    /// Retrieves the source code definition location for a layout node, if recorded.
+    pub fn get_node_source(&self, node: Node) -> Option<SourceLocation> {
+        self.node_sources.get(&node).copied()
+    }
+
+    /// Returns the currently attached root node of the layout tree, if any.
+    pub fn root_node(&self) -> Option<Node> {
+        let r = unsafe { (*self.ctx).root };
+        if unsafe { sys::muse_muid_is_valid(r) } {
+            Some(Node(r))
+        } else {
+            self.base_layer.state.root_node
+        }
+    }
+
+    /// Counts total active layout nodes in the layout engine.
+    pub fn count_nodes(&self) -> usize {
+        let mut count = 0;
+        if let Some(root) = self.root_node() {
+            count = 1 + self.count_children_recursive(root);
+        }
+        count
+    }
+
+    fn count_children_recursive(&self, node: Node) -> usize {
+        let children = node.children(self);
+        let mut count = children.len();
+        for child in children {
+            count += self.count_children_recursive(child);
+        }
+        count
+    }
+
+    /// Builds a hierarchical debug snapshot of the entire layout tree for inspector frontends.
+    pub fn build_debug_snapshot(
+        &self,
+        viewport_w: f32,
+        viewport_h: f32,
+        hovered_node: Option<Node>,
+    ) -> LayoutSnapshot {
+        let root = self.root_node().and_then(|r| self.build_node_debug_info(r));
+        let total_nodes = self.count_nodes();
+        LayoutSnapshot {
+            root,
+            total_nodes,
+            viewport_w,
+            viewport_h,
+            hovered_node: hovered_node.map(|n| n.id()),
+        }
+    }
+
+    fn build_node_debug_info(&self, node: Node) -> Option<NodeDebugInfo> {
+        let computed = node.get_computed(self)?;
+        let constraints = node.get_constraints(self);
+        let source = self.get_node_source(node);
+        let text = node.get_text(self).map(|s| s.to_string());
+
+        let name = if let Some(src) = source {
+            src.type_name.to_string()
+        } else if text.is_some() {
+            "Text".to_string()
+        } else {
+            format!("Node(#{})", node.id())
+        };
+
+        let metrics = if let Some(cons) = constraints {
+            crate::debugger::NodeBoxMetrics {
+                x: computed.x,
+                y: computed.y,
+                w: computed.w,
+                h: computed.h,
+                content_w: computed.content_w,
+                content_h: computed.content_h,
+                pad_top: cons.padding.top,
+                pad_bottom: cons.padding.bottom,
+                pad_left: cons.padding.left,
+                pad_right: cons.padding.right,
+                border_top: cons.border.top,
+                border_bottom: cons.border.bottom,
+                border_left: cons.border.left,
+                border_right: cons.border.right,
+                flex_direction: format!("{:?}", cons.flex_direction),
+                flex_grow: cons.flex_grow,
+                flex_shrink: cons.flex_shrink,
+            }
+        } else {
+            crate::debugger::NodeBoxMetrics {
+                x: computed.x,
+                y: computed.y,
+                w: computed.w,
+                h: computed.h,
+                content_w: computed.content_w,
+                content_h: computed.content_h,
+                ..Default::default()
+            }
+        };
+
+        let children = node
+            .children(self)
+            .into_iter()
+            .filter_map(|c| self.build_node_debug_info(c))
+            .collect();
+
+        Some(NodeDebugInfo {
+            id: node.id(),
+            name,
+            source,
+            metrics,
+            text,
+            children,
+        })
     }
 }
 

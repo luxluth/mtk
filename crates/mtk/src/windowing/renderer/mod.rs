@@ -406,6 +406,15 @@ impl<'w> Renderer<'w> {
                 &self.pipelines.dummy_solid_bind_group,
                 context,
             );
+
+            render_debug_highlight(
+                &mut surface_pass,
+                self.size.width,
+                self.size.height,
+                &self.pipelines,
+                &self.pipelines.dummy_solid_bind_group,
+                context,
+            );
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -1026,6 +1035,51 @@ fn render_focus_ring<'a>(
             shadow_color: [0.0; 4],
             border_widths: [ring_thickness; 4],
             border_radius: effects.border.radius.tl + ring_thickness,
+            alpha: 1.0,
+            shadow_spread: 0.0,
+            shadow_power: 0.0,
+            vibrancy: 0.0,
+            vibrancy_darkness: 0.0,
+            passes: 0.0,
+            _pad1: 0.0,
+            _pad2: 0.0,
+            _pad3: 0.0,
+        };
+
+        render_pass.set_pipeline(&pipelines.solid);
+        render_pass.set_bind_group(0, solid_bind_group, &[]);
+        render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
+        render_pass.draw(0..6, 0..1);
+    }
+}
+
+fn render_debug_highlight<'a>(
+    render_pass: &mut wgpu::RenderPass<'a>,
+    screen_width: u32,
+    screen_height: u32,
+    pipelines: &'a Pipelines,
+    solid_bind_group: &'a wgpu::BindGroup,
+    context: &crate::Context,
+) {
+    let Some(highlighted) = context.highlight_node else {
+        return;
+    };
+
+    if let Some(computed) = highlighted.get_computed(context) {
+        let effects = highlighted.get_effects(context).unwrap_or_default();
+
+        render_pass.set_scissor_rect(0, 0, screen_width.max(1), screen_height.max(1));
+
+        let outline_thickness = 2.0;
+        let immediate_data = ImmediateData {
+            color: [0.06, 0.72, 0.95, 0.15], // Translucent cyan tint
+            pos: [computed.x, computed.y],
+            screen_size: [screen_width as f32, screen_height as f32],
+            quad_size: [computed.w, computed.h],
+            border_color: [0.06, 0.72, 0.95, 0.9], // Vibrant Cyan debug border
+            shadow_color: [0.0; 4],
+            border_widths: [outline_thickness; 4],
+            border_radius: effects.border.radius.tl,
             alpha: 1.0,
             shadow_spread: 0.0,
             shadow_power: 0.0,

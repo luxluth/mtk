@@ -36,6 +36,10 @@ where
     scroll_targets_x: HashMap<Node, f32>,
     drag_scroll_node: Option<(Node, f32, f32)>,
     drag_scroll_x_node: Option<(Node, f32, f32)>,
+
+    debug_tx: Option<std::sync::mpsc::Sender<crate::debugger::DebugEvent>>,
+    debug_rx_cmd: Option<std::sync::mpsc::Receiver<crate::debugger::DebugCommand>>,
+    hovered_node: Option<Node>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -202,12 +206,29 @@ where
             scroll_targets_x: HashMap::new(),
             drag_scroll_node: None,
             drag_scroll_x_node: None,
+            debug_tx: None,
+            debug_rx_cmd: None,
+            hovered_node: None,
         }
+    }
+
+    /// Spawns the interactive Ratatui TUI Layout Debugger in the terminal.
+    pub fn enable_terminal_debugger(&mut self) -> &mut Self {
+        let (tx_event, rx_cmd) = crate::debugger::TerminalDebugger::spawn();
+        self.debug_tx = Some(tx_event);
+        self.debug_rx_cmd = Some(rx_cmd);
+        self
     }
 
     pub fn present(&mut self) {
         let event_loop = EventLoop::new().unwrap();
-        event_loop.set_control_flow(ControlFlow::Wait);
+        if self.debug_tx.is_some() {
+            event_loop.set_control_flow(ControlFlow::wait_duration(
+                std::time::Duration::from_millis(16),
+            ));
+        } else {
+            event_loop.set_control_flow(ControlFlow::Wait);
+        }
         event_loop.run_app(self).unwrap();
     }
 
@@ -585,6 +606,14 @@ where
         window.request_redraw();
     }
 
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        if self.debug_tx.is_some() {
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+        }
+    }
+
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         let window = self.window.as_ref().unwrap().clone();
         if id != window.id() {
@@ -593,7 +622,11 @@ where
 
         match event {
             WindowEvent::CloseRequested => {
-                // NOTE: Maybe accept a before_close_hook
+                // TODO: add a before_close hook that may
+                // decide if we close the window or not
+                if let Some(tx) = &self.debug_tx {
+                    let _ = tx.send(crate::debugger::DebugEvent::Closed);
+                }
                 event_loop.exit();
             }
             WindowEvent::ModifiersChanged(modifiers) => {
@@ -636,6 +669,17 @@ where
                 let y = position.y as f32;
                 self.cursor_pos = (x, y);
                 let hit_nodes = self.context.pick(x, y);
+
+                let hit_top = hit_nodes.first().copied();
+                if self.hovered_node != hit_top {
+                    self.hovered_node = hit_top;
+                    if let Some(tx) = &self.debug_tx {
+                        let _ = tx.send(crate::debugger::DebugEvent::HoveredNode(
+                            hit_top.map(|n| n.id()),
+                        ));
+                    }
+                }
+
                 let mtk_event = Event::CursorMoved { x, y, hit_nodes };
                 self.dispatch_and_rebuild(mtk_event);
             }
@@ -666,6 +710,37 @@ where
                 self.dispatch_and_rebuild(mtk_event);
             }
             WindowEvent::RedrawRequested => {
+                // Process incoming commands from TUI debugger
+                if let Some(rx_cmd) = &self.debug_rx_cmd {
+                    while let Ok(cmd) = rx_cmd.try_recv() {
+                        match cmd {
+                            crate::debugger::DebugCommand::HighlightNode(maybe_id) => {
+                                self.context.highlight_node = maybe_id.map(|id| {
+                                    Node(crate::sys::muNode {
+                                        numeral: id as usize,
+                                        generation: 0,
+                                    })
+                                });
+                            }
+                            crate::debugger::DebugCommand::RequestSnapshot => {
+                                let size = window.inner_size();
+                                self.context
+                                    .compute_layout(size.width as f32, size.height as f32);
+                                if let Some(tx) = &self.debug_tx {
+                                    let snapshot = self.context.build_debug_snapshot(
+                                        size.width as f32,
+                                        size.height as f32,
+                                        self.hovered_node,
+                                    );
+                                    let _ = tx.send(crate::debugger::DebugEvent::LayoutUpdated(
+                                        Box::new(snapshot),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+
                 let now = Instant::now();
                 let dt = now.duration_since(self.last_frame_time).as_secs_f32();
                 self.last_frame_time = now;
@@ -675,6 +750,17 @@ where
                 let size = window.inner_size();
                 self.context
                     .compute_layout(size.width as f32, size.height as f32);
+
+                if let Some(tx) = &self.debug_tx {
+                    let snapshot = self.context.build_debug_snapshot(
+                        size.width as f32,
+                        size.height as f32,
+                        self.hovered_node,
+                    );
+                    let _ = tx.send(crate::debugger::DebugEvent::LayoutUpdated(Box::new(
+                        snapshot,
+                    )));
+                }
 
                 let viewport = crate::style::Rect {
                     x: 0.0,

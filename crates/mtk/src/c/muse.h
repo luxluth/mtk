@@ -938,7 +938,7 @@ static void muse__m_apply_aspect_ratio(muComputed *comp, muConstraints *cons) {
       comp->h = comp->w / cons->dimension.aspect_ratio;
     } else if (cons->dimension.height.kind != MU_FIT &&
                cons->dimension.height.kind != MU_FILL) {
-  comp->w = comp->h * cons->dimension.aspect_ratio;
+      comp->w = comp->h * cons->dimension.aspect_ratio;
     }
   }
 }
@@ -1229,9 +1229,8 @@ static void muse__m_compute_bottom_up_node(muContext *ctx, muNode node) {
 }
 
 static inline float muse__m_get_flex_basis(muConstraints *c_cons,
-                                            muComputed *c_comp,
-                                            bool is_row_dir,
-                                            float inner_main) {
+                                           muComputed *c_comp, bool is_row_dir,
+                                           float inner_main) {
   if (c_cons->flex_basis.kind == MU_PERCENT) {
     return inner_main * c_cons->flex_basis.percent;
   } else if (c_cons->flex_basis.kind == MU_FIXED) {
@@ -1245,9 +1244,8 @@ static inline float muse__m_get_flex_basis(muConstraints *c_cons,
   } else if (!is_row_dir && c_cons->dimension.height.kind == MU_FIXED) {
     return (float)c_cons->dimension.height.px;
   } else {
-    bool is_main_fill = is_row_dir
-                            ? (c_cons->dimension.width.kind == MU_FILL)
-                            : (c_cons->dimension.height.kind == MU_FILL);
+    bool is_main_fill = is_row_dir ? (c_cons->dimension.width.kind == MU_FILL)
+                                   : (c_cons->dimension.height.kind == MU_FILL);
     if (c_cons->flex_grow > 0.0f || is_main_fill) {
       return 0.0f;
     }
@@ -1279,7 +1277,8 @@ static void muse__m_compute_flex_distribution_node(muContext *ctx,
     bool is_row_dir = muse__is_row(cons->flex_direction);
     float available_main = is_row_dir ? inner_w : inner_h;
 
-    // A) Pre-resolve cross-axis dimensions (Stretch, Fill, Percent) and main-axis percentages
+    // A) Pre-resolve cross-axis dimensions (Stretch, Fill, Percent) and
+    // main-axis percentages
     muse_foreach_child(child, ctx, node) {
       muConstraints *c_cons = muse_sparse_get(&ctx->constraints, child);
       muComputed *c_comp = muse_sparse_get(&ctx->computed, child);
@@ -1351,7 +1350,8 @@ static void muse__m_compute_flex_distribution_node(muContext *ctx,
         muse__m_apply_aspect_ratio(c_comp, c_cons);
       }
 
-      // Re-measure wrapped text with resolved available width including padding and border
+      // Re-measure wrapped text with resolved available width including padding
+      // and border
       if (muse_sparse_has(&ctx->texts, child) &&
           ctx->text_sizing_func != NULL) {
         float c_off_w = c_cons->padding.left + c_cons->border.left +
@@ -1420,8 +1420,8 @@ static void muse__m_compute_flex_distribution_node(muContext *ctx,
         muConstraints *c_cons = muse_sparse_get(&ctx->constraints, child);
         muComputed *c_comp = muse_sparse_get(&ctx->computed, child);
         if (c_cons == NULL || c_comp == NULL ||
-          c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE)
-        continue;
+            c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE)
+          continue;
 
         bool is_main_fill = is_row_dir
                                 ? (c_cons->dimension.width.kind == MU_FILL)
@@ -1429,8 +1429,8 @@ static void muse__m_compute_flex_distribution_node(muContext *ctx,
         float grow = (c_cons->flex_grow > 0.0f) ? c_cons->flex_grow
                                                 : (is_main_fill ? 1.0f : 0.0f);
         if (grow > 0.0f) {
-          float basis =
-              muse__m_get_flex_basis(c_cons, c_comp, is_row_dir, available_main);
+          float basis = muse__m_get_flex_basis(c_cons, c_comp, is_row_dir,
+                                               available_main);
           float allocated = basis + (grow / total_flex_grow) * free_space;
           if (is_row_dir) {
             c_comp->w = allocated;
@@ -1470,8 +1470,8 @@ static void muse__m_compute_flex_distribution_node(muContext *ctx,
               c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE)
             continue;
 
-          float basis =
-              muse__m_get_flex_basis(c_cons, c_comp, is_row_dir, available_main);
+          float basis = muse__m_get_flex_basis(c_cons, c_comp, is_row_dir,
+                                               available_main);
           if (c_cons->flex_shrink > 0.0f && basis > 0.0f) {
             float shrink_ratio =
                 (c_cons->flex_shrink * basis) / total_scaled_shrink;
@@ -2068,7 +2068,8 @@ MUSEDEF void muse_compute_layout(muContext *ctx, float viewport_width,
   muComputed viewport_bounds = {
       .x = 0.0f, .y = 0.0f, .w = viewport_width, .h = viewport_height};
 
-  // PASS 2: Available Space (Top-Down Flat Pre-Order Loop with Subtree Skipping)
+  // PASS 2: Available Space (Top-Down Flat Pre-Order Loop with Subtree
+  // Skipping)
   for (size_t i = 0; i < ctx->layout_order.count; i++) {
     muNode node = ctx->layout_order.items[i];
     if (!muse_sparse_has(&ctx->dirties, node))
@@ -2104,7 +2105,8 @@ MUSEDEF void muse_compute_layout(muContext *ctx, float viewport_width,
     muse__m_compute_top_down_node(ctx, node, parent_bounds);
   }
 
-  // PASS 3: Intrinsic Sizing (Bottom-Up Flat Reverse Loop with Subtree Skipping)
+  // PASS 3: Intrinsic Sizing (Bottom-Up Flat Reverse Loop with Subtree
+  // Skipping)
   for (size_t i = ctx->layout_order.count; i-- > 0;) {
     muNode node = ctx->layout_order.items[i];
     if (!muse_sparse_has(&ctx->dirties, node))
@@ -2113,7 +2115,8 @@ MUSEDEF void muse_compute_layout(muContext *ctx, float viewport_width,
     muse__m_compute_bottom_up_node(ctx, node);
   }
 
-  // PASS 4: Flex Distribution (Top-Down Flat Pre-Order Loop with Subtree Skipping)
+  // PASS 4: Flex Distribution (Top-Down Flat Pre-Order Loop with Subtree
+  // Skipping)
   for (size_t i = 0; i < ctx->layout_order.count; i++) {
     muNode node = ctx->layout_order.items[i];
     if (!muse_sparse_has(&ctx->dirties, node))
@@ -2122,7 +2125,8 @@ MUSEDEF void muse_compute_layout(muContext *ctx, float viewport_width,
     muse__m_compute_flex_distribution_node(ctx, node);
   }
 
-  // PASS 5: Positional Alignment (Top-Down Flat Pre-Order Loop with Subtree Skipping)
+  // PASS 5: Positional Alignment (Top-Down Flat Pre-Order Loop with Subtree
+  // Skipping)
   if (ctx->rooted && muse_muid_is_valid(ctx->root)) {
     muComputed *r_comp = muse_sparse_get(&ctx->computed, ctx->root);
     if (r_comp) {
@@ -2138,7 +2142,8 @@ MUSEDEF void muse_compute_layout(muContext *ctx, float viewport_width,
     muse__m_compute_positional_alignment_node(ctx, node);
   }
 
-  // PASS 5.5: Content Bounds Calculation (Bottom-Up Flat Reverse Loop with Subtree Skipping)
+  // PASS 5.5: Content Bounds Calculation (Bottom-Up Flat Reverse Loop with
+  // Subtree Skipping)
   for (size_t i = ctx->layout_order.count; i-- > 0;) {
     muNode node = ctx->layout_order.items[i];
     if (!muse_sparse_has(&ctx->dirties, node))

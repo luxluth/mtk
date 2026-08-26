@@ -884,6 +884,9 @@ fn main() {
 
     let mut window = Window::with(initial_state, update, app);
 
+    #[cfg(feature = "debugger")]
+    window.enable_terminal_debugger();
+
     window.present_with(
         WindowAttributes::default()
             .with_title("MTK - Comprehensive Native Widget Gallery")

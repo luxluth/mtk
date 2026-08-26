@@ -34,6 +34,11 @@ impl Hash for Node {
 }
 
 impl Node {
+    /// Returns the unique numeric identifier for this layout node.
+    pub fn id(&self) -> u64 {
+        self.0.numeral as u64
+    }
+
     pub fn get_invalid() -> Node {
         Node(unsafe { crate::sys::muse_muid_invalid() })
     }

@@ -2,6 +2,7 @@ use std::marker::PhantomData;
 use winit::keyboard::{Key, NamedKey};
 
 use crate::animation::Curve;
+use crate::debugger::SourceLocation;
 use crate::style::{Style, TextStyle, VerticalAlignment};
 use crate::text_property::{Alignment, FontWeight};
 use crate::ui::event::EventResult;
@@ -14,6 +15,7 @@ pub struct Button<Msg> {
     pub(crate) on_click: Option<Msg>,
     pub(crate) disabled: bool,
     pub(crate) custom_style: Option<Style>,
+    pub(crate) source_loc: Option<SourceLocation>,
     _marker: PhantomData<Msg>,
 }
 
@@ -23,12 +25,14 @@ pub struct Button<Msg> {
 /// ```rust,ignore
 /// button("Submit").on_click(AppMsg::SubmitForm)
 /// ```
+#[track_caller]
 pub fn button<S: ToString, Msg>(label: S) -> Button<Msg> {
     Button {
         label: label.to_string(),
         on_click: None,
         disabled: false,
         custom_style: None,
+        source_loc: Some(SourceLocation::here("Button")),
         _marker: PhantomData,
     }
 }
@@ -78,7 +82,7 @@ impl<Msg: Clone> Button<Msg> {
                 .set_text_style(TextStyle {
                     color: rgb!(255, 255, 255),
                     font_size: 14.0,
-                    font_weight: FontWeight::MEDIUM,
+                    font_weight: FontWeight::SEMI_BOLD,
                     ..Default::default()
                 }),
         );
@@ -98,6 +102,9 @@ impl<State, Msg: Clone> View<State> for Button<Msg> {
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let node = ctx.create_node();
+        if let Some(loc) = self.source_loc {
+            ctx.set_node_source(node, loc);
+        }
 
         let default_text_style = TextStyle {
             font_size: 14.0,
