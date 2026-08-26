@@ -435,6 +435,7 @@ typedef struct muContext {
   MUSE_DA(muId) available_ids;
   muRenderList render_list;
   muNodeList pick_list;
+  muNodeList layout_order;
 
   muTextSizingFunc *text_sizing_func;
   size_t next_entity_numeral;
@@ -443,6 +444,7 @@ typedef struct muContext {
 
   bool rooted; // Just to make it nicer to use
   bool render_list_dirty;
+  bool layout_order_dirty;
   void *userdata;
 } muContext;
 
@@ -530,6 +532,7 @@ MUSEDEF void muse_context_free(muContext *ctx) {
   muse_da_free(&ctx->available_ids);
   muse_da_free(&ctx->render_list);
   muse_da_free(&ctx->pick_list);
+  muse_da_free(&ctx->layout_order);
 
   muse_sparse_free(&ctx->hierarchies);
   muse_sparse_free(&ctx->constraints);
@@ -541,12 +544,14 @@ MUSEDEF void muse_context_free(muContext *ctx) {
 MUSEDEF void muse_root_attach(muContext *ctx, muNode node) {
   ctx->root = node;
   ctx->rooted = true;
+  ctx->layout_order_dirty = true;
   muse_node_set_dirty(ctx, node);
 }
 
 MUSEDEF void muse_root_drop(muContext *ctx) {
   ctx->root = MUSE_UNDEFINED_MUID;
   ctx->rooted = false;
+  ctx->layout_order_dirty = true;
 }
 
 MUSEDEF muNode muse_node_create(muContext *ctx) {
@@ -588,6 +593,7 @@ MUSEDEF void muse_node_destroy(muContext *ctx, muNode node) {
   muse_sparse_remove(&ctx->texts, node);
 
   muse_da_append(&ctx->available_ids, node);
+  ctx->layout_order_dirty = true;
 }
 
 MUSEDEF bool muse_node_remove(muContext *ctx, muNode node) {
@@ -625,6 +631,7 @@ MUSEDEF bool muse_node_remove(muContext *ctx, muNode node) {
   current_hrc->prev_sibling = MUSE_UNDEFINED_MUID;
   current_hrc->next_sibling = MUSE_UNDEFINED_MUID;
 
+  ctx->layout_order_dirty = true;
   muse_node_set_dirty(ctx, parent);
   return true;
 }
@@ -673,6 +680,7 @@ MUSEDEF bool muse_node_append(muContext *ctx, muNode parent, muNode child) {
     parent_hrc->last_child = child;
   }
 
+  ctx->layout_order_dirty = true;
   muse_node_set_dirty(ctx, parent);
 
   return true;
@@ -715,6 +723,7 @@ MUSEDEF bool muse_node_prepend(muContext *ctx, muNode parent, muNode child) {
     parent_hrc->first_child = child;
   }
 
+  ctx->layout_order_dirty = true;
   muse_node_set_dirty(ctx, parent);
 
   return true;
@@ -767,6 +776,7 @@ MUSEDEF bool muse_node_put_after(muContext *ctx, muNode sibling, muNode node) {
   sibling_hrc->next_sibling = node;
   node_hrc->prev_sibling = sibling;
 
+  ctx->layout_order_dirty = true;
   muse_node_set_dirty(ctx, parent);
 
   return true;
@@ -819,6 +829,7 @@ MUSEDEF bool muse_node_put_before(muContext *ctx, muNode sibling, muNode node) {
   node_hrc->next_sibling = sibling;
   sibling_hrc->prev_sibling = node;
 
+  ctx->layout_order_dirty = true;
   muse_node_set_dirty(ctx, parent);
 
   return true;
@@ -927,14 +938,32 @@ static void muse__m_apply_aspect_ratio(muComputed *comp, muConstraints *cons) {
       comp->h = comp->w / cons->dimension.aspect_ratio;
     } else if (cons->dimension.height.kind != MU_FIT &&
                cons->dimension.height.kind != MU_FILL) {
-      comp->w = comp->h * cons->dimension.aspect_ratio;
+  comp->w = comp->h * cons->dimension.aspect_ratio;
     }
   }
 }
 
-static void muse__m_compute_top_down(muContext *ctx, muNode node,
-                                     muComputed parent_bounds) {
+static void muse__m_collect_layout_order(muContext *ctx, muNode node) {
+  if (!muse_muid_is_valid(node))
+    return;
+  muse_da_append(&ctx->layout_order, node);
+  muse_foreach_child(child, ctx, node) {
+    muse__m_collect_layout_order(ctx, child);
+  }
+}
 
+static void muse__m_ensure_layout_order(muContext *ctx) {
+  if (!ctx->layout_order_dirty && ctx->layout_order.count > 0)
+    return;
+  ctx->layout_order.count = 0;
+  if (ctx->rooted && muse_muid_is_valid(ctx->root)) {
+    muse__m_collect_layout_order(ctx, ctx->root);
+  }
+  ctx->layout_order_dirty = false;
+}
+
+static void muse__m_compute_top_down_node(muContext *ctx, muNode node,
+                                          muComputed parent_bounds) {
   if (!muse_muid_is_valid(node))
     return;
 
@@ -1016,31 +1045,6 @@ static void muse__m_compute_top_down(muContext *ctx, muNode node,
       }
     }
   }
-
-  // BORDER-BOX: Shrink the available bounds for the children
-  muComputed my_bounds = *muse_sparse_get(&ctx->computed, node);
-
-  float off_l =
-      (cons != NULL) ? (cons->padding.left + cons->border.left) : 0.0f;
-  float off_t = (cons != NULL) ? (cons->padding.top + cons->border.top) : 0.0f;
-  float off_r =
-      (cons != NULL) ? (cons->padding.right + cons->border.right) : 0.0f;
-  float off_b =
-      (cons != NULL) ? (cons->padding.bottom + cons->border.bottom) : 0.0f;
-
-  muComputed content_bounds = {.x = my_bounds.x + off_l,
-                               .y = my_bounds.y + off_t,
-                               .w = my_bounds.w - (off_l + off_r),
-                               .h = my_bounds.h - (off_t + off_b)};
-
-  if (content_bounds.w < 0.0f)
-    content_bounds.w = 0.0f;
-  if (content_bounds.h < 0.0f)
-    content_bounds.h = 0.0f;
-
-  muse_foreach_child(child, ctx, node) {
-    muse__m_compute_top_down(ctx, child, content_bounds);
-  }
 }
 
 static inline muTextComputedOutput muse__m_get_text_size(muContext *ctx,
@@ -1075,18 +1079,14 @@ static inline bool muse__is_reverse(muFlexDirection dir) {
   return dir == MUSE_FLEX_ROW_REVERSE || dir == MUSE_FLEX_COLUMN_REVERSE;
 }
 
-static void muse__m_compute_bottom_up(muContext *ctx, muNode node) {
+static void muse__m_compute_bottom_up_node(muContext *ctx, muNode node) {
   if (!muse_muid_is_valid(node))
     return;
-
-  muse_foreach_child(child, ctx, node) {
-    muse__m_compute_bottom_up(ctx, child);
-  }
 
   muConstraints *cons = muse_sparse_get(&ctx->constraints, node);
   muComputed *comp = muse_sparse_get(&ctx->computed, node);
 
-  if (cons != NULL) {
+  if (cons != NULL && comp != NULL) {
     bool fit_w = cons->dimension.width.kind == MU_FIT;
     bool fit_h = cons->dimension.height.kind == MU_FIT;
 
@@ -1255,7 +1255,8 @@ static inline float muse__m_get_flex_basis(muConstraints *c_cons,
   }
 }
 
-static void muse__m_compute_flex_distribution(muContext *ctx, muNode node) {
+static void muse__m_compute_flex_distribution_node(muContext *ctx,
+                                                   muNode node) {
   if (!muse_muid_is_valid(node))
     return;
 
@@ -1553,14 +1554,10 @@ static void muse__m_compute_flex_distribution(muContext *ctx, muNode node) {
       muse__m_clamp_min_max(comp, cons);
     }
   }
-
-  muse_foreach_child(child, ctx, node) {
-    muse__m_compute_flex_distribution(ctx, child);
-  }
 }
 
-static void muse__m_compute_positional_alignment(muContext *ctx, muNode node,
-                                                 float start_x, float start_y) {
+static void muse__m_compute_positional_alignment_node(muContext *ctx,
+                                                      muNode node) {
   if (!muse_muid_is_valid(node))
     return;
 
@@ -1568,42 +1565,40 @@ static void muse__m_compute_positional_alignment(muContext *ctx, muNode node,
   muComputed *comp = muse_sparse_get(&ctx->computed, node);
 
   if (cons != NULL && comp != NULL) {
-    comp->x = start_x;
-    comp->y = start_y;
-
     float off_l = cons->padding.left + cons->border.left;
     float off_t = cons->padding.top + cons->border.top;
     float off_r = cons->padding.right + cons->border.right;
     float off_b = cons->padding.bottom + cons->border.bottom;
-    float off_w = off_l + off_r;
-    float off_h = off_t + off_b;
 
-    float inner_w = comp->w - off_w;
-    float inner_h = comp->h - off_h;
+    float inner_w = comp->w - (off_l + off_r);
+    float inner_h = comp->h - (off_t + off_b);
+    if (inner_w < 0.0f)
+      inner_w = 0.0f;
+    if (inner_h < 0.0f)
+      inner_h = 0.0f;
 
     bool is_row_dir = muse__is_row(cons->flex_direction);
     bool is_rev = muse__is_reverse(cons->flex_direction);
-    bool is_wrapping = (cons->flex_wrap == MUSE_FLEX_WRAP ||
-                        cons->flex_wrap == MUSE_FLEX_WRAP_REVERSE);
 
     float inner_main = is_row_dir ? inner_w : inner_h;
     float inner_cross = is_row_dir ? inner_h : inner_w;
 
     float base_x = comp->x - cons->scroll.x;
     float base_y = comp->y - cons->scroll.y;
-    float cross_start =
-        (is_row_dir ? base_y : base_x) + (is_row_dir ? off_t : off_l);
+    float cross_start = is_row_dir ? (base_y + off_t) : (base_x + off_l);
 
-    if (is_wrapping) {
+    // Multi-line flex wrap layout
+    if (cons->flex_wrap == MUSE_FLEX_WRAP ||
+        cons->flex_wrap == MUSE_FLEX_WRAP_REVERSE) {
       muNode child_nodes[256];
-      int total_inflow = 0;
+      int child_cnt = 0;
       muse_foreach_child(c, ctx, node) {
         muConstraints *c_cons = muse_sparse_get(&ctx->constraints, c);
         if (c_cons &&
             c_cons->positioning.strategy == MUSE_POSITION_STRATEGY_ABSOLUTE) {
-          muComputed *c_comp = muse_sparse_get(&ctx->computed, c);
           float abs_x = base_x;
           float abs_y = base_y;
+          muComputed *c_comp = muse_sparse_get(&ctx->computed, c);
           if (c_comp) {
             if (!isnan(c_cons->positioning.absolute.left)) {
               abs_x = base_x + c_cons->positioning.absolute.left;
@@ -1617,23 +1612,26 @@ static void muse__m_compute_positional_alignment(muContext *ctx, muNode node,
               abs_y = base_y + comp->h - c_comp->h -
                       c_cons->positioning.absolute.bottom;
             }
+            c_comp->x = abs_x;
+            c_comp->y = abs_y;
           }
-          muse__m_compute_positional_alignment(ctx, c, abs_x, abs_y);
-        } else if (total_inflow < 256) {
-          child_nodes[total_inflow++] = c;
+          continue;
+        }
+        if (child_cnt < 256) {
+          child_nodes[child_cnt++] = c;
         }
       }
 
       int line_start = 0;
       float cur_cross_start = cross_start;
 
-      while (line_start < total_inflow) {
-        int line_end = line_start;
+      while (line_start < child_cnt) {
         float line_main_used = 0.0f;
         float line_cross_max = 0.0f;
         int line_child_count = 0;
+        int line_end = line_start;
 
-        while (line_end < total_inflow) {
+        while (line_end < child_cnt) {
           muNode c = child_nodes[line_end];
           muComputed *c_comp = muse_sparse_get(&ctx->computed, c);
           if (!c_comp) {
@@ -1748,8 +1746,8 @@ static void muse__m_compute_positional_alignment(muContext *ctx, muNode node,
 
           if (is_row_dir) {
             float child_x = is_rev ? (cursor_main - c_comp->w) : cursor_main;
-            muse__m_compute_positional_alignment(
-                ctx, c, child_x, cur_cross_start + cross_offset);
+            c_comp->x = child_x;
+            c_comp->y = cur_cross_start + cross_offset;
             if (is_rev) {
               cursor_main -= c_comp->w + space_between;
             } else {
@@ -1757,8 +1755,8 @@ static void muse__m_compute_positional_alignment(muContext *ctx, muNode node,
             }
           } else {
             float child_y = is_rev ? (cursor_main - c_comp->h) : cursor_main;
-            muse__m_compute_positional_alignment(
-                ctx, c, cur_cross_start + cross_offset, child_y);
+            c_comp->x = cur_cross_start + cross_offset;
+            c_comp->y = child_y;
             if (is_rev) {
               cursor_main -= c_comp->h + space_between;
             } else {
@@ -1840,7 +1838,6 @@ static void muse__m_compute_positional_alignment(muContext *ctx, muNode node,
       }
     }
 
-    // macro to layout a single child
 #define MUSE_LAYOUT_CHILD(child_node)                                          \
   do {                                                                         \
     muConstraints *c_cons = muse_sparse_get(&ctx->constraints, (child_node));  \
@@ -1861,7 +1858,8 @@ static void muse__m_compute_positional_alignment(muContext *ctx, muNode node,
           abs_y = base_y + comp->h - c_comp->h -                               \
                   c_cons->positioning.absolute.bottom;                         \
         }                                                                      \
-        muse__m_compute_positional_alignment(ctx, (child_node), abs_x, abs_y); \
+        c_comp->x = abs_x;                                                     \
+        c_comp->y = abs_y;                                                     \
       } else {                                                                 \
         float child_cross = is_row_dir ? c_comp->h : c_comp->w;                \
         float cross_offset = 0.0f;                                             \
@@ -1904,8 +1902,8 @@ static void muse__m_compute_positional_alignment(muContext *ctx, muNode node,
         }                                                                      \
         if (is_row_dir) {                                                      \
           float child_x = is_rev ? (cursor_main - c_comp->w) : cursor_main;    \
-          muse__m_compute_positional_alignment(ctx, (child_node), child_x,     \
-                                               cross_start + cross_offset);    \
+          c_comp->x = child_x;                                                 \
+          c_comp->y = cross_start + cross_offset;                              \
           if (is_rev) {                                                        \
             cursor_main -= c_comp->w + space_between;                          \
           } else {                                                             \
@@ -1913,8 +1911,8 @@ static void muse__m_compute_positional_alignment(muContext *ctx, muNode node,
           }                                                                    \
         } else {                                                               \
           float child_y = is_rev ? (cursor_main - c_comp->h) : cursor_main;    \
-          muse__m_compute_positional_alignment(                                \
-              ctx, (child_node), cross_start + cross_offset, child_y);         \
+          c_comp->x = cross_start + cross_offset;                              \
+          c_comp->y = child_y;                                                 \
           if (is_rev) {                                                        \
             cursor_main -= c_comp->h + space_between;                          \
           } else {                                                             \
@@ -1935,7 +1933,7 @@ static void muse__m_compute_positional_alignment(muContext *ctx, muNode node,
   }
 }
 
-static void muse__m_compute_content_bounds(muContext *ctx, muNode node) {
+static void muse__m_compute_content_bounds_node(muContext *ctx, muNode node) {
   if (!muse_muid_is_valid(node))
     return;
 
@@ -1965,7 +1963,6 @@ static void muse__m_compute_content_bounds(muContext *ctx, muNode node) {
     max_h = text_size.computed_height + off_h;
   } else {
     muse_foreach_child(child, ctx, node) {
-      muse__m_compute_content_bounds(ctx, child);
       muComputed *c_comp = muse_sparse_get(&ctx->computed, child);
       if (c_comp) {
         float child_bottom = (c_comp->y - comp->y) + c_comp->h + scroll_y;
@@ -2019,6 +2016,11 @@ MUSEDEF void muse_compute_layout(muContext *ctx, float viewport_width,
   if (!ctx->rooted)
     return;
   if (ctx->dirties.dense.count == 0)
+    return;
+
+  // Ensure topological layout order array is up-to-date
+  muse__m_ensure_layout_order(ctx);
+  if (ctx->layout_order.count == 0)
     return;
 
   // PASS 1: Dirty propagation
@@ -2076,20 +2078,65 @@ MUSEDEF void muse_compute_layout(muContext *ctx, float viewport_width,
   muComputed viewport_bounds = {
       .x = 0.0f, .y = 0.0f, .w = viewport_width, .h = viewport_height};
 
-  // PASS 2: Available Space
-  muse__m_compute_top_down(ctx, ctx->root, viewport_bounds);
+  // PASS 2: Available Space (Top-Down Flat Pre-Order Loop)
+  for (size_t i = 0; i < ctx->layout_order.count; i++) {
+    muNode node = ctx->layout_order.items[i];
+    muHierarchy *hrc = muse_sparse_get(&ctx->hierarchies, node);
+    muComputed parent_bounds = viewport_bounds;
 
-  // PASS 3: Intrinsic Sizing
-  muse__m_compute_bottom_up(ctx, ctx->root);
+    if (hrc && muse_muid_is_valid(hrc->parent)) {
+      muComputed *p_comp = muse_sparse_get(&ctx->computed, hrc->parent);
+      muConstraints *p_cons = muse_sparse_get(&ctx->constraints, hrc->parent);
+      if (p_comp) {
+        float off_l =
+            p_cons ? (p_cons->padding.left + p_cons->border.left) : 0.0f;
+        float off_t =
+            p_cons ? (p_cons->padding.top + p_cons->border.top) : 0.0f;
+        float off_r =
+            p_cons ? (p_cons->padding.right + p_cons->border.right) : 0.0f;
+        float off_b =
+            p_cons ? (p_cons->padding.bottom + p_cons->border.bottom) : 0.0f;
 
-  // PASS 4: Flex Distribution
-  muse__m_compute_flex_distribution(ctx, ctx->root);
+        parent_bounds.x = p_comp->x + off_l;
+        parent_bounds.y = p_comp->y + off_t;
+        parent_bounds.w = p_comp->w - (off_l + off_r);
+        parent_bounds.h = p_comp->h - (off_t + off_b);
+        if (parent_bounds.w < 0.0f)
+          parent_bounds.w = 0.0f;
+        if (parent_bounds.h < 0.0f)
+          parent_bounds.h = 0.0f;
+      }
+    }
 
-  // PASS 5: Positional Alignment
-  muse__m_compute_positional_alignment(ctx, ctx->root, 0.0f, 0.0f);
+    muse__m_compute_top_down_node(ctx, node, parent_bounds);
+  }
 
-  // PASS 5.5: Content Bounds Calculation
-  muse__m_compute_content_bounds(ctx, ctx->root);
+  // PASS 3: Intrinsic Sizing (Bottom-Up Flat Reverse Loop)
+  for (size_t i = ctx->layout_order.count; i-- > 0;) {
+    muse__m_compute_bottom_up_node(ctx, ctx->layout_order.items[i]);
+  }
+
+  // PASS 4: Flex Distribution (Top-Down Flat Pre-Order Loop)
+  for (size_t i = 0; i < ctx->layout_order.count; i++) {
+    muse__m_compute_flex_distribution_node(ctx, ctx->layout_order.items[i]);
+  }
+
+  // PASS 5: Positional Alignment (Top-Down Flat Pre-Order Loop)
+  if (ctx->rooted && muse_muid_is_valid(ctx->root)) {
+    muComputed *r_comp = muse_sparse_get(&ctx->computed, ctx->root);
+    if (r_comp) {
+      r_comp->x = 0.0f;
+      r_comp->y = 0.0f;
+    }
+  }
+  for (size_t i = 0; i < ctx->layout_order.count; i++) {
+    muse__m_compute_positional_alignment_node(ctx, ctx->layout_order.items[i]);
+  }
+
+  // PASS 5.5: Content Bounds Calculation (Bottom-Up Flat Reverse Loop)
+  for (size_t i = ctx->layout_order.count; i-- > 0;) {
+    muse__m_compute_content_bounds_node(ctx, ctx->layout_order.items[i]);
+  }
 
   // PASS 6: Clear Dirties
   for (size_t i = 0; i < ctx->dirties.dense.count; i++) {
