@@ -14,10 +14,38 @@ use crate::{
     windowing::renderer::Renderer,
 };
 
+use std::sync::Mutex;
+use std::sync::mpsc::{Receiver, Sender, channel};
+use winit::event_loop::EventLoopProxy;
+
+/// A thread-safe, cloneable handle to dispatch messages to the UI event loop from background threads.
+#[derive(Clone)]
+pub struct WindowHandle<Msg: 'static + Send> {
+    tx: Sender<Msg>,
+    proxy: Arc<Mutex<Option<EventLoopProxy<()>>>>,
+}
+
+impl<Msg: 'static + Send> WindowHandle<Msg> {
+    /// Sends a message from any thread to the UI event loop, triggering `update` and view diffing.
+    pub fn send(&self, msg: Msg) -> Result<(), Msg> {
+        self.tx.send(msg).map_err(|e| e.0)?;
+        if let Ok(guard) = self.proxy.lock() {
+            if let Some(proxy) = guard.as_ref() {
+                let _ = proxy.send_event(());
+            }
+        }
+        Ok(())
+    }
+}
+
 pub struct Window<'r, S, V>
 where
     V: View<S>,
+    V::Message: 'static + Send,
 {
+    msg_tx: Sender<V::Message>,
+    msg_rx: Receiver<V::Message>,
+    event_proxy: Arc<Mutex<Option<EventLoopProxy<()>>>>,
     renderer: Option<Renderer<'r>>,
 
     window: Option<Arc<WWindow>>,
@@ -160,12 +188,16 @@ impl Default for WindowAttributes {
 impl<'r, S, V> Window<'r, S, V>
 where
     V: View<S>,
+    V::Message: 'static + Send,
 {
     pub fn with<U, F>(state: S, update_fn: U, mut view_fn: F) -> Self
     where
         U: FnMut(&mut S, V::Message) + 'static,
         F: FnMut(&S) -> V + 'static,
     {
+        let (msg_tx, msg_rx) = channel();
+        let event_proxy = Arc::new(Mutex::new(None));
+
         let mut ctx = Context::new();
 
         let view = view_fn(&state);
@@ -191,6 +223,9 @@ where
         });
 
         Self {
+            msg_tx,
+            msg_rx,
+            event_proxy,
             renderer: None,
             window: None,
             context: ctx,
@@ -212,6 +247,14 @@ where
         }
     }
 
+    /// Returns a thread-safe [`WindowHandle`] that can be cloned and moved to background threads to dispatch messages.
+    pub fn handle(&self) -> WindowHandle<V::Message> {
+        WindowHandle {
+            tx: self.msg_tx.clone(),
+            proxy: self.event_proxy.clone(),
+        }
+    }
+
     /// Spawns the interactive Ratatui TUI Layout Debugger in the terminal.
     pub fn enable_terminal_debugger(&mut self) -> &mut Self {
         let (tx_event, rx_cmd) = crate::debugger::TerminalDebugger::spawn();
@@ -222,6 +265,9 @@ where
 
     pub fn present(&mut self) {
         let event_loop = EventLoop::new().unwrap();
+        if let Ok(mut guard) = self.event_proxy.lock() {
+            *guard = Some(event_loop.create_proxy());
+        }
         if self.debug_tx.is_some() {
             event_loop.set_control_flow(ControlFlow::wait_duration(
                 std::time::Duration::from_millis(16),
@@ -553,12 +599,42 @@ where
             }
         }
     }
+
+    fn process_pending_messages(&mut self) {
+        if let (Some(view), Some(element), Some(app_view_fn), Some(update_fn)) = (
+            &self.view,
+            &mut self.element,
+            &mut self.app_view_fn,
+            &mut self.update_fn,
+        ) {
+            let mut state_changed = false;
+            while let Ok(msg) = self.msg_rx.try_recv() {
+                update_fn(&mut self.state, msg);
+                state_changed = true;
+            }
+
+            if state_changed {
+                let new_view = app_view_fn(&self.state);
+                new_view.rebuild(view, &mut self.context, element);
+                self.view = Some(new_view);
+
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
+        }
+    }
 }
 
 impl<'r, S, V> ApplicationHandler for Window<'r, S, V>
 where
     V: View<S>,
+    V::Message: 'static + Send,
 {
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: ()) {
+        self.process_pending_messages();
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let attr = self.attr.clone();
         let mut window_attributes = WWindow::default_attributes()
@@ -607,6 +683,7 @@ where
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        self.process_pending_messages();
         if self.debug_tx.is_some() {
             if let Some(window) = &self.window {
                 window.request_redraw();
@@ -783,5 +860,34 @@ where
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::widgets::text;
+
+    #[test]
+    fn test_window_handle_send_across_threads() {
+        let mut window = Window::with(
+            0,
+            |state: &mut i32, msg: i32| *state += msg,
+            |state: &i32| text(format!("{state}")),
+        );
+
+        let handle = window.handle();
+        let handle_clone = handle.clone();
+
+        let thread = std::thread::spawn(move || {
+            let res = handle_clone.send(42);
+            assert!(res.is_ok());
+        });
+
+        thread.join().unwrap();
+
+        assert_eq!(window.state, 0);
+        window.process_pending_messages();
+        assert_eq!(window.state, 42);
     }
 }
