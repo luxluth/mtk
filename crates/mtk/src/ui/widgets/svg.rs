@@ -2,6 +2,7 @@
 
 use std::marker::PhantomData;
 
+use crate::colors::Color;
 use crate::debugger::SourceLocation;
 use crate::image::{ObjectFit, SvgData};
 use crate::style::Style;
@@ -13,6 +14,7 @@ use crate::{Context, Node};
 pub struct Svg<Msg> {
     pub(crate) data: SvgData,
     pub(crate) fit: ObjectFit,
+    pub(crate) color: Option<Color>,
     pub(crate) style: Option<Style>,
     pub(crate) on_click: Option<Msg>,
     pub(crate) source_loc: Option<SourceLocation>,
@@ -25,6 +27,7 @@ pub fn svg<Msg>(data: SvgData) -> Svg<Msg> {
     Svg {
         data,
         fit: ObjectFit::default(),
+        color: None,
         style: None,
         on_click: None,
         source_loc: Some(SourceLocation::here("Svg")),
@@ -36,6 +39,12 @@ impl<Msg> Svg<Msg> {
     /// Sets the object-fit mode (how the SVG scales to fit layout constraints).
     pub fn fit(mut self, fit: ObjectFit) -> Self {
         self.fit = fit;
+        self
+    }
+
+    /// Sets the CSS `currentColor` value for the SVG.
+    pub fn color(mut self, color: Color) -> Self {
+        self.color = Some(color);
         self
     }
 
@@ -72,9 +81,15 @@ impl<State, Msg: Clone> View<State> for Svg<Msg> {
             style.apply_to_node(ctx, node);
         }
 
-        ctx.svgs
-            .borrow_mut()
-            .insert(node, (self.data.clone(), self.fit));
+        let data = if let Some(color) = self.color {
+            self.data
+                .with_color(color)
+                .unwrap_or_else(|_| self.data.clone())
+        } else {
+            self.data.clone()
+        };
+
+        ctx.svgs.borrow_mut().insert(node, (data, self.fit));
 
         SvgElement {
             node,
@@ -84,10 +99,16 @@ impl<State, Msg: Clone> View<State> for Svg<Msg> {
     }
 
     fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
-        if self.data.id != prev.data.id || self.fit != prev.fit {
-            ctx.svgs
-                .borrow_mut()
-                .insert(element.node, (self.data.clone(), self.fit));
+        let data = if let Some(color) = self.color {
+            self.data
+                .with_color(color)
+                .unwrap_or_else(|_| self.data.clone())
+        } else {
+            self.data.clone()
+        };
+
+        if self.data.id != prev.data.id || self.fit != prev.fit || self.color != prev.color {
+            ctx.svgs.borrow_mut().insert(element.node, (data, self.fit));
             element.node.set_dirty(ctx);
         }
 

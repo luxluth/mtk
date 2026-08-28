@@ -110,6 +110,8 @@ impl ImageData {
     }
 }
 
+use crate::colors::Color;
+
 /// Parsed vector SVG data backed by `usvg::Tree`.
 #[derive(Clone)]
 pub struct SvgData {
@@ -117,6 +119,7 @@ pub struct SvgData {
     pub width: f32,
     pub height: f32,
     pub tree: Arc<resvg::usvg::Tree>,
+    pub source: Arc<[u8]>,
 }
 
 impl std::fmt::Debug for SvgData {
@@ -135,9 +138,35 @@ impl SvgData {
         Self::from_bytes(svg_str.as_bytes())
     }
 
+    /// Parses an SVG from a UTF-8 string with a default `currentColor` CSS value.
+    pub fn from_str_with_color(svg_str: &str, color: Color) -> Result<Self, String> {
+        Self::from_bytes_with_color(svg_str.as_bytes(), color)
+    }
+
     /// Parses an SVG from byte slice.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
         let opt = resvg::usvg::Options::default();
+        Self::from_bytes_with_options(bytes, opt)
+    }
+
+    /// Parses an SVG from byte slice with a default `currentColor` CSS value.
+    pub fn from_bytes_with_color(bytes: &[u8], color: Color) -> Result<Self, String> {
+        let mut opt = resvg::usvg::Options::default();
+        opt.style_sheet = Some(format!(
+            "svg {{ color: rgba({}, {}, {}, {}); }}",
+            color.r,
+            color.g,
+            color.b,
+            color.a as f32 / 255.0
+        ));
+        Self::from_bytes_with_options(bytes, opt)
+    }
+
+    /// Parses an SVG from byte slice with explicit `usvg::Options`.
+    pub fn from_bytes_with_options(
+        bytes: &[u8],
+        opt: resvg::usvg::Options,
+    ) -> Result<Self, String> {
         let tree = resvg::usvg::Tree::from_data(bytes, &opt)
             .map_err(|e| format!("Failed to parse SVG data: {e:?}"))?;
 
@@ -151,6 +180,7 @@ impl SvgData {
             width,
             height,
             tree: Arc::new(tree),
+            source: bytes.into(),
         })
     }
 
@@ -159,6 +189,21 @@ impl SvgData {
         let bytes = std::fs::read(path.as_ref())
             .map_err(|e| format!("Failed to read SVG file '{:?}': {e}", path.as_ref()))?;
         Self::from_bytes(&bytes)
+    }
+
+    /// Parses an SVG from a file path on disk with a default `currentColor` CSS value.
+    pub fn from_file_with_color<P: AsRef<std::path::Path>>(
+        path: P,
+        color: Color,
+    ) -> Result<Self, String> {
+        let bytes = std::fs::read(path.as_ref())
+            .map_err(|e| format!("Failed to read SVG file '{:?}': {e}", path.as_ref()))?;
+        Self::from_bytes_with_color(&bytes, color)
+    }
+
+    /// Re-parses the SVG with a dynamic `currentColor`.
+    pub fn with_color(&self, color: Color) -> Result<Self, String> {
+        Self::from_bytes_with_color(&self.source, color)
     }
 
     /// Rasterizes the SVG at a specific target pixel resolution `(target_w, target_h)`.
@@ -233,6 +278,60 @@ mod tests {
         assert_eq!(image.width, 2);
         assert_eq!(image.height, 2);
         assert_eq!(image.pixels.len(), 16);
+    }
+
+    #[test]
+    fn test_current_color_behavior() {
+        let svg_raw = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+            <rect width="100" height="100" fill="currentColor" />
+        </svg>"#;
+        let svg_red =
+            SvgData::from_str_with_color(svg_raw, Color::new(255, 0, 0, 255)).expect("Valid SVG");
+        let pixmap_red = svg_red
+            .render_to_pixmap(100, 100, ObjectFit::Contain)
+            .expect("Render");
+        assert_eq!(
+            (
+                pixmap_red.data()[0],
+                pixmap_red.data()[1],
+                pixmap_red.data()[2],
+                pixmap_red.data()[3]
+            ),
+            (255, 0, 0, 255)
+        );
+
+        let svg_blue = svg_red
+            .with_color(Color::new(0, 0, 255, 255))
+            .expect("Recolor");
+        let pixmap_blue = svg_blue
+            .render_to_pixmap(100, 100, ObjectFit::Contain)
+            .expect("Render");
+        assert_eq!(
+            (
+                pixmap_blue.data()[0],
+                pixmap_blue.data()[1],
+                pixmap_blue.data()[2],
+                pixmap_blue.data()[3]
+            ),
+            (0, 0, 255, 255)
+        );
+
+        // Test multi-color SVG: fixed green rect + dynamic currentColor rect
+        let multi_color_svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+            <rect x="0" y="0" width="50" height="100" fill="#00ff00" />
+            <rect x="50" y="0" width="50" height="100" fill="currentColor" />
+        </svg>"##;
+        let svg = SvgData::from_str_with_color(multi_color_svg, Color::new(255, 0, 0, 255))
+            .expect("Valid SVG");
+        let pixmap = svg
+            .render_to_pixmap(100, 100, ObjectFit::Fill)
+            .expect("Render");
+        // Left side is fixed green (0, 255, 0)
+        assert_eq!(pixmap.pixel(25, 50).unwrap().green(), 255);
+        assert_eq!(pixmap.pixel(25, 50).unwrap().red(), 0);
+        // Right side is currentColor red (255, 0, 0)
+        assert_eq!(pixmap.pixel(75, 50).unwrap().red(), 255);
+        assert_eq!(pixmap.pixel(75, 50).unwrap().green(), 0);
     }
 
     #[test]
