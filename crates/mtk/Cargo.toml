@@ -15,6 +15,7 @@ swash = { workspace = true }
 wgpu = { workspace = true }
 winit = { workspace = true }
 zune-image = { workspace = true }
+zune-core.workspace = true
 arboard = { workspace = true }
 mtk-macro = { path = "../mtk-macro" }
 ratatui = { version = "0.30.2", optional = true }

@@ -24,6 +24,25 @@ pub struct CanvasGpuResource {
     pub height: u32,
 }
 
+pub struct ImageGpuResource {
+    pub _texture: wgpu::Texture,
+    pub _view: wgpu::TextureView,
+    pub bind_group: wgpu::BindGroup,
+    pub image_id: u64,
+    pub _width: u32,
+    pub _height: u32,
+}
+
+pub struct SvgGpuResource {
+    pub _texture: wgpu::Texture,
+    pub _view: wgpu::TextureView,
+    pub bind_group: wgpu::BindGroup,
+    pub svg_id: u64,
+    pub width: u32,
+    pub height: u32,
+    pub fit: crate::image::ObjectFit,
+}
+
 pub struct Renderer<'w> {
     _instance: wgpu::Instance,
     window: Arc<Window>,
@@ -39,6 +58,8 @@ pub struct Renderer<'w> {
     pub scene: SceneTarget,
     pub text_batch: TextBatch,
     pub canvas_textures: HashMap<crate::Node, CanvasGpuResource>,
+    pub image_textures: HashMap<crate::Node, ImageGpuResource>,
+    pub svg_textures: HashMap<crate::Node, SvgGpuResource>,
 }
 
 impl<'w> Renderer<'w> {
@@ -139,6 +160,8 @@ impl<'w> Renderer<'w> {
             scene,
             text_batch,
             canvas_textures: HashMap::new(),
+            image_textures: HashMap::new(),
+            svg_textures: HashMap::new(),
         }
     }
 
@@ -197,8 +220,10 @@ impl<'w> Renderer<'w> {
                 label: Some("Render Encoder"),
             });
 
-        // 2. Update and paint active canvas widgets
+        // 2. Update and paint active canvas, image, and svg widgets
         self.update_canvas_textures(context, &mut encoder);
+        self.update_image_textures(context);
+        self.update_svg_textures(context);
 
         // 3. Determine if multi-pass background blur is required
         let first_vibrancy_index = context.render_list().enumerate().find_map(|(idx, cmd)| {
@@ -259,6 +284,8 @@ impl<'w> Renderer<'w> {
                     &self.text_batch.bind_group,
                     &text_ranges,
                     &self.canvas_textures,
+                    &self.image_textures,
+                    &self.svg_textures,
                     context,
                 );
             }
@@ -353,6 +380,8 @@ impl<'w> Renderer<'w> {
                     &self.text_batch.bind_group,
                     &text_ranges,
                     &self.canvas_textures,
+                    &self.image_textures,
+                    &self.svg_textures,
                     context,
                 );
 
@@ -395,6 +424,8 @@ impl<'w> Renderer<'w> {
                 &self.text_batch.bind_group,
                 &text_ranges,
                 &self.canvas_textures,
+                &self.image_textures,
+                &self.svg_textures,
                 context,
             );
 
@@ -581,6 +612,184 @@ impl<'w> Renderer<'w> {
             self.window.request_redraw();
         }
     }
+
+    fn update_image_textures(&mut self, context: &crate::Context) {
+        self.image_textures
+            .retain(|node, _| context.images.borrow().contains_key(node));
+
+        let images = context.images.borrow();
+        for (node, (image_data, _fit)) in images.iter() {
+            let needs_upload = match self.image_textures.get(node) {
+                Some(res) => res.image_id != image_data.id,
+                None => true,
+            };
+
+            if needs_upload {
+                let w = image_data.width.max(1);
+                let h = image_data.height.max(1);
+
+                let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("Image Offscreen Texture"),
+                    size: wgpu::Extent3d {
+                        width: w,
+                        height: h,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                });
+
+                self.queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    &image_data.pixels,
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(4 * w),
+                        rows_per_image: Some(h),
+                    },
+                    wgpu::Extent3d {
+                        width: w,
+                        height: h,
+                        depth_or_array_layers: 1,
+                    },
+                );
+
+                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("Image Bind Group"),
+                    layout: &self.pipelines.texture_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(
+                                &self.pipelines.texture_sampler,
+                            ),
+                        },
+                    ],
+                });
+
+                self.image_textures.insert(
+                    *node,
+                    ImageGpuResource {
+                        _texture: texture,
+                        _view: view,
+                        bind_group,
+                        image_id: image_data.id,
+                        _width: w,
+                        _height: h,
+                    },
+                );
+            }
+        }
+    }
+
+    fn update_svg_textures(&mut self, context: &crate::Context) {
+        self.svg_textures
+            .retain(|node, _| context.svgs.borrow().contains_key(node));
+
+        let svgs = context.svgs.borrow();
+        for (node, (svg_data, fit)) in svgs.iter() {
+            if let Some(computed) = node.get_computed(context) {
+                let target_w = (computed.w.round() as u32).max(1);
+                let target_h = (computed.h.round() as u32).max(1);
+
+                let needs_render = match self.svg_textures.get(node) {
+                    Some(res) => {
+                        res.svg_id != svg_data.id
+                            || res.width != target_w
+                            || res.height != target_h
+                            || res.fit != *fit
+                    }
+                    None => true,
+                };
+
+                if needs_render {
+                    if let Some(pixmap) = svg_data.render_to_pixmap(target_w, target_h, *fit) {
+                        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                            label: Some("SVG Rendered Texture"),
+                            size: wgpu::Extent3d {
+                                width: target_w,
+                                height: target_h,
+                                depth_or_array_layers: 1,
+                            },
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: wgpu::TextureDimension::D2,
+                            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                                | wgpu::TextureUsages::COPY_DST,
+                            view_formats: &[],
+                        });
+
+                        self.queue.write_texture(
+                            wgpu::TexelCopyTextureInfo {
+                                texture: &texture,
+                                mip_level: 0,
+                                origin: wgpu::Origin3d::ZERO,
+                                aspect: wgpu::TextureAspect::All,
+                            },
+                            pixmap.data(),
+                            wgpu::TexelCopyBufferLayout {
+                                offset: 0,
+                                bytes_per_row: Some(4 * target_w),
+                                rows_per_image: Some(target_h),
+                            },
+                            wgpu::Extent3d {
+                                width: target_w,
+                                height: target_h,
+                                depth_or_array_layers: 1,
+                            },
+                        );
+
+                        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                        let bind_group =
+                            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("SVG Bind Group"),
+                                layout: &self.pipelines.texture_bind_group_layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: wgpu::BindingResource::TextureView(&view),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: wgpu::BindingResource::Sampler(
+                                            &self.pipelines.texture_sampler,
+                                        ),
+                                    },
+                                ],
+                            });
+
+                        self.svg_textures.insert(
+                            *node,
+                            SvgGpuResource {
+                                _texture: texture,
+                                _view: view,
+                                bind_group,
+                                svg_id: svg_data.id,
+                                width: target_w,
+                                height: target_h,
+                                fit: *fit,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn compute_scissor_rect(
@@ -616,6 +825,8 @@ fn render_command_slice<'a, I>(
     text_bind_group: &'a wgpu::BindGroup,
     text_ranges: &'a HashMap<usize, RenderTextData>,
     canvas_textures: &'a HashMap<crate::Node, CanvasGpuResource>,
+    image_textures: &'a HashMap<crate::Node, ImageGpuResource>,
+    svg_textures: &'a HashMap<crate::Node, SvgGpuResource>,
     context: &crate::Context,
 ) where
     I: Iterator<Item = (usize, crate::render::RenderCommand<'a>)>,
@@ -699,6 +910,18 @@ fn render_command_slice<'a, I>(
             if let Some(canvas_res) = canvas_textures.get(&node) {
                 render_pass.set_pipeline(&pipelines.texture);
                 render_pass.set_bind_group(0, &canvas_res.bind_group, &[]);
+                immediate_data.color = [1.0, 1.0, 1.0, 1.0];
+                render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
+                render_pass.draw(0..6, 0..1);
+            } else if let Some(image_res) = image_textures.get(&node) {
+                render_pass.set_pipeline(&pipelines.texture);
+                render_pass.set_bind_group(0, &image_res.bind_group, &[]);
+                immediate_data.color = [1.0, 1.0, 1.0, 1.0];
+                render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
+                render_pass.draw(0..6, 0..1);
+            } else if let Some(svg_res) = svg_textures.get(&node) {
+                render_pass.set_pipeline(&pipelines.texture);
+                render_pass.set_bind_group(0, &svg_res.bind_group, &[]);
                 immediate_data.color = [1.0, 1.0, 1.0, 1.0];
                 render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
                 render_pass.draw(0..6, 0..1);

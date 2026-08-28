@@ -4,6 +4,7 @@ pub mod animation;
 pub mod colors;
 pub mod debugger;
 pub mod effects;
+pub mod image;
 pub mod layer;
 pub(crate) mod node;
 pub mod render;
@@ -20,9 +21,10 @@ pub use mtk_macro::Lens;
 pub use crate::colors::Color;
 use crate::debugger::{LayoutSnapshot, NodeDebugInfo, SourceLocation};
 use crate::effects::Effects;
+pub use crate::image::{ImageData, ObjectFit, SvgData};
 pub use crate::layer::*;
 pub use crate::node::Node;
-use crate::render::RenderCommand;
+pub use crate::render::RenderCommand;
 pub use crate::style::*;
 pub use crate::text::*;
 use std::cell::RefCell;
@@ -87,6 +89,8 @@ pub struct Context {
     pub(crate) ensure_visible_requests: HashMap<Node, crate::style::Rect>,
     pub(crate) clipboard: Arc<Mutex<Option<arboard::Clipboard>>>,
     pub(crate) canvases: RefCell<HashMap<Node, crate::ui::widgets::CanvasData>>,
+    pub(crate) images: RefCell<HashMap<Node, (ImageData, ObjectFit)>>,
+    pub(crate) svgs: RefCell<HashMap<Node, (SvgData, ObjectFit)>>,
     pub(crate) dt: f32,
     pub(crate) node_sources: HashMap<Node, SourceLocation>,
     pub(crate) highlight_node: Option<Node>,
@@ -125,6 +129,8 @@ impl Context {
             ensure_visible_requests: HashMap::new(),
             clipboard,
             canvases: RefCell::new(HashMap::new()),
+            images: RefCell::new(HashMap::new()),
+            svgs: RefCell::new(HashMap::new()),
             dt: 0.016,
             node_sources: HashMap::new(),
             highlight_node: None,
