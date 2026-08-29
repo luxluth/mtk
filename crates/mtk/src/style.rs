@@ -433,6 +433,46 @@ pub enum PositionStrategy {
     },
 }
 
+/// [PositionStrategy::Absolute] building helper
+#[derive(Default)]
+pub struct AbsoluteBuilder {
+    top: Option<f32>,
+    left: Option<f32>,
+    bottom: Option<f32>,
+    right: Option<f32>,
+}
+
+macro_rules! builder_part {
+    ($what:ident) => {
+        pub fn $what(mut self, value: f32) -> Self {
+            self.$what = Some(value);
+            self
+        }
+    };
+}
+
+impl AbsoluteBuilder {
+    builder_part!(top);
+    builder_part!(left);
+    builder_part!(bottom);
+    builder_part!(right);
+
+    pub fn build(self) -> PositionStrategy {
+        PositionStrategy::Absolute {
+            top: self.top.unwrap_or(f32::NAN),
+            left: self.left.unwrap_or(f32::NAN),
+            bottom: self.bottom.unwrap_or(f32::NAN),
+            right: self.right.unwrap_or(f32::NAN),
+        }
+    }
+}
+
+impl PositionStrategy {
+    pub fn absolute() -> AbsoluteBuilder {
+        AbsoluteBuilder::default()
+    }
+}
+
 impl Into<sys::muPositionStrategy> for PositionStrategy {
     fn into(self) -> sys::muPositionStrategy {
         match self {
