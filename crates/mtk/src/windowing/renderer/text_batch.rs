@@ -242,7 +242,7 @@ impl TextBatch {
                                 } else {
                                     brush.into()
                                 };
-                                color[3] *= effects.opacity;
+                                color[3] *= super::compute_effective_opacity(context, node);
 
                                 text_instances.push(TextInstance {
                                     pos: [(cx + dx * scale).round(), (cy + dy * scale).round()],
@@ -392,7 +392,7 @@ impl TextBatch {
                         underlines,
                         caret: caret_rect,
                         style: text_style.clone(),
-                        alpha: effects.opacity,
+                        alpha: super::compute_effective_opacity(context, node),
                     },
                 );
             }

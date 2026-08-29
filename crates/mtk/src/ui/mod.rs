@@ -10,6 +10,7 @@ pub mod event;
 pub mod layer;
 pub mod lens;
 pub mod memoize;
+pub mod router;
 pub mod style;
 pub mod transition;
 pub mod widgets;
@@ -18,6 +19,7 @@ pub use adapter::{ViewAdaptExt, adapt};
 pub use event::{EventKind, ViewEventExt};
 pub use layer::{Layer, ViewLayerExt, layer};
 pub use lens::Lens;
+pub use router::{Router, router};
 pub use style::ViewStyleExt;
 pub use transition::Transition;
 
@@ -262,8 +264,8 @@ where
     }
 
     fn teardown(&self, ctx: &mut Context, elements: &mut Self::Elements) {
-        for (i, view) in self.iter().enumerate() {
-            view.teardown(ctx, &mut elements[i]);
+        for (view, el) in self.iter().zip(elements.iter_mut()) {
+            view.teardown(ctx, el);
         }
     }
 
@@ -278,9 +280,9 @@ where
         let mut handled = EventResult::Ignored;
         let mut emitted_msg = None;
 
-        for (i, v) in self.iter().enumerate() {
+        for (v, el) in self.iter().zip(elements.iter_mut()) {
             if (is_tick || handled == EventResult::Ignored) && emitted_msg.is_none() {
-                let (res, msg) = v.handle_event(&mut elements[i], state, event.clone(), ctx);
+                let (res, msg) = v.handle_event(el, state, event.clone(), ctx);
                 handled = handled.or(res);
                 if msg.is_some() {
                     emitted_msg = msg;
@@ -436,5 +438,25 @@ where
         } else {
             (EventResult::Ignored, None)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::widgets::{button, row};
+
+    #[test]
+    fn test_vec_view_sequence_grow_and_shrink() {
+        let mut ctx = Context::new();
+        let list5: Vec<_> = (0..5).map(|i| button::<_, ()>(format!("{i}"))).collect();
+        let list6: Vec<_> = (0..6).map(|i| button::<_, ()>(format!("{i}"))).collect();
+
+        let row_view5 = row(list5);
+        let row_view6 = row(list6);
+
+        let mut el = View::<()>::build(&row_view5, &mut ctx);
+        View::<()>::rebuild(&row_view6, &row_view5, &mut ctx, &mut el);
+        View::<()>::teardown(&row_view6, &mut ctx, &mut el);
     }
 }

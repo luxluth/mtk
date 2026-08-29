@@ -384,15 +384,6 @@ impl<'w> Renderer<'w> {
                     &self.svg_textures,
                     context,
                 );
-
-                render_focus_ring(
-                    &mut surface_pass,
-                    self.size.width,
-                    self.size.height,
-                    &self.pipelines,
-                    &blurred_solid_bind_group,
-                    context,
-                );
             }
         } else {
             // SINGLE-PASS FAST PATH FOR NON-BLURRED SCENES //
@@ -426,15 +417,6 @@ impl<'w> Renderer<'w> {
                 &self.canvas_textures,
                 &self.image_textures,
                 &self.svg_textures,
-                context,
-            );
-
-            render_focus_ring(
-                &mut surface_pass,
-                self.size.width,
-                self.size.height,
-                &self.pipelines,
-                &self.pipelines.dummy_solid_bind_group,
                 context,
             );
 
@@ -815,6 +797,22 @@ fn compute_scissor_rect(
     }
 }
 
+#[inline]
+pub(crate) fn compute_effective_opacity(context: &crate::Context, mut node: crate::Node) -> f32 {
+    let mut alpha = 1.0;
+    loop {
+        if let Some(eff) = context.effects.get(&node) {
+            alpha *= eff.opacity;
+        }
+        if let Some(parent) = node.parent(context) {
+            node = parent;
+        } else {
+            break;
+        }
+    }
+    alpha
+}
+
 fn render_command_slice<'a, I>(
     render_pass: &mut wgpu::RenderPass<'a>,
     commands: I,
@@ -887,13 +885,15 @@ fn render_command_slice<'a, I>(
                 }
             }
 
+            let effective_alpha = compute_effective_opacity(context, node);
+
             let mut immediate_data = ImmediateData {
                 color: effects.background_color.into(),
                 pos: [scaled_x, scaled_y],
                 screen_size: [screen_width as f32, screen_height as f32],
                 quad_size: [scaled_w, scaled_h],
                 border_radius: effects.border.radius.tl * scale,
-                alpha: effects.opacity,
+                alpha: effective_alpha,
                 border_color: effects.border.color.into(),
                 shadow_color: effects.shadow.color.into(),
                 border_widths,
@@ -910,19 +910,19 @@ fn render_command_slice<'a, I>(
             if let Some(canvas_res) = canvas_textures.get(&node) {
                 render_pass.set_pipeline(&pipelines.texture);
                 render_pass.set_bind_group(0, &canvas_res.bind_group, &[]);
-                immediate_data.color = [1.0, 1.0, 1.0, 1.0];
+                immediate_data.color = [1.0, 1.0, 1.0, effective_alpha];
                 render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
                 render_pass.draw(0..6, 0..1);
             } else if let Some(image_res) = image_textures.get(&node) {
                 render_pass.set_pipeline(&pipelines.texture);
                 render_pass.set_bind_group(0, &image_res.bind_group, &[]);
-                immediate_data.color = [1.0, 1.0, 1.0, 1.0];
+                immediate_data.color = [1.0, 1.0, 1.0, effective_alpha];
                 render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
                 render_pass.draw(0..6, 0..1);
             } else if let Some(svg_res) = svg_textures.get(&node) {
                 render_pass.set_pipeline(&pipelines.texture);
                 render_pass.set_bind_group(0, &svg_res.bind_group, &[]);
-                immediate_data.color = [1.0, 1.0, 1.0, 1.0];
+                immediate_data.color = [1.0, 1.0, 1.0, effective_alpha];
                 render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
                 render_pass.draw(0..6, 0..1);
             } else {
@@ -930,6 +930,58 @@ fn render_command_slice<'a, I>(
                 render_pass.set_bind_group(0, solid_bind_group, &[]);
                 render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
                 render_pass.draw(0..6, 0..1);
+            }
+
+            if Some(node) == context.focused_node() {
+                let should_render = if context.modal_layer.state.visible {
+                    if let Some(modal_root) = context.modal_layer.state.root_node {
+                        node.is_descendant_of(context, modal_root) || node == modal_root
+                    } else {
+                        false
+                    }
+                } else if let Some(inter) = context
+                    .intermediate_layers
+                    .iter()
+                    .rfind(|l| l.state.visible && l.blocking)
+                {
+                    if let Some(inter_root) = inter.state.root_node {
+                        node.is_descendant_of(context, inter_root) || node == inter_root
+                    } else {
+                        false
+                    }
+                } else {
+                    true
+                };
+
+                if should_render {
+                    let ring_thickness = 2.0;
+                    let ring_data = ImmediateData {
+                        color: [0.0; 4],
+                        pos: [scaled_x - ring_thickness, scaled_y - ring_thickness],
+                        screen_size: [screen_width as f32, screen_height as f32],
+                        quad_size: [
+                            scaled_w + ring_thickness * 2.0,
+                            scaled_h + ring_thickness * 2.0,
+                        ],
+                        border_color: [0.0, 0.47, 1.0, 1.0],
+                        shadow_color: [0.0; 4],
+                        border_widths: [ring_thickness; 4],
+                        border_radius: effects.border.radius.tl * scale + ring_thickness,
+                        alpha: effective_alpha,
+                        shadow_spread: 0.0,
+                        shadow_power: 0.0,
+                        vibrancy: 0.0,
+                        vibrancy_darkness: 0.0,
+                        passes: 0.0,
+                        _pad1: 0.0,
+                        _pad2: 0.0,
+                        _pad3: 0.0,
+                    };
+                    render_pass.set_pipeline(&pipelines.solid);
+                    render_pass.set_bind_group(0, solid_bind_group, &[]);
+                    render_pass.set_immediates(0, bytemuck::bytes_of(&ring_data));
+                    render_pass.draw(0..6, 0..1);
+                }
             }
         } else if cmd.kind() == RenderCommandKind::Text {
             let node = cmd.node();
@@ -1206,73 +1258,6 @@ fn render_command_slice<'a, I>(
                 }
             }
         }
-    }
-}
-
-fn render_focus_ring<'a>(
-    render_pass: &mut wgpu::RenderPass<'a>,
-    screen_width: u32,
-    screen_height: u32,
-    pipelines: &'a Pipelines,
-    solid_bind_group: &'a wgpu::BindGroup,
-    context: &crate::Context,
-) {
-    let Some(focused) = context.focused_node() else {
-        return;
-    };
-
-    // If modal is active, focus must belong to modal
-    if context.modal_layer.state.visible {
-        if let Some(modal_root) = context.modal_layer.state.root_node {
-            if !focused.is_descendant_of(context, modal_root) && focused != modal_root {
-                return;
-            }
-        }
-    } else if let Some(inter) = context
-        .intermediate_layers
-        .iter()
-        .rfind(|l| l.state.visible && l.blocking)
-    {
-        if let Some(inter_root) = inter.state.root_node {
-            if !focused.is_descendant_of(context, inter_root) && focused != inter_root {
-                return;
-            }
-        }
-    }
-
-    if let Some(computed) = focused.get_computed(context) {
-        let effects = focused.get_effects(context).unwrap_or_default();
-
-        render_pass.set_scissor_rect(0, 0, screen_width.max(1), screen_height.max(1));
-
-        let ring_thickness = 2.0;
-        let immediate_data = ImmediateData {
-            color: [0.0; 4],
-            pos: [computed.x - ring_thickness, computed.y - ring_thickness],
-            screen_size: [screen_width as f32, screen_height as f32],
-            quad_size: [
-                computed.w + ring_thickness * 2.0,
-                computed.h + ring_thickness * 2.0,
-            ],
-            border_color: [0.0, 0.47, 1.0, 1.0], // Accessible blue focus ring
-            shadow_color: [0.0; 4],
-            border_widths: [ring_thickness; 4],
-            border_radius: effects.border.radius.tl + ring_thickness,
-            alpha: 1.0,
-            shadow_spread: 0.0,
-            shadow_power: 0.0,
-            vibrancy: 0.0,
-            vibrancy_darkness: 0.0,
-            passes: 0.0,
-            _pad1: 0.0,
-            _pad2: 0.0,
-            _pad3: 0.0,
-        };
-
-        render_pass.set_pipeline(&pipelines.solid);
-        render_pass.set_bind_group(0, solid_bind_group, &[]);
-        render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
-        render_pass.draw(0..6, 0..1);
     }
 }
 

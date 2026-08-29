@@ -202,6 +202,11 @@ impl Context {
         self.request_frame();
     }
 
+    /// Clears the currently focused node, removing any active keyboard focus ring (alias for [`clear_focus`](Self::clear_focus)).
+    pub fn blur(&mut self) {
+        self.clear_focus();
+    }
+
     /// Requests that a specific rectangular region of `node` be scrolled into view inside parent scroll views.
     pub fn request_ensure_visible(&mut self, node: Node, rect: crate::style::Rect) {
         self.ensure_visible_requests.insert(node, rect);

@@ -33,6 +33,7 @@ use crate::{
     ui::{Event, View, ViewSequence, event::EventResult},
 };
 
+pub use crate::ui::router::router;
 pub use badge::*;
 pub use button::*;
 pub use canvas::*;
