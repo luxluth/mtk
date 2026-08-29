@@ -2,12 +2,14 @@ pub(crate) mod atlas;
 pub(crate) mod blur;
 pub(crate) mod pipelines;
 pub(crate) mod scene;
+pub(crate) mod svg_cache;
 pub(crate) mod text_batch;
 
 use self::atlas::Atlas;
 use self::blur::BlurPipeline;
 use self::pipelines::{ImmediateData, Pipelines};
 use self::scene::SceneTarget;
+use self::svg_cache::{SvgRasterPool, SvgRasterRequest};
 use self::text_batch::{RenderTextData, TextBatch};
 use crate::effects::Filter;
 use crate::render::RenderCommandKind;
@@ -25,7 +27,7 @@ pub struct CanvasGpuResource {
 }
 
 pub struct ImageGpuResource {
-    pub _texture: wgpu::Texture,
+    pub texture: wgpu::Texture,
     pub _view: wgpu::TextureView,
     pub bind_group: wgpu::BindGroup,
     pub image_id: u64,
@@ -34,7 +36,7 @@ pub struct ImageGpuResource {
 }
 
 pub struct SvgGpuResource {
-    pub _texture: wgpu::Texture,
+    pub texture: wgpu::Texture,
     pub _view: wgpu::TextureView,
     pub bind_group: wgpu::BindGroup,
     pub svg_id: u64,
@@ -60,6 +62,10 @@ pub struct Renderer<'w> {
     pub canvas_textures: HashMap<crate::Node, CanvasGpuResource>,
     pub image_textures: HashMap<crate::Node, ImageGpuResource>,
     pub svg_textures: HashMap<crate::Node, SvgGpuResource>,
+    pub(crate) svg_pool: SvgRasterPool,
+    pub(crate) svg_generations: HashMap<crate::Node, u64>,
+    pub(crate) svg_requested_sizes: HashMap<crate::Node, (u64, u32, u32, crate::image::ObjectFit)>,
+    pub(crate) next_svg_gen: u64,
 }
 
 impl<'w> Renderer<'w> {
@@ -145,6 +151,8 @@ impl<'w> Renderer<'w> {
             &atlas.sampler,
         );
 
+        let svg_pool = SvgRasterPool::new(Arc::clone(&window));
+
         Self {
             _instance: instance,
             window,
@@ -162,6 +170,10 @@ impl<'w> Renderer<'w> {
             canvas_textures: HashMap::new(),
             image_textures: HashMap::new(),
             svg_textures: HashMap::new(),
+            svg_pool,
+            svg_generations: HashMap::new(),
+            svg_requested_sizes: HashMap::new(),
+            next_svg_gen: 0,
         }
     }
 
@@ -443,8 +455,13 @@ impl<'w> Renderer<'w> {
         encoder: &mut wgpu::CommandEncoder,
     ) {
         // Retain only active canvases
-        self.canvas_textures
-            .retain(|node, _| context.canvases.borrow().contains_key(node));
+        self.canvas_textures.retain(|node, res| {
+            let keep = context.canvases.borrow().contains_key(node);
+            if !keep {
+                res.texture.destroy();
+            }
+            keep
+        });
 
         let any_canvas_requested_frame = std::cell::Cell::new(false);
 
@@ -496,7 +513,7 @@ impl<'w> Renderer<'w> {
                         ],
                     });
 
-                    self.canvas_textures.insert(
+                    if let Some(old) = self.canvas_textures.insert(
                         *node,
                         CanvasGpuResource {
                             texture,
@@ -505,7 +522,9 @@ impl<'w> Renderer<'w> {
                             width: w,
                             height: h,
                         },
-                    );
+                    ) {
+                        old.texture.destroy();
+                    }
 
                     canvas_data.width = w;
                     canvas_data.height = h;
@@ -596,8 +615,13 @@ impl<'w> Renderer<'w> {
     }
 
     fn update_image_textures(&mut self, context: &crate::Context) {
-        self.image_textures
-            .retain(|node, _| context.images.borrow().contains_key(node));
+        self.image_textures.retain(|node, res| {
+            let keep = context.images.borrow().contains_key(node);
+            if !keep {
+                res.texture.destroy();
+            }
+            keep
+        });
 
         let images = context.images.borrow();
         for (node, (image_data, _fit)) in images.iter() {
@@ -663,24 +687,155 @@ impl<'w> Renderer<'w> {
                     ],
                 });
 
-                self.image_textures.insert(
+                if let Some(old) = self.image_textures.insert(
                     *node,
                     ImageGpuResource {
-                        _texture: texture,
+                        texture,
                         _view: view,
                         bind_group,
                         image_id: image_data.id,
                         _width: w,
                         _height: h,
                     },
-                );
+                ) {
+                    old.texture.destroy();
+                }
             }
         }
     }
 
+    fn upload_svg_texture(
+        &mut self,
+        node: crate::Node,
+        svg_id: u64,
+        width: u32,
+        height: u32,
+        fit: crate::image::ObjectFit,
+        pixmap: resvg::tiny_skia::Pixmap,
+    ) {
+        if let Some(existing) = self.svg_textures.get_mut(&node) {
+            if existing.width == width && existing.height == height {
+                self.queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &existing.texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    pixmap.data(),
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(4 * width),
+                        rows_per_image: Some(height),
+                    },
+                    wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                );
+                existing.svg_id = svg_id;
+                existing.fit = fit;
+                return;
+            }
+        }
+
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("SVG Rendered Texture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            pixmap.data(),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * width),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("SVG Bind Group"),
+            layout: &self.pipelines.texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.pipelines.texture_sampler),
+                },
+            ],
+        });
+
+        if let Some(old) = self.svg_textures.insert(
+            node,
+            SvgGpuResource {
+                texture,
+                _view: view,
+                bind_group,
+                svg_id,
+                width,
+                height,
+                fit,
+            },
+        ) {
+            old.texture.destroy();
+        }
+    }
+
     fn update_svg_textures(&mut self, context: &crate::Context) {
-        self.svg_textures
+        self.svg_textures.retain(|node, res| {
+            let keep = context.svgs.borrow().contains_key(node);
+            if !keep {
+                res.texture.destroy();
+            }
+            keep
+        });
+        self.svg_generations
             .retain(|node, _| context.svgs.borrow().contains_key(node));
+        self.svg_requested_sizes
+            .retain(|node, _| context.svgs.borrow().contains_key(node));
+
+        while let Some(res) = self.svg_pool.try_recv() {
+            if let Some(&expected_gen) = self.svg_generations.get(&res.node) {
+                if expected_gen == res.generation {
+                    if let Some(pixmap) = res.pixmap {
+                        self.upload_svg_texture(
+                            res.node,
+                            res.svg_id,
+                            res.target_w,
+                            res.target_h,
+                            res.fit,
+                            pixmap,
+                        );
+                    }
+                }
+            }
+        }
 
         let svgs = context.svgs.borrow();
         for (node, (svg_data, fit)) in svgs.iter() {
@@ -688,85 +843,46 @@ impl<'w> Renderer<'w> {
                 let target_w = (computed.w.round() as u32).max(1);
                 let target_h = (computed.h.round() as u32).max(1);
 
-                let needs_render = match self.svg_textures.get(node) {
-                    Some(res) => {
-                        res.svg_id != svg_data.id
-                            || res.width != target_w
-                            || res.height != target_h
-                            || res.fit != *fit
+                match self.svg_textures.get(node) {
+                    None => {
+                        if let Some(pixmap) = svg_data.render_to_pixmap(target_w, target_h, *fit) {
+                            self.upload_svg_texture(
+                                *node,
+                                svg_data.id,
+                                target_w,
+                                target_h,
+                                *fit,
+                                pixmap,
+                            );
+                            self.svg_requested_sizes
+                                .insert(*node, (svg_data.id, target_w, target_h, *fit));
+                        }
                     }
-                    None => true,
-                };
+                    Some(res) => {
+                        let needs_update = res.svg_id != svg_data.id
+                            || res.fit != *fit
+                            || res.width != target_w
+                            || res.height != target_h;
 
-                if needs_render {
-                    if let Some(pixmap) = svg_data.render_to_pixmap(target_w, target_h, *fit) {
-                        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-                            label: Some("SVG Rendered Texture"),
-                            size: wgpu::Extent3d {
-                                width: target_w,
-                                height: target_h,
-                                depth_or_array_layers: 1,
-                            },
-                            mip_level_count: 1,
-                            sample_count: 1,
-                            dimension: wgpu::TextureDimension::D2,
-                            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                            usage: wgpu::TextureUsages::TEXTURE_BINDING
-                                | wgpu::TextureUsages::COPY_DST,
-                            view_formats: &[],
-                        });
+                        if needs_update {
+                            let requested = self.svg_requested_sizes.get(node).copied();
+                            if requested != Some((svg_data.id, target_w, target_h, *fit)) {
+                                self.next_svg_gen += 1;
+                                let generation = self.next_svg_gen;
+                                self.svg_generations.insert(*node, generation);
+                                self.svg_requested_sizes
+                                    .insert(*node, (svg_data.id, target_w, target_h, *fit));
 
-                        self.queue.write_texture(
-                            wgpu::TexelCopyTextureInfo {
-                                texture: &texture,
-                                mip_level: 0,
-                                origin: wgpu::Origin3d::ZERO,
-                                aspect: wgpu::TextureAspect::All,
-                            },
-                            pixmap.data(),
-                            wgpu::TexelCopyBufferLayout {
-                                offset: 0,
-                                bytes_per_row: Some(4 * target_w),
-                                rows_per_image: Some(target_h),
-                            },
-                            wgpu::Extent3d {
-                                width: target_w,
-                                height: target_h,
-                                depth_or_array_layers: 1,
-                            },
-                        );
-
-                        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-                        let bind_group =
-                            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                                label: Some("SVG Bind Group"),
-                                layout: &self.pipelines.texture_bind_group_layout,
-                                entries: &[
-                                    wgpu::BindGroupEntry {
-                                        binding: 0,
-                                        resource: wgpu::BindingResource::TextureView(&view),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 1,
-                                        resource: wgpu::BindingResource::Sampler(
-                                            &self.pipelines.texture_sampler,
-                                        ),
-                                    },
-                                ],
-                            });
-
-                        self.svg_textures.insert(
-                            *node,
-                            SvgGpuResource {
-                                _texture: texture,
-                                _view: view,
-                                bind_group,
-                                svg_id: svg_data.id,
-                                width: target_w,
-                                height: target_h,
-                                fit: *fit,
-                            },
-                        );
+                                self.svg_pool.schedule(SvgRasterRequest {
+                                    node: *node,
+                                    svg_data: svg_data.clone(),
+                                    target_w,
+                                    target_h,
+                                    fit: *fit,
+                                    generation,
+                                });
+                            }
+                        }
                     }
                 }
             }

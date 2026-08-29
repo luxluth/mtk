@@ -60,7 +60,8 @@ impl SceneTarget {
             height,
         );
 
-        self.texture = texture;
+        let old_texture = std::mem::replace(&mut self.texture, texture);
+        old_texture.destroy();
         self.view = view;
         self.blit_bind_group = blit_bind_group;
     }

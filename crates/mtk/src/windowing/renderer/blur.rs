@@ -123,7 +123,9 @@ impl BlurPipeline {
         }
         self.width = width.max(1);
         self.height = height.max(1);
-        self.pyramid.clear();
+        for level in self.pyramid.drain(..) {
+            level.texture.destroy();
+        }
 
         // 3 pyramid levels (1/2, 1/4, 1/8)
         let mut cur_w = (self.width / 2).max(1);
