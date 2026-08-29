@@ -51,6 +51,21 @@ impl TextContext {
         }
     }
 
+    /// Registers raw font bytes (.ttf or .otf) into the Parley font collection.
+    pub fn register_fonts(&mut self, font_data: Vec<u8>) {
+        self.font_cx
+            .collection
+            .register_fonts(font_data.into(), None);
+        self.layout_cache.clear();
+    }
+
+    /// Loads and registers a font file from disk.
+    pub fn register_font_file(&mut self, path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
+        let data = std::fs::read(path)?;
+        self.register_fonts(data);
+        Ok(())
+    }
+
     pub fn get_or_create_layout(
         &mut self,
         text: &str,

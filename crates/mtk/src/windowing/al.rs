@@ -263,6 +263,18 @@ where
         self
     }
 
+    /// Registers raw font bytes (e.g. from `include_bytes!(...)`) into the window's text context.
+    pub fn with_font_bytes(mut self, data: &[u8]) -> Self {
+        self.context.register_fonts(data.to_vec());
+        self
+    }
+
+    /// Loads and registers a font file from disk into the window's text context.
+    pub fn with_font_file(mut self, path: impl AsRef<std::path::Path>) -> std::io::Result<Self> {
+        self.context.register_font_file(path)?;
+        Ok(self)
+    }
+
     pub fn present(&mut self) {
         let event_loop = EventLoop::new().unwrap();
         if let Ok(mut guard) = self.event_proxy.lock() {

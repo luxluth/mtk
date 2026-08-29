@@ -482,6 +482,16 @@ impl Context {
         }
     }
 
+    /// Registers raw font bytes (.ttf or .otf) into the shared text context.
+    pub fn register_fonts(&mut self, font_data: Vec<u8>) {
+        self.text_context.lock().unwrap().register_fonts(font_data);
+    }
+
+    /// Loads and registers a font file from disk into the shared text context.
+    pub fn register_font_file(&mut self, path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
+        self.text_context.lock().unwrap().register_font_file(path)
+    }
+
     /// Performs a fast $O(1)$ scalar hit test at `(x, y)` and returns a list of hit nodes ordered from top-most child to parent.
     pub fn pick(&mut self, x: f32, y: f32) -> Vec<Node> {
         let list = unsafe { sys::muse_node_pick(self.ctx, x, y) };

@@ -928,6 +928,109 @@ impl Effects {
 }
 
 impl TextStyle {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn font_size(mut self, size: f32) -> Self {
+        self.font_size = size;
+        self
+    }
+
+    pub fn size(self, size: f32) -> Self {
+        self.font_size(size)
+    }
+
+    pub fn line_height(mut self, line_height: LineHeight) -> Self {
+        self.line_height = line_height;
+        self
+    }
+
+    pub fn color(mut self, color: Color) -> Self {
+        self.color = color;
+        self
+    }
+
+    pub fn font_family(mut self, family: impl Into<String>) -> Self {
+        self.font_family = family.into();
+        self
+    }
+
+    pub fn family(self, family: impl Into<String>) -> Self {
+        self.font_family(family)
+    }
+
+    pub fn font_weight(mut self, weight: FontWeight) -> Self {
+        self.font_weight = weight;
+        self
+    }
+
+    pub fn weight(self, weight: FontWeight) -> Self {
+        self.font_weight(weight)
+    }
+
+    pub fn font_style(mut self, style: FontStyle) -> Self {
+        self.font_style = style;
+        self
+    }
+
+    pub fn italic(self) -> Self {
+        self.font_style(FontStyle::Italic)
+    }
+
+    pub fn alignment(mut self, alignment: Alignment) -> Self {
+        self.alignment = alignment;
+        self
+    }
+
+    pub fn align(self, alignment: Alignment) -> Self {
+        self.alignment(alignment)
+    }
+
+    pub fn vertical_alignment(mut self, alignment: VerticalAlignment) -> Self {
+        self.vertical_alignment = alignment;
+        self
+    }
+
+    pub fn vertical_align(self, alignment: VerticalAlignment) -> Self {
+        self.vertical_alignment(alignment)
+    }
+
+    pub fn wrap(mut self, wrap: bool) -> Self {
+        self.wrap = wrap;
+        self
+    }
+
+    pub fn overflow_wrap(mut self, overflow_wrap: OverflowWrap) -> Self {
+        self.overflow_wrap = overflow_wrap;
+        self
+    }
+
+    pub fn selection_color(mut self, color: Color) -> Self {
+        self.selection_color = color;
+        self
+    }
+
+    pub fn selection_bg(mut self, color: Color) -> Self {
+        self.selection_bg = color;
+        self
+    }
+
+    pub fn caret_color(mut self, color: Color) -> Self {
+        self.caret_color = color;
+        self
+    }
+
+    pub fn strikethrough(mut self, strikethrough: bool) -> Self {
+        self.strikethrough = strikethrough;
+        self
+    }
+
+    pub fn underline(mut self, underline: bool) -> Self {
+        self.underline = underline;
+        self
+    }
+
     /// Merges non-default typography styling from `other` into `self`.
     pub fn merge(&mut self, other: &TextStyle) {
         if (other.font_size - 16.0).abs() > 1e-4 {
