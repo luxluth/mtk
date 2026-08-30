@@ -929,6 +929,64 @@ pub(crate) fn compute_effective_opacity(context: &crate::Context, mut node: crat
     alpha
 }
 
+#[inline]
+pub(crate) fn compute_effective_scale(context: &crate::Context, mut node: crate::Node) -> f32 {
+    let mut scale = 1.0;
+    loop {
+        if let Some(eff) = context.effects.get(&node) {
+            scale *= eff.scale;
+        }
+        if let Some(parent) = node.parent(context) {
+            node = parent;
+        } else {
+            break;
+        }
+    }
+    scale
+}
+
+#[inline]
+pub(crate) fn transform_point_ancestors(
+    context: &crate::Context,
+    mut node: crate::Node,
+    mut pt: (f32, f32),
+) -> (f32, f32) {
+    while let Some(parent) = node.parent(context) {
+        if let Some(computed) = parent.get_computed(context) {
+            let eff = context.effects.get(&parent).cloned().unwrap_or_default();
+            let s = eff.scale;
+            if (s - 1.0).abs() > 1e-4 {
+                let cx = computed.x + computed.w / 2.0;
+                let cy = computed.y + computed.h / 2.0;
+                pt.0 = cx + (pt.0 - cx) * s;
+                pt.1 = cy + (pt.1 - cy) * s;
+            }
+        }
+        node = parent;
+    }
+    pt
+}
+
+#[inline]
+pub(crate) fn transform_node_point(
+    context: &crate::Context,
+    node: crate::Node,
+    pt: (f32, f32),
+) -> (f32, f32) {
+    let mut curr_pt = pt;
+    if let Some(computed) = node.get_computed(context) {
+        let eff = context.effects.get(&node).cloned().unwrap_or_default();
+        let s = eff.scale;
+        if (s - 1.0).abs() > 1e-4 {
+            let cx = computed.x + computed.w / 2.0;
+            let cy = computed.y + computed.h / 2.0;
+            curr_pt.0 = cx + (curr_pt.0 - cx) * s;
+            curr_pt.1 = cy + (curr_pt.1 - cy) * s;
+        }
+    }
+    transform_point_ancestors(context, node, curr_pt)
+}
+
 fn render_command_slice<'a, I>(
     render_pass: &mut wgpu::RenderPass<'a>,
     commands: I,
@@ -969,21 +1027,23 @@ fn render_command_slice<'a, I>(
             let computed = cmd.computed();
             let constraints = node.get_constraints(context).unwrap_or_default();
             let effects = context.effects.get(&node).cloned().unwrap_or_default();
-            let scale = effects.scale;
+            let total_scale = compute_effective_scale(context, node);
 
             let cx = computed.x + computed.w / 2.0;
             let cy = computed.y + computed.h / 2.0;
+            let (transformed_cx, transformed_cy) =
+                transform_point_ancestors(context, node, (cx, cy));
 
-            let scaled_w = computed.w * scale;
-            let scaled_h = computed.h * scale;
-            let scaled_x = cx - scaled_w / 2.0;
-            let scaled_y = cy - scaled_h / 2.0;
+            let scaled_w = computed.w * total_scale;
+            let scaled_h = computed.h * total_scale;
+            let scaled_x = transformed_cx - scaled_w / 2.0;
+            let scaled_y = transformed_cy - scaled_h / 2.0;
 
             let border_widths = [
-                constraints.border.top * scale,
-                constraints.border.right * scale,
-                constraints.border.bottom * scale,
-                constraints.border.left * scale,
+                constraints.border.top * total_scale,
+                constraints.border.right * total_scale,
+                constraints.border.bottom * total_scale,
+                constraints.border.left * total_scale,
             ];
 
             let mut vibrancy = 0.0;
@@ -1008,12 +1068,12 @@ fn render_command_slice<'a, I>(
                 pos: [scaled_x, scaled_y],
                 screen_size: [screen_width as f32, screen_height as f32],
                 quad_size: [scaled_w, scaled_h],
-                border_radius: effects.border.radius.tl * scale,
+                border_radius: effects.border.radius.tl * total_scale,
                 alpha: effective_alpha,
                 border_color: effects.border.color.into(),
                 shadow_color: effects.shadow.color.into(),
                 border_widths,
-                shadow_spread: effects.shadow.spread * scale,
+                shadow_spread: effects.shadow.spread * total_scale,
                 shadow_power: effects.shadow.power,
                 vibrancy,
                 vibrancy_darkness: 0.0,
@@ -1082,7 +1142,7 @@ fn render_command_slice<'a, I>(
                         border_color: [0.0, 0.47, 1.0, 1.0],
                         shadow_color: [0.0; 4],
                         border_widths: [ring_thickness; 4],
-                        border_radius: effects.border.radius.tl * scale + ring_thickness,
+                        border_radius: effects.border.radius.tl * total_scale + ring_thickness,
                         alpha: effective_alpha,
                         shadow_spread: 0.0,
                         shadow_power: 0.0,
@@ -1419,5 +1479,53 @@ fn render_debug_highlight<'a>(
         render_pass.set_bind_group(0, solid_bind_group, &[]);
         render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
         render_pass.draw(0..6, 0..1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Context;
+    use crate::style::Size;
+
+    #[test]
+    fn test_hierarchical_scale_cascading() {
+        let mut ctx = Context::new();
+
+        let parent = ctx.create_node();
+        parent.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(100);
+            c.height = Size::Fixed(100);
+        });
+        parent.update_effects(&mut ctx, |e| {
+            e.scale = 0.5;
+        });
+
+        let child = ctx.create_node();
+        child.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(20);
+            c.height = Size::Fixed(20);
+        });
+        child.update_effects(&mut ctx, |e| {
+            e.scale = 0.8;
+        });
+
+        parent.append(&mut ctx, child);
+        ctx.root_attach(parent);
+        ctx.compute_layout(100.0, 100.0);
+
+        // Effective scale compounds: 0.5 * 0.8 = 0.4
+        let parent_scale = compute_effective_scale(&ctx, parent);
+        let child_scale = compute_effective_scale(&ctx, child);
+        assert!((parent_scale - 0.5).abs() < 1e-4);
+        assert!((child_scale - 0.4).abs() < 1e-4);
+
+        // Transform child center point relative to parent scale
+        // Parent center is (50, 50). Child is at (0, 0) relative to parent -> center (10, 10).
+        // (10 - 50) * 0.5 + 50 = -20 + 50 = 30.
+        let child_center = (10.0, 10.0);
+        let transformed = transform_point_ancestors(&ctx, child, child_center);
+        assert!((transformed.0 - 30.0).abs() < 1e-4);
+        assert!((transformed.1 - 30.0).abs() < 1e-4);
     }
 }

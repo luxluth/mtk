@@ -162,11 +162,7 @@ impl TextBatch {
                 let text_y =
                     computed.y + constraints.padding.top + vertical_offset - constraints.scroll.y;
 
-                let effects = node.get_effects(context).unwrap_or_default();
-                let scale = effects.scale;
-
-                let cx = computed.x + computed.w / 2.0;
-                let cy = computed.y + computed.h / 2.0;
+                let total_scale = super::compute_effective_scale(context, node);
 
                 // 1. Glyphs extraction
                 for line in layout.lines() {
@@ -234,8 +230,11 @@ impl TextBatch {
                                 let global_x = base_x + info.offset_x as f32;
                                 let global_y = base_y + info.offset_y as f32;
 
-                                let dx = global_x - cx;
-                                let dy = global_y - cy;
+                                let (transformed_x, transformed_y) = super::transform_node_point(
+                                    context,
+                                    node,
+                                    (global_x, global_y),
+                                );
 
                                 let mut color: [f32; 4] = if info.is_color {
                                     [1.0, 1.0, 1.0, brush.a as f32 / 255.0]
@@ -245,10 +244,10 @@ impl TextBatch {
                                 color[3] *= super::compute_effective_opacity(context, node);
 
                                 text_instances.push(TextInstance {
-                                    pos: [(cx + dx * scale).round(), (cy + dy * scale).round()],
+                                    pos: [transformed_x.round(), transformed_y.round()],
                                     size: [
-                                        (info.physical_w as f32 * scale).round(),
-                                        (info.physical_h as f32 * scale).round(),
+                                        (info.physical_w as f32 * total_scale).round(),
+                                        (info.physical_h as f32 * total_scale).round(),
                                     ],
                                     uv_pos: [info.uv_x, info.uv_y],
                                     uv_size: [info.uv_w, info.uv_h],
