@@ -186,8 +186,13 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
         event: Event,
         ctx: &mut Context,
     ) -> (EventResult, Option<Self::Message>) {
-        let mut state_changed = false;
         let node = self.inner.get_node(&element.0);
+        let res = self
+            .inner
+            .handle_event(&mut element.0, state, event.clone(), ctx);
+        let (inner_handled, _) = res;
+
+        let mut state_changed = false;
 
         let newly_focused = Some(node) == ctx.focused_node();
         if element.1.is_focused != newly_focused {
@@ -207,7 +212,11 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
                 pressed, hit_nodes, ..
             } => {
                 let is_hit = hit_nodes.contains(&node);
-                let new_active = *pressed && is_hit;
+                let new_active = if inner_handled == EventResult::Handled {
+                    false
+                } else {
+                    *pressed && is_hit
+                };
                 if element.1.is_active != new_active {
                     element.1.is_active = new_active;
                     state_changed = true;
@@ -223,15 +232,6 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
             if state_changed {
                 ctx.request_frame();
             }
-        }
-
-        let res = self.inner.handle_event(&mut element.0, state, event, ctx);
-
-        let after_focused = Some(node) == ctx.focused_node();
-        if element.1.is_focused != after_focused {
-            element.1.is_focused = after_focused;
-            element.1.is_animating = self.apply_style(ctx, &mut element.1, node);
-            ctx.request_frame();
         }
 
         res
@@ -639,5 +639,73 @@ mod tests {
         // After focus: on_focus applied, border becomes 3.0
         let cons_focused = node.get_constraints(&ctx).unwrap();
         assert_eq!(cons_focused.border.top, 3.0);
+    }
+
+    #[test]
+    fn test_nested_styled_view_active_suppression() {
+        use crate::ui::widgets::button;
+
+        let mut ctx = Context::new();
+
+        let inner_btn = button::<_, ()>("Inner Button");
+        let parent_card =
+            row((inner_btn,)).style(Style::new().scale(1.0).on_active(|s| s.scale(0.8)));
+
+        let mut el = View::<()>::build(&parent_card, &mut ctx);
+        let parent_node = View::<()>::get_node(&parent_card, &el);
+        let child_node = View::<()>::get_node(&parent_card.inner.children.0, &el.0.1.0);
+
+        // 1. Click child button: both child and parent are in hit_nodes
+        // Press on child button (button consumes press -> Handled)
+        let _ = View::<()>::handle_event(
+            &parent_card,
+            &mut el,
+            &(),
+            Event::MouseInput {
+                pressed: true,
+                hit_nodes: vec![child_node, parent_node],
+                x: 0.0,
+                y: 0.0,
+            },
+            &mut ctx,
+        );
+
+        // Parent active state must be suppressed (scale remains 1.0)
+        assert!(!el.1.is_active);
+        let parent_eff = ctx.effects.get(&parent_node).cloned().unwrap_or_default();
+        assert_eq!(parent_eff.scale, 1.0);
+
+        // Release on child button
+        let _ = View::<()>::handle_event(
+            &parent_card,
+            &mut el,
+            &(),
+            Event::MouseInput {
+                pressed: false,
+                hit_nodes: vec![child_node, parent_node],
+                x: 0.0,
+                y: 0.0,
+            },
+            &mut ctx,
+        );
+
+        // 2. Click directly on parent (child not in hit_nodes)
+        let _ = View::<()>::handle_event(
+            &parent_card,
+            &mut el,
+            &(),
+            Event::MouseInput {
+                pressed: true,
+                hit_nodes: vec![parent_node],
+                x: 0.0,
+                y: 0.0,
+            },
+            &mut ctx,
+        );
+
+        // Parent active state MUST trigger (scale becomes 0.8)
+        assert!(el.1.is_active);
+        let parent_eff = ctx.effects.get(&parent_node).cloned().unwrap_or_default();
+        assert_eq!(parent_eff.scale, 0.8);
     }
 }
