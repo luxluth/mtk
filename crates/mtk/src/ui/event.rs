@@ -96,6 +96,19 @@ where
         event: Event,
         ctx: &mut Context,
     ) -> (EventResult, Option<Self::Message>) {
+        let (inner_res, inner_msg) =
+            self.inner
+                .handle_event(&mut element.inner_element, state, event.clone(), ctx);
+
+        if inner_res == EventResult::Handled || inner_msg.is_some() {
+            if let Event::MouseInput { pressed, .. } = &event {
+                if !*pressed {
+                    element.is_pressed = false;
+                }
+            }
+            return (inner_res, inner_msg);
+        }
+
         let mut handled = EventResult::Ignored;
         let mut emitted_msg = None;
 
@@ -128,20 +141,16 @@ where
                             handled = EventResult::Handled;
                         }
                     }
-                } else {
-                    if element.is_pressed {
-                        element.is_pressed = false;
-                        if is_hit {
-                            if self.kind == EventKind::Click || self.kind == EventKind::Release {
-                                emitted_msg = (self.handler)(state);
-                                handled = EventResult::Handled;
-                            }
-                        } else {
-                            if self.kind == EventKind::Release {
-                                emitted_msg = (self.handler)(state);
-                                handled = EventResult::Handled;
-                            }
+                } else if element.is_pressed {
+                    element.is_pressed = false;
+                    if is_hit {
+                        if self.kind == EventKind::Click || self.kind == EventKind::Release {
+                            emitted_msg = (self.handler)(state);
+                            handled = EventResult::Handled;
                         }
+                    } else if self.kind == EventKind::Release {
+                        emitted_msg = (self.handler)(state);
+                        handled = EventResult::Handled;
                     }
                 }
             }
@@ -166,11 +175,7 @@ where
             _ => {}
         }
 
-        let (inner_res, inner_msg) =
-            self.inner
-                .handle_event(&mut element.inner_element, state, event, ctx);
-
-        (handled.or(inner_res), emitted_msg.or(inner_msg))
+        (handled.or(inner_res), inner_msg.or(emitted_msg))
     }
 }
 
@@ -197,5 +202,97 @@ impl<State, V: View<State>> ViewEventExt<State> for V {
             handler: Rc::new(handler),
             _marker: std::marker::PhantomData,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::widgets::{row, text};
+
+    #[derive(Clone, Debug, PartialEq)]
+    enum TestMsg {
+        ParentClick,
+        ChildClick,
+    }
+
+    #[test]
+    fn test_nested_event_handler_child_priority() {
+        let mut ctx = Context::new();
+
+        let child_view = row((text::<_, TestMsg>("Child"),))
+            .on_event(EventKind::Click, |_| Some(TestMsg::ChildClick));
+
+        let parent_view = row((child_view, text::<_, TestMsg>("Parent Text")))
+            .on_event(EventKind::Click, |_| Some(TestMsg::ParentClick));
+
+        let mut element = View::<()>::build(&parent_view, &mut ctx);
+        let parent_node = View::<()>::get_node(&parent_view, &element);
+        let child_node =
+            View::<()>::get_node(&parent_view.inner.children.0, &element.inner_element.1.0);
+
+        // 1. Click child node: both child and parent are in hit_nodes
+        // Press on child
+        let (res_down, msg_down) = View::<()>::handle_event(
+            &parent_view,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                pressed: true,
+                hit_nodes: vec![child_node, parent_node],
+                x: 0.0,
+                y: 0.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(res_down, EventResult::Ignored);
+        assert_eq!(msg_down, None);
+
+        // Release on child: child handler must fire, parent handler must NOT fire
+        let (res_up, msg_up) = View::<()>::handle_event(
+            &parent_view,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                pressed: false,
+                hit_nodes: vec![child_node, parent_node],
+                x: 0.0,
+                y: 0.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(res_up, EventResult::Handled);
+        assert_eq!(msg_up, Some(TestMsg::ChildClick));
+
+        // 2. Click parent node directly (child not hit)
+        let (p_down_res, p_down_msg) = View::<()>::handle_event(
+            &parent_view,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                pressed: true,
+                hit_nodes: vec![parent_node],
+                x: 0.0,
+                y: 0.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(p_down_res, EventResult::Ignored);
+        assert_eq!(p_down_msg, None);
+
+        let (p_up_res, p_up_msg) = View::<()>::handle_event(
+            &parent_view,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                pressed: false,
+                hit_nodes: vec![parent_node],
+                x: 0.0,
+                y: 0.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(p_up_res, EventResult::Handled);
+        assert_eq!(p_up_msg, Some(TestMsg::ParentClick));
     }
 }
