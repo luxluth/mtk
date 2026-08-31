@@ -303,7 +303,7 @@ impl ImageCache {
     }
 }
 
-/// Performs high-performance bilinear downsampling on an RGBA8 buffer to fit within `(max_w, max_h)`.
+/// Performs high-performance anti-aliased area-averaging downsampling on an RGBA8 buffer to fit within `(max_w, max_h)`.
 pub fn downscale_rgba8(
     src_w: u32,
     src_h: u32,
@@ -330,41 +330,67 @@ pub fn downscale_rgba8(
     }
 
     let mut dst = vec![0u8; (dst_w as usize) * (dst_h as usize) * 4];
-    let x_ratio = src_w as f32 / dst_w as f32;
-    let y_ratio = src_h as f32 / dst_h as f32;
+    let scale_x = src_w as f32 / dst_w as f32;
+    let scale_y = src_h as f32 / dst_h as f32;
 
     for dy in 0..dst_h {
-        let sy = (dy as f32 + 0.5) * y_ratio - 0.5;
-        let y0 = (sy.floor().max(0.0) as u32).min(src_h - 1);
-        let y1 = (sy.ceil().max(0.0) as u32).min(src_h - 1);
-        let wy = (sy - y0 as f32).clamp(0.0, 1.0);
+        let src_y_start = (dy as f32) * scale_y;
+        let src_y_end = ((dy + 1) as f32) * scale_y;
+
+        let y_min = src_y_start.floor() as u32;
+        let y_max = (src_y_end.ceil() as u32).min(src_h);
 
         let row_offset = (dy as usize) * (dst_w as usize) * 4;
 
         for dx in 0..dst_w {
-            let sx = (dx as f32 + 0.5) * x_ratio - 0.5;
-            let x0 = (sx.floor().max(0.0) as u32).min(src_w - 1);
-            let x1 = (sx.ceil().max(0.0) as u32).min(src_w - 1);
-            let wx = (sx - x0 as f32).clamp(0.0, 1.0);
+            let src_x_start = (dx as f32) * scale_x;
+            let src_x_end = ((dx + 1) as f32) * scale_x;
 
-            let p00_idx = ((y0 as usize) * (src_w as usize) + (x0 as usize)) * 4;
-            let p10_idx = ((y0 as usize) * (src_w as usize) + (x1 as usize)) * 4;
-            let p01_idx = ((y1 as usize) * (src_w as usize) + (x0 as usize)) * 4;
-            let p11_idx = ((y1 as usize) * (src_w as usize) + (x1 as usize)) * 4;
+            let x_min = src_x_start.floor() as u32;
+            let x_max = (src_x_end.ceil() as u32).min(src_w);
+
+            let mut r_acc = 0.0f32;
+            let mut g_acc = 0.0f32;
+            let mut b_acc = 0.0f32;
+            let mut a_acc = 0.0f32;
+            let mut total_weight = 0.0f32;
+
+            for sy in y_min..y_max {
+                let y_top = (sy as f32).max(src_y_start);
+                let y_bot = ((sy + 1) as f32).min(src_y_end);
+                let wy = (y_bot - y_top).max(0.0);
+                if wy <= 0.0 {
+                    continue;
+                }
+
+                let src_row_idx = (sy as usize) * (src_w as usize) * 4;
+
+                for sx in x_min..x_max {
+                    let x_left = (sx as f32).max(src_x_start);
+                    let x_right = ((sx + 1) as f32).min(src_x_end);
+                    let wx = (x_right - x_left).max(0.0);
+                    let weight = wx * wy;
+
+                    if weight <= 0.0 {
+                        continue;
+                    }
+
+                    let p_idx = src_row_idx + (sx as usize) * 4;
+                    r_acc += (src_pixels[p_idx] as f32) * weight;
+                    g_acc += (src_pixels[p_idx + 1] as f32) * weight;
+                    b_acc += (src_pixels[p_idx + 2] as f32) * weight;
+                    a_acc += (src_pixels[p_idx + 3] as f32) * weight;
+                    total_weight += weight;
+                }
+            }
 
             let dst_idx = row_offset + (dx as usize) * 4;
-
-            let w00 = (1.0 - wx) * (1.0 - wy);
-            let w10 = wx * (1.0 - wy);
-            let w01 = (1.0 - wx) * wy;
-            let w11 = wx * wy;
-
-            for c in 0..4 {
-                let v = (src_pixels[p00_idx + c] as f32) * w00
-                    + (src_pixels[p10_idx + c] as f32) * w10
-                    + (src_pixels[p01_idx + c] as f32) * w01
-                    + (src_pixels[p11_idx + c] as f32) * w11;
-                dst[dst_idx + c] = v.round().clamp(0.0, 255.0) as u8;
+            if total_weight > 0.0 {
+                let inv_w = 1.0 / total_weight;
+                dst[dst_idx] = (r_acc * inv_w).round().clamp(0.0, 255.0) as u8;
+                dst[dst_idx + 1] = (g_acc * inv_w).round().clamp(0.0, 255.0) as u8;
+                dst[dst_idx + 2] = (b_acc * inv_w).round().clamp(0.0, 255.0) as u8;
+                dst[dst_idx + 3] = (a_acc * inv_w).round().clamp(0.0, 255.0) as u8;
             }
         }
     }

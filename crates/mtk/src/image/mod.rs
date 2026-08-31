@@ -726,4 +726,32 @@ mod tests {
         assert_eq!(scaled.len(), 20 * 20 * 4);
         assert_eq!(scaled[0], 255);
     }
+
+    #[test]
+    fn test_downscale_diagonal_antialiasing() {
+        // Draw a diagonal black/white split across a 50x50 image
+        let mut original = vec![0u8; 50 * 50 * 4];
+        for y in 0..50 {
+            for x in 0..50 {
+                let idx = (y * 50 + x) * 4;
+                let val = if x >= y { 255 } else { 0 };
+                original[idx] = val;
+                original[idx + 1] = val;
+                original[idx + 2] = val;
+                original[idx + 3] = 255;
+            }
+        }
+
+        // Downscale to 10x10
+        let (w, h, scaled) = downscale_rgba8(50, 50, &original, 10, 10);
+        assert_eq!(w, 10);
+        assert_eq!(h, 10);
+
+        // Pixels along the diagonal boundary must have intermediate anti-aliased values
+        let diag_pixel_r = scaled[(5 * 10 + 5) * 4];
+        assert!(
+            diag_pixel_r > 0 && diag_pixel_r < 255,
+            "Diagonal boundary must be smoothly anti-aliased, got: {diag_pixel_r}"
+        );
+    }
 }
