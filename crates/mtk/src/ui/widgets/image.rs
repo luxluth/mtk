@@ -73,6 +73,15 @@ impl<State, Msg: Clone> View<State> for Image<Msg> {
             style.apply_to_node(ctx, node);
         }
 
+        if self.data.height > 0 && self.data.width > 0 {
+            let intrinsic_ar = self.data.width as f32 / self.data.height as f32;
+            node.update_constraints(ctx, |c| {
+                if c.aspect_ratio == 0.0 {
+                    c.aspect_ratio = intrinsic_ar;
+                }
+            });
+        }
+
         ctx.images
             .borrow_mut()
             .insert(node, (self.data.clone(), self.fit));
@@ -94,6 +103,15 @@ impl<State, Msg: Clone> View<State> for Image<Msg> {
 
         if let Some(ref style) = self.style {
             style.apply_to_node(ctx, element.node);
+        }
+
+        if self.data.height > 0 && self.data.width > 0 {
+            let intrinsic_ar = self.data.width as f32 / self.data.height as f32;
+            element.node.update_constraints(ctx, |c| {
+                if c.aspect_ratio == 0.0 {
+                    c.aspect_ratio = intrinsic_ar;
+                }
+            });
         }
     }
 

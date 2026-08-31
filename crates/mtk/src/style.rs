@@ -1297,6 +1297,11 @@ impl Style {
         self
     }
 
+    pub fn max_width(mut self, max_w: f32) -> Self {
+        self.base_constraints.max_width = max_w;
+        self
+    }
+
     pub fn height(mut self, size: Size) -> Self {
         self.base_constraints.height = size;
         self
@@ -1304,6 +1309,16 @@ impl Style {
 
     pub fn min_height(mut self, min_h: f32) -> Self {
         self.base_constraints.min_height = min_h;
+        self
+    }
+
+    pub fn max_height(mut self, max_h: f32) -> Self {
+        self.base_constraints.max_height = max_h;
+        self
+    }
+
+    pub fn aspect_ratio(mut self, ratio: f32) -> Self {
+        self.base_constraints.aspect_ratio = ratio;
         self
     }
 
@@ -1755,5 +1770,76 @@ pub(crate) mod tests {
         let untouched_leaf = leaf_nodes[0];
         let untouched_bounds = untouched_leaf.get_computed(&ctx).unwrap();
         assert_eq!(untouched_bounds.w, 50.0);
+    }
+
+    #[test]
+    fn test_aspect_ratio_resolution_modes() {
+        let mut ctx = crate::Context::new();
+
+        // 1. Fixed width + Fit height + Aspect Ratio 2.0
+        let node1 = ctx.create_node();
+        node1.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(100);
+            c.height = Size::Fit;
+            c.aspect_ratio = 2.0;
+        });
+        ctx.root_attach(node1);
+        ctx.compute_layout(500.0, 500.0);
+        let b1 = node1.get_computed(&ctx).unwrap();
+        assert_eq!(b1.w, 100.0);
+        assert_eq!(b1.h, 50.0);
+
+        // 2. Fixed height + Fit width + Aspect Ratio 2.0
+        let node2 = ctx.create_node();
+        node2.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fit;
+            c.height = Size::Fixed(50);
+            c.aspect_ratio = 2.0;
+        });
+        ctx.root_attach(node2);
+        ctx.compute_layout(500.0, 500.0);
+        let b2 = node2.get_computed(&ctx).unwrap();
+        assert_eq!(b2.w, 100.0);
+        assert_eq!(b2.h, 50.0);
+
+        // 3. Child with height: Fill + width: Fit in a Row (Cross-axis stretch)
+        let row = ctx.create_node();
+        row.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(400);
+            c.height = Size::Fixed(40);
+            c.flex_direction = FlexDirection::Row;
+        });
+        let child_fill_h = ctx.create_node();
+        child_fill_h.update_constraints(&mut ctx, |c| {
+            c.height = Size::Fill;
+            c.width = Size::Fit;
+            c.aspect_ratio = 1.5; // w = h * 1.5 = 40 * 1.5 = 60
+        });
+        row.append(&mut ctx, child_fill_h);
+        ctx.root_attach(row);
+        ctx.compute_layout(400.0, 400.0);
+        let b3 = child_fill_h.get_computed(&ctx).unwrap();
+        assert_eq!(b3.h, 40.0);
+        assert_eq!(b3.w, 60.0);
+
+        // 4. Child with width: Fill + height: Fit in a Column
+        let col = ctx.create_node();
+        col.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(300);
+            c.height = Size::Fixed(500);
+            c.flex_direction = FlexDirection::Column;
+        });
+        let child_fill_w = ctx.create_node();
+        child_fill_w.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fill;
+            c.height = Size::Fit;
+            c.aspect_ratio = 1.5; // h = w / 1.5 = 300 / 1.5 = 200
+        });
+        col.append(&mut ctx, child_fill_w);
+        ctx.root_attach(col);
+        ctx.compute_layout(300.0, 500.0);
+        let b4 = child_fill_w.get_computed(&ctx).unwrap();
+        assert_eq!(b4.w, 300.0);
+        assert_eq!(b4.h, 200.0);
     }
 }

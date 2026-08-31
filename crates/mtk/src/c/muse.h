@@ -932,14 +932,42 @@ static void muse__m_clamp_min_max(muComputed *comp, muConstraints *cons) {
 }
 
 static void muse__m_apply_aspect_ratio(muComputed *comp, muConstraints *cons) {
-  if (cons->dimension.aspect_ratio > 0.0f) {
-    if (cons->dimension.width.kind != MU_FIT &&
-        cons->dimension.width.kind != MU_FILL) {
-      comp->h = comp->w / cons->dimension.aspect_ratio;
-    } else if (cons->dimension.height.kind != MU_FIT &&
-               cons->dimension.height.kind != MU_FILL) {
-      comp->w = comp->h * cons->dimension.aspect_ratio;
-    }
+  if (cons->dimension.aspect_ratio <= 0.0f)
+    return;
+
+  float ar = cons->dimension.aspect_ratio;
+  bool is_w_fixed = (cons->dimension.width.kind == MU_FIXED ||
+                     cons->dimension.width.kind == MU_PERCENT);
+  bool is_h_fixed = (cons->dimension.height.kind == MU_FIXED ||
+                     cons->dimension.height.kind == MU_PERCENT);
+
+  // If author explicitly specified both fixed/percent width and height, respect
+  // them
+  if (is_w_fixed && is_h_fixed) {
+    return;
+  }
+
+  if (is_w_fixed && comp->w > 0.0f) {
+    comp->h = comp->w / ar;
+    muse__m_clamp_min_max(comp, cons);
+    return;
+  }
+
+  if (is_h_fixed && comp->h > 0.0f) {
+    comp->w = comp->h * ar;
+    muse__m_clamp_min_max(comp, cons);
+    return;
+  }
+
+  // When one dimension has a resolved non-zero value and the other is fit/zero
+  if (comp->w > 0.0f &&
+      (comp->h == 0.0f || cons->dimension.height.kind == MU_FIT)) {
+    comp->h = comp->w / ar;
+    muse__m_clamp_min_max(comp, cons);
+  } else if (comp->h > 0.0f &&
+             (comp->w == 0.0f || cons->dimension.width.kind == MU_FIT)) {
+    comp->w = comp->h * ar;
+    muse__m_clamp_min_max(comp, cons);
   }
 }
 
@@ -1249,6 +1277,13 @@ static inline float muse__m_get_flex_basis(muConstraints *c_cons,
     if (c_cons->flex_grow > 0.0f || is_main_fill) {
       return 0.0f;
     }
+    if (c_cons->dimension.aspect_ratio > 0.0f) {
+      if (is_row_dir && c_comp->w == 0.0f && c_comp->h > 0.0f) {
+        return c_comp->h * c_cons->dimension.aspect_ratio;
+      } else if (!is_row_dir && c_comp->h == 0.0f && c_comp->w > 0.0f) {
+        return c_comp->w / c_cons->dimension.aspect_ratio;
+      }
+    }
     return is_row_dir ? c_comp->w : c_comp->h;
   }
 }
@@ -1345,7 +1380,7 @@ static void muse__m_compute_flex_distribution_node(muContext *ctx,
         }
       }
 
-      if (modified) {
+      if (modified || c_cons->dimension.aspect_ratio > 0.0f) {
         muse__m_clamp_min_max(c_comp, c_cons);
         muse__m_apply_aspect_ratio(c_comp, c_cons);
       }

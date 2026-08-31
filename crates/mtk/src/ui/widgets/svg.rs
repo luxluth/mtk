@@ -111,6 +111,15 @@ impl<State, Msg: Clone> View<State> for Svg<Msg> {
             style.apply_to_node(ctx, node);
         }
 
+        if self.data.height > 0.0 && self.data.width > 0.0 {
+            let intrinsic_ar = self.data.width / self.data.height;
+            node.update_constraints(ctx, |c| {
+                if c.aspect_ratio == 0.0 {
+                    c.aspect_ratio = intrinsic_ar;
+                }
+            });
+        }
+
         let data = if self.style_opts != SvgStyle::default() {
             self.data
                 .with_style(&self.style_opts)
@@ -147,6 +156,15 @@ impl<State, Msg: Clone> View<State> for Svg<Msg> {
 
         if let Some(ref style) = self.style {
             style.apply_to_node(ctx, element.node);
+        }
+
+        if self.data.height > 0.0 && self.data.width > 0.0 {
+            let intrinsic_ar = self.data.width / self.data.height;
+            element.node.update_constraints(ctx, |c| {
+                if c.aspect_ratio == 0.0 {
+                    c.aspect_ratio = intrinsic_ar;
+                }
+            });
         }
     }
 
