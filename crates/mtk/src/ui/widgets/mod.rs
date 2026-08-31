@@ -51,6 +51,7 @@ pub use svg::*;
 pub use switch::*;
 pub use textarea::*;
 pub use tooltip::*;
+pub use virtual_list::*;
 
 mod badge;
 mod button;
@@ -70,6 +71,7 @@ mod svg;
 mod switch;
 mod textarea;
 mod tooltip;
+mod virtual_list;
 
 use crate::debugger::SourceLocation;
 

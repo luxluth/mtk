@@ -60,8 +60,8 @@ where
     attr: WindowAttributes,
     cursor_pos: (f32, f32),
     last_frame_time: Instant,
-    scroll_targets: HashMap<Node, f32>,
-    scroll_targets_x: HashMap<Node, f32>,
+    scroll_velocities: HashMap<Node, (f32, f32)>,
+    last_touch_velocity: HashMap<Node, (f32, f32)>,
     drag_scroll_node: Option<(Node, f32, f32)>,
     drag_scroll_x_node: Option<(Node, f32, f32)>,
 
@@ -237,8 +237,8 @@ where
             element: Some(element),
             cursor_pos: (0.0, 0.0),
             last_frame_time: Instant::now(),
-            scroll_targets: HashMap::new(),
-            scroll_targets_x: HashMap::new(),
+            scroll_velocities: HashMap::new(),
+            last_touch_velocity: HashMap::new(),
             drag_scroll_node: None,
             drag_scroll_x_node: None,
             debug_tx: None,
@@ -304,94 +304,82 @@ where
         ) {
             let is_tick = matches!(mtk_event, Event::Tick { .. });
 
-            // Sync scroll targets when widgets update constraints.scroll directly
-            if !matches!(mtk_event, Event::Tick { .. } | Event::MouseWheel { .. }) {
-                let targets_y: Vec<Node> = self.scroll_targets.keys().copied().collect();
-                for node in targets_y {
-                    if let Some(c) = node.get_constraints(&self.context) {
-                        self.scroll_targets.insert(node, c.scroll.y);
-                    }
-                }
-                let targets_x: Vec<Node> = self.scroll_targets_x.keys().copied().collect();
-                for node in targets_x {
-                    if let Some(c) = node.get_constraints(&self.context) {
-                        self.scroll_targets_x.insert(node, c.scroll.x);
-                    }
-                }
-            }
-
-            // A) Tick kinetic lerping for ultra-smooth 120Hz/60Hz scrolling
+            // A) Tick kinetic velocity simulation for physical momentum scrolling
             if let Event::Tick { dt } = mtk_event {
-                let mut lerp_animating = false;
-                let keys: Vec<Node> = self.scroll_targets.keys().copied().collect();
-                for node in keys {
-                    if self.drag_scroll_node.map(|(n, ..)| n) == Some(node) {
+                let mut is_animating = false;
+                let dt_clamped = dt.clamp(0.001, 0.05);
+                let friction = 4.8;
+                let decay = (-friction * dt_clamped).exp();
+
+                let nodes: Vec<Node> = self.scroll_velocities.keys().copied().collect();
+                for node in nodes {
+                    if self.drag_scroll_node.map(|(n, ..)| n) == Some(node)
+                        || self.drag_scroll_x_node.map(|(n, ..)| n) == Some(node)
+                    {
                         continue;
                     }
-                    if let Some(target_scroll_y) = self.scroll_targets.get(&node).copied() {
+                    if let Some((mut vx, mut vy)) = self.scroll_velocities.get(&node).copied() {
                         let constraints = node.get_constraints(&self.context).unwrap_or_default();
-                        let (computed_h, content_h) =
+                        let (computed_w, computed_h, content_w, content_h) =
                             if let Some(computed) = node.get_computed(&self.context) {
-                                (computed.h, node.compute_content_height(&self.context))
+                                (
+                                    computed.w,
+                                    computed.h,
+                                    computed.content_w.max(computed.w),
+                                    node.compute_content_height(&self.context),
+                                )
                             } else {
-                                (0.0, 0.0)
+                                (0.0, 0.0, 0.0, 0.0)
                             };
                         let max_scroll_y = (content_h - computed_h).max(0.0);
-                        let clamped_target = target_scroll_y.clamp(0.0, max_scroll_y);
-
-                        let diff = clamped_target - constraints.scroll.y;
-                        if diff.abs() > 0.1 {
-                            lerp_animating = true;
-                            let factor = 1.0 - (-22.0 * dt).exp();
-                            let new_scroll_y = constraints.scroll.y + diff * factor;
-                            node.update_constraints(&mut self.context, |c| {
-                                c.scroll.y = new_scroll_y;
-                            });
-                        } else {
-                            if (constraints.scroll.y - clamped_target).abs() > 0.001 {
-                                node.update_constraints(&mut self.context, |c| {
-                                    c.scroll.y = clamped_target;
-                                });
-                            }
-                            self.scroll_targets.insert(node, constraints.scroll.y);
-                        }
-                    }
-                }
-                let keys_x: Vec<Node> = self.scroll_targets_x.keys().copied().collect();
-                for node in keys_x {
-                    if self.drag_scroll_x_node.map(|(n, ..)| n) == Some(node) {
-                        continue;
-                    }
-                    if let Some(target_scroll_x) = self.scroll_targets_x.get(&node).copied() {
-                        let constraints = node.get_constraints(&self.context).unwrap_or_default();
-                        let (computed_w, content_w) =
-                            if let Some(computed) = node.get_computed(&self.context) {
-                                (computed.w, computed.content_w.max(computed.w))
-                            } else {
-                                (0.0, 0.0)
-                            };
                         let max_scroll_x = (content_w - computed_w).max(0.0);
-                        let clamped_target = target_scroll_x.clamp(0.0, max_scroll_x);
 
-                        let diff = clamped_target - constraints.scroll.x;
-                        if diff.abs() > 0.1 {
-                            lerp_animating = true;
-                            let factor = 1.0 - (-22.0 * dt).exp();
-                            let new_scroll_x = constraints.scroll.x + diff * factor;
-                            node.update_constraints(&mut self.context, |c| {
-                                c.scroll.x = new_scroll_x;
-                            });
-                        } else {
-                            if (constraints.scroll.x - clamped_target).abs() > 0.001 {
-                                node.update_constraints(&mut self.context, |c| {
-                                    c.scroll.x = clamped_target;
-                                });
+                        let mut next_scroll_y = constraints.scroll.y;
+                        let mut next_scroll_x = constraints.scroll.x;
+
+                        if vy.abs() > 1.0 && max_scroll_y > 0.0 {
+                            next_scroll_y =
+                                (constraints.scroll.y + vy * dt_clamped).clamp(0.0, max_scroll_y);
+                            if next_scroll_y == 0.0 || next_scroll_y == max_scroll_y {
+                                vy = 0.0;
+                            } else {
+                                vy *= decay;
                             }
-                            self.scroll_targets_x.insert(node, constraints.scroll.x);
+                        } else {
+                            vy = 0.0;
+                        }
+
+                        if vx.abs() > 1.0 && max_scroll_x > 0.0 {
+                            next_scroll_x =
+                                (constraints.scroll.x + vx * dt_clamped).clamp(0.0, max_scroll_x);
+                            if next_scroll_x == 0.0 || next_scroll_x == max_scroll_x {
+                                vx = 0.0;
+                            } else {
+                                vx *= decay;
+                            }
+                        } else {
+                            vx = 0.0;
+                        }
+
+                        if (next_scroll_y - constraints.scroll.y).abs() > 0.001
+                            || (next_scroll_x - constraints.scroll.x).abs() > 0.001
+                        {
+                            node.update_constraints(&mut self.context, |c| {
+                                c.scroll.y = next_scroll_y;
+                                c.scroll.x = next_scroll_x;
+                            });
+                        }
+
+                        if vy.abs() > 1.0 || vx.abs() > 1.0 {
+                            is_animating = true;
+                            self.scroll_velocities.insert(node, (vx, vy));
+                        } else {
+                            self.scroll_velocities.remove(&node);
                         }
                     }
                 }
-                if lerp_animating {
+
+                if is_animating {
                     if let Some(window) = &self.window {
                         window.request_redraw();
                     }
@@ -462,7 +450,7 @@ where
                             node.update_constraints(&mut self.context, |c| {
                                 c.scroll.y = new_scroll_y;
                             });
-                            self.scroll_targets.insert(node, new_scroll_y);
+                            self.scroll_velocities.remove(&node);
                             if let Some(window) = &self.window {
                                 window.request_redraw();
                             }
@@ -484,7 +472,7 @@ where
                             node.update_constraints(&mut self.context, |c| {
                                 c.scroll.x = new_scroll_x;
                             });
-                            self.scroll_targets_x.insert(node, new_scroll_x);
+                            self.scroll_velocities.remove(&node);
                             if let Some(window) = &self.window {
                                 window.request_redraw();
                             }
@@ -520,8 +508,9 @@ where
                 if let Event::MouseWheel {
                     delta_x,
                     delta_y,
+                    is_touchpad,
+                    phase,
                     ref hit_nodes,
-                    ..
                 } = mtk_event
                 {
                     for node in hit_nodes.iter().rev() {
@@ -542,39 +531,105 @@ where
 
                                 let mut scrolled = false;
 
-                                if is_scrollable_y && max_scroll_y > 0.0 && delta_y.abs() > 0.0 {
-                                    let current_target = self
-                                        .scroll_targets
-                                        .get(node)
-                                        .copied()
-                                        .unwrap_or(constraints.scroll.y);
-                                    let new_target =
-                                        (current_target - delta_y * 1.6).clamp(0.0, max_scroll_y);
-                                    self.scroll_targets.insert(*node, new_target);
-                                    scrolled = true;
-                                }
+                                if is_touchpad {
+                                    use winit::event::TouchPhase;
+                                    match phase {
+                                        TouchPhase::Started => {
+                                            self.scroll_velocities.remove(node);
+                                            self.last_touch_velocity.remove(node);
+                                        }
+                                        TouchPhase::Moved => {
+                                            self.scroll_velocities.remove(node);
+                                            let mut new_scroll_y = constraints.scroll.y;
+                                            let mut new_scroll_x = constraints.scroll.x;
 
-                                let scroll_delta_x = if delta_x.abs() > 0.0 {
-                                    delta_x
-                                } else if max_scroll_y == 0.0 || !is_scrollable_y {
-                                    delta_y
+                                            if is_scrollable_y && max_scroll_y > 0.0 {
+                                                new_scroll_y = (constraints.scroll.y - delta_y)
+                                                    .clamp(0.0, max_scroll_y);
+                                            }
+                                            if is_scrollable_x && max_scroll_x > 0.0 {
+                                                new_scroll_x = (constraints.scroll.x - delta_x)
+                                                    .clamp(0.0, max_scroll_x);
+                                            }
+
+                                            if new_scroll_y != constraints.scroll.y
+                                                || new_scroll_x != constraints.scroll.x
+                                            {
+                                                node.update_constraints(&mut self.context, |c| {
+                                                    c.scroll.y = new_scroll_y;
+                                                    c.scroll.x = new_scroll_x;
+                                                });
+                                                scrolled = true;
+                                            }
+                                            let dt = (self.context.dt as f32).max(0.008);
+                                            let vy = -delta_y / dt;
+                                            let vx = -delta_x / dt;
+                                            self.last_touch_velocity.insert(*node, (vx, vy));
+                                        }
+                                        TouchPhase::Ended => {
+                                            if let Some((vx, vy)) =
+                                                self.last_touch_velocity.remove(node)
+                                            {
+                                                if vx.abs() > 10.0 || vy.abs() > 10.0 {
+                                                    self.scroll_velocities.insert(*node, (vx, vy));
+                                                    scrolled = true;
+                                                }
+                                            }
+                                        }
+                                        TouchPhase::Cancelled => {
+                                            self.scroll_velocities.remove(node);
+                                            self.last_touch_velocity.remove(node);
+                                        }
+                                    }
                                 } else {
-                                    0.0
-                                };
-
-                                if is_scrollable_x
-                                    && max_scroll_x > 0.0
-                                    && scroll_delta_x.abs() > 0.0
-                                {
-                                    let current_target = self
-                                        .scroll_targets_x
+                                    let (cur_vx, cur_vy) = self
+                                        .scroll_velocities
                                         .get(node)
                                         .copied()
-                                        .unwrap_or(constraints.scroll.x);
-                                    let new_target = (current_target - scroll_delta_x * 1.6)
-                                        .clamp(0.0, max_scroll_x);
-                                    self.scroll_targets_x.insert(*node, new_target);
-                                    scrolled = true;
+                                        .unwrap_or((0.0, 0.0));
+
+                                    let mut new_vy = cur_vy;
+                                    let mut new_vx = cur_vx;
+
+                                    if is_scrollable_y && max_scroll_y > 0.0 && delta_y.abs() > 0.0
+                                    {
+                                        let impulse_y = -delta_y * 45.0;
+                                        new_vy = if (cur_vy > 0.0 && impulse_y > 0.0)
+                                            || (cur_vy < 0.0 && impulse_y < 0.0)
+                                        {
+                                            (cur_vy * 0.7 + impulse_y).clamp(-15000.0, 15000.0)
+                                        } else {
+                                            impulse_y
+                                        };
+                                        scrolled = true;
+                                    }
+
+                                    let scroll_delta_x = if delta_x.abs() > 0.0 {
+                                        delta_x
+                                    } else if max_scroll_y == 0.0 || !is_scrollable_y {
+                                        delta_y
+                                    } else {
+                                        0.0
+                                    };
+
+                                    if is_scrollable_x
+                                        && max_scroll_x > 0.0
+                                        && scroll_delta_x.abs() > 0.0
+                                    {
+                                        let impulse_x = -scroll_delta_x * 45.0;
+                                        new_vx = if (cur_vx > 0.0 && impulse_x > 0.0)
+                                            || (cur_vx < 0.0 && impulse_x < 0.0)
+                                        {
+                                            (cur_vx * 0.7 + impulse_x).clamp(-15000.0, 15000.0)
+                                        } else {
+                                            impulse_x
+                                        };
+                                        scrolled = true;
+                                    }
+
+                                    if scrolled {
+                                        self.scroll_velocities.insert(*node, (new_vx, new_vy));
+                                    }
                                 }
 
                                 if scrolled {
