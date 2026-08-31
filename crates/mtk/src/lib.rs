@@ -21,7 +21,7 @@ pub use mtk_macro::Lens;
 pub use crate::colors::Color;
 use crate::debugger::{LayoutSnapshot, NodeDebugInfo, SourceLocation};
 use crate::effects::Effects;
-pub use crate::image::{ImageData, ObjectFit, SvgData};
+pub use crate::image::{ImageData, ObjectFit, SvgData, SvgStyle};
 pub use crate::layer::*;
 pub use crate::node::Node;
 pub use crate::render::RenderCommand;

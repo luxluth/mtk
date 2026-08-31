@@ -112,6 +112,115 @@ impl ImageData {
 
 use crate::colors::Color;
 
+/// Configuration for dynamic SVG CSS styling.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SvgStyle {
+    /// Sets CSS `currentColor` on root `<svg>`.
+    pub color: Option<Color>,
+    /// Sets `fill` on SVG elements.
+    pub fill: Option<Color>,
+    /// Sets `stroke` color on SVG elements.
+    pub stroke: Option<Color>,
+    /// Sets `stroke-width` in pixels.
+    pub stroke_width: Option<f32>,
+    /// Custom CSS stylesheet string appended to usvg options.
+    pub custom_css: Option<String>,
+}
+
+impl SvgStyle {
+    /// Creates a default empty `SvgStyle`.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets CSS `currentColor` on root `<svg>`.
+    pub fn color(mut self, color: Color) -> Self {
+        self.color = Some(color);
+        self
+    }
+
+    /// Sets `fill` color. Use `Color::new(0, 0, 0, 0)` for `fill: none`.
+    pub fn fill(mut self, fill: Color) -> Self {
+        self.fill = Some(fill);
+        self
+    }
+
+    /// Sets `stroke` color. Use `Color::new(0, 0, 0, 0)` for `stroke: none`.
+    pub fn stroke(mut self, stroke: Color) -> Self {
+        self.stroke = Some(stroke);
+        self
+    }
+
+    /// Sets `stroke-width` in pixels.
+    pub fn stroke_width(mut self, width: f32) -> Self {
+        self.stroke_width = Some(width);
+        self
+    }
+
+    /// Appends a raw custom CSS stylesheet.
+    pub fn custom_css(mut self, css: impl Into<String>) -> Self {
+        self.custom_css = Some(css.into());
+        self
+    }
+
+    /// Compiles the style options into a CSS stylesheet for `usvg`.
+    pub fn to_css(&self) -> Option<String> {
+        let mut rules = String::new();
+
+        if let Some(c) = self.color {
+            rules.push_str(&format!(
+                "svg {{ color: rgba({}, {}, {}, {}); }}\n",
+                c.r,
+                c.g,
+                c.b,
+                c.a as f32 / 255.0
+            ));
+        }
+
+        let mut elem_rules = String::new();
+        if let Some(f) = self.fill {
+            if f.a == 0 {
+                elem_rules.push_str("fill: none;\n");
+            } else {
+                elem_rules.push_str(&format!(
+                    "fill: rgba({}, {}, {}, {});\n",
+                    f.r,
+                    f.g,
+                    f.b,
+                    f.a as f32 / 255.0
+                ));
+            }
+        }
+        if let Some(s) = self.stroke {
+            if s.a == 0 {
+                elem_rules.push_str("stroke: none;\n");
+            } else {
+                elem_rules.push_str(&format!(
+                    "stroke: rgba({}, {}, {}, {});\n",
+                    s.r,
+                    s.g,
+                    s.b,
+                    s.a as f32 / 255.0
+                ));
+            }
+        }
+        if let Some(w) = self.stroke_width {
+            elem_rules.push_str(&format!("stroke-width: {}px;\n", w));
+        }
+
+        if !elem_rules.is_empty() {
+            rules.push_str(&format!("svg, * {{\n{}}}\n", elem_rules));
+        }
+
+        if let Some(ref custom) = self.custom_css {
+            rules.push_str(custom);
+            rules.push('\n');
+        }
+
+        if rules.is_empty() { None } else { Some(rules) }
+    }
+}
+
 /// Parsed vector SVG data backed by `usvg::Tree`.
 #[derive(Clone)]
 pub struct SvgData {
@@ -120,6 +229,7 @@ pub struct SvgData {
     pub height: f32,
     pub tree: Arc<resvg::usvg::Tree>,
     pub source: Arc<[u8]>,
+    pub style: SvgStyle,
 }
 
 impl std::fmt::Debug for SvgData {
@@ -143,6 +253,11 @@ impl SvgData {
         Self::from_bytes_with_color(svg_str.as_bytes(), color)
     }
 
+    /// Parses an SVG from a UTF-8 string with dynamic CSS styling.
+    pub fn from_str_with_style(svg_str: &str, style: &SvgStyle) -> Result<Self, String> {
+        Self::from_bytes_with_style(svg_str.as_bytes(), style)
+    }
+
     /// Parses an SVG from byte slice.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
         let opt = resvg::usvg::Options::default();
@@ -151,15 +266,16 @@ impl SvgData {
 
     /// Parses an SVG from byte slice with a default `currentColor` CSS value.
     pub fn from_bytes_with_color(bytes: &[u8], color: Color) -> Result<Self, String> {
+        Self::from_bytes_with_style(bytes, &SvgStyle::new().color(color))
+    }
+
+    /// Parses an SVG from byte slice with dynamic CSS styling.
+    pub fn from_bytes_with_style(bytes: &[u8], style: &SvgStyle) -> Result<Self, String> {
         let mut opt = resvg::usvg::Options::default();
-        opt.style_sheet = Some(format!(
-            "svg {{ color: rgba({}, {}, {}, {}); }}",
-            color.r,
-            color.g,
-            color.b,
-            color.a as f32 / 255.0
-        ));
-        Self::from_bytes_with_options(bytes, opt)
+        opt.style_sheet = style.to_css();
+        let mut data = Self::from_bytes_with_options(bytes, opt)?;
+        data.style = style.clone();
+        Ok(data)
     }
 
     /// Parses an SVG from byte slice with explicit `usvg::Options`.
@@ -181,6 +297,7 @@ impl SvgData {
             height,
             tree: Arc::new(tree),
             source: bytes.into(),
+            style: SvgStyle::default(),
         })
     }
 
@@ -201,9 +318,48 @@ impl SvgData {
         Self::from_bytes_with_color(&bytes, color)
     }
 
+    /// Parses an SVG from a file path on disk with dynamic CSS styling.
+    pub fn from_file_with_style<P: AsRef<std::path::Path>>(
+        path: P,
+        style: &SvgStyle,
+    ) -> Result<Self, String> {
+        let bytes = std::fs::read(path.as_ref())
+            .map_err(|e| format!("Failed to read SVG file '{:?}': {e}", path.as_ref()))?;
+        Self::from_bytes_with_style(&bytes, style)
+    }
+
+    /// Re-parses the SVG with dynamic CSS styling.
+    pub fn with_style(&self, style: &SvgStyle) -> Result<Self, String> {
+        Self::from_bytes_with_style(&self.source, style)
+    }
+
     /// Re-parses the SVG with a dynamic `currentColor`.
     pub fn with_color(&self, color: Color) -> Result<Self, String> {
-        Self::from_bytes_with_color(&self.source, color)
+        let mut style = self.style.clone();
+        style.color = Some(color);
+        self.with_style(&style)
+    }
+
+    /// Re-parses the SVG with a dynamic fill color.
+    pub fn with_fill(&self, fill: Color) -> Result<Self, String> {
+        let mut style = self.style.clone();
+        style.fill = Some(fill);
+        self.with_style(&style)
+    }
+
+    /// Re-parses the SVG with a dynamic stroke color and width.
+    pub fn with_stroke(&self, stroke: Color, width: f32) -> Result<Self, String> {
+        let mut style = self.style.clone();
+        style.stroke = Some(stroke);
+        style.stroke_width = Some(width);
+        self.with_style(&style)
+    }
+
+    /// Re-parses the SVG with custom CSS rules.
+    pub fn with_css(&self, css: impl Into<String>) -> Result<Self, String> {
+        let mut style = self.style.clone();
+        style.custom_css = Some(css.into());
+        self.with_style(&style)
     }
 
     /// Rasterizes the SVG at a specific target pixel resolution `(target_w, target_h)`.
@@ -390,5 +546,65 @@ mod tests {
             assert_eq!(pixmap.width(), 300);
             assert_eq!(pixmap.height(), 300);
         }
+    }
+
+    #[test]
+    fn test_svg_dynamic_styling() {
+        let svg_raw = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+            <rect x="10" y="10" width="80" height="80" />
+        </svg>"#;
+
+        // 1. Test fill override
+        let red = Color::new(255, 0, 0, 255);
+        let svg_fill = SvgData::from_str(svg_raw).unwrap().with_fill(red).unwrap();
+        let pixmap = svg_fill
+            .render_to_pixmap(100, 100, ObjectFit::Fill)
+            .unwrap();
+        let center = pixmap.pixel(50, 50).unwrap();
+        assert_eq!(
+            (center.red(), center.green(), center.blue(), center.alpha()),
+            (255, 0, 0, 255)
+        );
+
+        // 2. Test stroke override with stroke width
+        let blue = Color::new(0, 0, 255, 255);
+        let svg_stroke = SvgData::from_str(svg_raw)
+            .unwrap()
+            .with_fill(Color::new(0, 0, 0, 0))
+            .unwrap()
+            .with_stroke(blue, 10.0)
+            .unwrap();
+        let pixmap_stroke = svg_stroke
+            .render_to_pixmap(100, 100, ObjectFit::Fill)
+            .unwrap();
+        // Border pixel (10, 50) is blue stroke
+        let border = pixmap_stroke.pixel(10, 50).unwrap();
+        assert_eq!(
+            (border.red(), border.green(), border.blue(), border.alpha()),
+            (0, 0, 255, 255)
+        );
+        // Center pixel (50, 50) is transparent because fill: none
+        let center_empty = pixmap_stroke.pixel(50, 50).unwrap();
+        assert_eq!(center_empty.alpha(), 0);
+
+        // 3. Test comprehensive SvgStyle builder
+        let style = SvgStyle::new()
+            .fill(Color::new(0, 255, 0, 255))
+            .stroke(Color::new(255, 255, 0, 255))
+            .stroke_width(4.0);
+        let svg_styled = SvgData::from_str_with_style(svg_raw, &style).unwrap();
+        let pixmap_styled = svg_styled
+            .render_to_pixmap(100, 100, ObjectFit::Fill)
+            .unwrap();
+        let styled_center = pixmap_styled.pixel(50, 50).unwrap();
+        assert_eq!(
+            (
+                styled_center.red(),
+                styled_center.green(),
+                styled_center.blue(),
+                styled_center.alpha()
+            ),
+            (0, 255, 0, 255)
+        );
     }
 }

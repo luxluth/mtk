@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 
 use crate::colors::Color;
 use crate::debugger::SourceLocation;
-use crate::image::{ObjectFit, SvgData};
+use crate::image::{ObjectFit, SvgData, SvgStyle};
 use crate::style::Style;
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
@@ -14,7 +14,7 @@ use crate::{Context, Node};
 pub struct Svg<Msg> {
     pub(crate) data: SvgData,
     pub(crate) fit: ObjectFit,
-    pub(crate) color: Option<Color>,
+    pub(crate) style_opts: SvgStyle,
     pub(crate) style: Option<Style>,
     pub(crate) on_click: Option<Msg>,
     pub(crate) source_loc: Option<SourceLocation>,
@@ -27,7 +27,7 @@ pub fn svg<Msg>(data: SvgData) -> Svg<Msg> {
     Svg {
         data,
         fit: ObjectFit::default(),
-        color: None,
+        style_opts: SvgStyle::default(),
         style: None,
         on_click: None,
         source_loc: Some(SourceLocation::here("Svg")),
@@ -44,11 +44,41 @@ impl<Msg> Svg<Msg> {
 
     /// Sets the CSS `currentColor` value for the SVG.
     pub fn color(mut self, color: Color) -> Self {
-        self.color = Some(color);
+        self.style_opts.color = Some(color);
         self
     }
 
-    /// Sets custom styles (width, height, corner radius, borders, shadows) for the SVG container.
+    /// Sets the `fill` color for SVG elements (use `Color::new(0, 0, 0, 0)` for `fill: none`).
+    pub fn fill(mut self, fill: Color) -> Self {
+        self.style_opts.fill = Some(fill);
+        self
+    }
+
+    /// Sets the `stroke` color for SVG elements (use `Color::new(0, 0, 0, 0)` for `stroke: none`).
+    pub fn stroke(mut self, stroke: Color) -> Self {
+        self.style_opts.stroke = Some(stroke);
+        self
+    }
+
+    /// Sets the `stroke-width` in pixels for SVG elements.
+    pub fn stroke_width(mut self, width: f32) -> Self {
+        self.style_opts.stroke_width = Some(width);
+        self
+    }
+
+    /// Appends a raw custom CSS stylesheet string for `usvg`.
+    pub fn custom_css(mut self, css: impl Into<String>) -> Self {
+        self.style_opts.custom_css = Some(css.into());
+        self
+    }
+
+    /// Sets comprehensive dynamic SVG CSS styling options.
+    pub fn svg_style(mut self, style: SvgStyle) -> Self {
+        self.style_opts = style;
+        self
+    }
+
+    /// Sets custom layout styles (width, height, corner radius, borders, shadows) for the SVG container.
     pub fn style(mut self, style: Style) -> Self {
         self.style = Some(style);
         self
@@ -81,9 +111,9 @@ impl<State, Msg: Clone> View<State> for Svg<Msg> {
             style.apply_to_node(ctx, node);
         }
 
-        let data = if let Some(color) = self.color {
+        let data = if self.style_opts != SvgStyle::default() {
             self.data
-                .with_color(color)
+                .with_style(&self.style_opts)
                 .unwrap_or_else(|_| self.data.clone())
         } else {
             self.data.clone()
@@ -99,15 +129,18 @@ impl<State, Msg: Clone> View<State> for Svg<Msg> {
     }
 
     fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
-        let data = if let Some(color) = self.color {
+        let data = if self.style_opts != SvgStyle::default() {
             self.data
-                .with_color(color)
+                .with_style(&self.style_opts)
                 .unwrap_or_else(|_| self.data.clone())
         } else {
             self.data.clone()
         };
 
-        if self.data.id != prev.data.id || self.fit != prev.fit || self.color != prev.color {
+        if self.data.id != prev.data.id
+            || self.fit != prev.fit
+            || self.style_opts != prev.style_opts
+        {
             ctx.svgs.borrow_mut().insert(element.node, (data, self.fit));
             element.node.set_dirty(ctx);
         }
