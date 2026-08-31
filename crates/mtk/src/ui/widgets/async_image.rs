@@ -2,28 +2,32 @@ use std::marker::PhantomData;
 use std::path::PathBuf;
 
 use crate::debugger::SourceLocation;
-use crate::image::{ImageCache, ObjectFit};
+use crate::image::{CacheKey, ImageCache, ObjectFit};
 use crate::style::Style;
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
 use crate::{Context, Node};
 
 /// A widget that asynchronously streams and displays an image from a file path without blocking the UI thread.
+///
+/// Automatically downscales large images in the background to match the node's computed layout resolution and display DPI.
 pub struct AsyncImage<Msg> {
     pub(crate) path: PathBuf,
     pub(crate) fit: ObjectFit,
     pub(crate) style: Option<Style>,
+    pub(crate) max_dim: Option<(u32, u32)>,
     pub(crate) source_loc: Option<SourceLocation>,
     _marker: PhantomData<Msg>,
 }
 
-/// Creates a new `AsyncImage` widget that streams the image from disk in the background.
+/// Creates a new `AsyncImage` widget that streams and automatically scales the image from disk in the background.
 #[track_caller]
 pub fn async_image<Msg>(path: impl Into<PathBuf>) -> AsyncImage<Msg> {
     AsyncImage {
         path: path.into(),
         fit: ObjectFit::default(),
         style: None,
+        max_dim: None,
         source_loc: Some(SourceLocation::here("AsyncImage")),
         _marker: PhantomData,
     }
@@ -41,11 +45,60 @@ impl<Msg> AsyncImage<Msg> {
         self.style = Some(style);
         self
     }
+
+    /// Explicitly overrides the maximum thumbnail bounds in physical pixels.
+    pub fn max_dimension(mut self, width: u32, height: u32) -> Self {
+        self.max_dim = Some((width.max(1), height.max(1)));
+        self
+    }
+
+    fn resolve_target_dim(&self, ctx: &Context, node: Node) -> Option<(u32, u32)> {
+        if let Some(dim) = self.max_dim {
+            return Some(dim);
+        }
+
+        let scale = ctx.scale_factor.max(1.0);
+
+        // 1. Check computed layout bounds from layout pass
+        if let Some(comp) = node.get_computed(ctx) {
+            if comp.w > 0.0 && comp.h > 0.0 {
+                let tw = (comp.w * scale).ceil().max(1.0) as u32;
+                let th = (comp.h * scale).ceil().max(1.0) as u32;
+                return Some((tw, th));
+            }
+        }
+
+        // 2. Check explicit style constraints on node
+        if let Some(cons) = node.get_constraints(ctx) {
+            let w = match cons.width {
+                crate::style::Size::Fixed(v) if v > 0 => {
+                    Some(((v as f32) * scale).ceil().max(1.0) as u32)
+                }
+                _ => None,
+            };
+            let h = match cons.height {
+                crate::style::Size::Fixed(v) if v > 0 => {
+                    Some(((v as f32) * scale).ceil().max(1.0) as u32)
+                }
+                _ => None,
+            };
+            match (w, h) {
+                (Some(tw), Some(th)) => return Some((tw, th)),
+                (Some(tw), None) => return Some((tw, tw)),
+                (None, Some(th)) => return Some((th, th)),
+                (None, None) => {}
+            }
+        }
+
+        // Default ceiling for unconstrained layouts
+        Some((1024, 1024))
+    }
 }
 
 pub struct AsyncImageElement {
     pub(crate) node: Node,
     pub(crate) current_path: PathBuf,
+    pub(crate) target_dim: Option<(u32, u32)>,
     pub(crate) attached_image_id: Option<u64>,
 }
 
@@ -63,9 +116,15 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
             style.apply_to_node(ctx, node);
         }
 
+        let target_dim = self.resolve_target_dim(ctx, node);
+        let key = CacheKey {
+            path: self.path.clone(),
+            max_dim: target_dim,
+        };
+
         let mut attached_image_id = None;
 
-        if let Some(data) = ImageCache::global().get(&self.path) {
+        if let Some(data) = ImageCache::global().get_keyed(&key) {
             if data.height > 0 && data.width > 0 {
                 let intrinsic_ar = data.width as f32 / data.height as f32;
                 node.update_constraints(ctx, |c| {
@@ -80,9 +139,8 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
             attached_image_id = Some(data.id);
         } else {
             let window = ctx.window();
-            let path_clone = self.path.clone();
-            ImageCache::global().load_async(
-                path_clone,
+            ImageCache::global().load_async_keyed(
+                key,
                 Some(move |_result| {
                     if let Some(win) = window {
                         win.request_redraw();
@@ -94,6 +152,7 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
         AsyncImageElement {
             node,
             current_path: self.path.clone(),
+            target_dim,
             attached_image_id,
         }
     }
@@ -103,13 +162,20 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
             style.apply_to_node(ctx, element.node);
         }
 
-        let path_changed = element.current_path != self.path;
+        let target_dim = self.resolve_target_dim(ctx, element.node);
+        let path_changed = element.current_path != self.path || element.target_dim != target_dim;
         if path_changed {
             element.current_path = self.path.clone();
+            element.target_dim = target_dim;
             element.attached_image_id = None;
         }
 
-        if let Some(data) = ImageCache::global().get(&self.path) {
+        let key = CacheKey {
+            path: self.path.clone(),
+            max_dim: target_dim,
+        };
+
+        if let Some(data) = ImageCache::global().get_keyed(&key) {
             let needs_update = element.attached_image_id != Some(data.id);
             if needs_update {
                 if data.height > 0 && data.width > 0 {
@@ -126,11 +192,10 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
                 element.attached_image_id = Some(data.id);
                 element.node.set_dirty(ctx);
             }
-        } else if !ImageCache::global().is_loading(&self.path) {
+        } else if !ImageCache::global().is_loading_keyed(&key) {
             let window = ctx.window();
-            let path_clone = self.path.clone();
-            ImageCache::global().load_async(
-                path_clone,
+            ImageCache::global().load_async_keyed(
+                key,
                 Some(move |_result| {
                     if let Some(win) = window {
                         win.request_redraw();
@@ -159,7 +224,12 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
     ) -> (EventResult, Option<Self::Message>) {
         if matches!(event, Event::Tick { .. }) {
             if element.attached_image_id.is_none() {
-                if let Some(data) = ImageCache::global().get(&element.current_path) {
+                let target_dim = self.resolve_target_dim(ctx, element.node);
+                let key = CacheKey {
+                    path: element.current_path.clone(),
+                    max_dim: target_dim,
+                };
+                if let Some(data) = ImageCache::global().get_keyed(&key) {
                     if data.height > 0 && data.width > 0 {
                         let intrinsic_ar = data.width as f32 / data.height as f32;
                         element.node.update_constraints(ctx, |c| {

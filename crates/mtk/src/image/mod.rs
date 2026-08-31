@@ -1,5 +1,5 @@
 pub mod cache;
-pub use cache::ImageCache;
+pub use cache::{CacheKey, ImageCache, downscale_rgba8};
 
 use std::io::Cursor;
 use std::sync::Arc;
@@ -111,11 +111,41 @@ impl ImageData {
         ImageCache::global().get_or_load(path)
     }
 
+    /// Decodes an image from a file path with optional thumbnail downscaling, utilizing the global texture cache.
+    pub fn from_file_scaled<P: AsRef<std::path::Path>>(
+        path: P,
+        max_dim: Option<(u32, u32)>,
+    ) -> Result<Self, String> {
+        let key = CacheKey {
+            path: path.as_ref().to_path_buf(),
+            max_dim,
+        };
+        ImageCache::global().get_or_load_keyed(&key)
+    }
+
     /// Decodes an image directly from disk without reading or writing to the global texture cache.
     pub fn from_file_uncached<P: AsRef<std::path::Path>>(path: P) -> Result<Self, String> {
+        Self::from_file_uncached_scaled(path, None)
+    }
+
+    /// Decodes an image directly from disk with optional downscaling without caching.
+    pub fn from_file_uncached_scaled<P: AsRef<std::path::Path>>(
+        path: P,
+        max_dim: Option<(u32, u32)>,
+    ) -> Result<Self, String> {
         let bytes = std::fs::read(path.as_ref())
             .map_err(|e| format!("Failed to read image file '{:?}': {e}", path.as_ref()))?;
-        Self::from_bytes(&bytes)
+        let full = Self::from_bytes(&bytes)?;
+
+        if let Some((max_w, max_h)) = max_dim {
+            if full.width > max_w || full.height > max_h {
+                let (w, h, pixels) =
+                    downscale_rgba8(full.width, full.height, &full.pixels, max_w, max_h);
+                return Self::from_rgba8(w, h, pixels);
+            }
+        }
+
+        Ok(full)
     }
 
     /// Requests background streaming and decoding for an image file without blocking the UI thread.
@@ -124,6 +154,21 @@ impl ImageData {
         F: FnOnce(Result<ImageData, String>) + Send + 'static,
     {
         ImageCache::global().load_async(path, Some(on_complete));
+    }
+
+    /// Requests background streaming and decoding with optional downscaling without blocking the UI thread.
+    pub fn load_async_scaled<P: AsRef<std::path::Path>, F>(
+        path: P,
+        max_dim: Option<(u32, u32)>,
+        on_complete: F,
+    ) where
+        F: FnOnce(Result<ImageData, String>) + Send + 'static,
+    {
+        let key = CacheKey {
+            path: path.as_ref().to_path_buf(),
+            max_dim,
+        };
+        ImageCache::global().load_async_keyed(key, Some(on_complete));
     }
 }
 
@@ -640,5 +685,45 @@ mod tests {
 
         cache.clear();
         assert!(cache.get(&path).is_none());
+    }
+
+    #[test]
+    fn test_image_cache_lru_eviction() {
+        let cache = ImageCache::new();
+        // Set small limit: enough for ~2 small images (each 400 bytes pixels + ~32 bytes overhead)
+        cache.set_max_bytes(1000);
+
+        let p1 = std::path::PathBuf::from("/virtual/img1.png");
+        let p2 = std::path::PathBuf::from("/virtual/img2.png");
+        let p3 = std::path::PathBuf::from("/virtual/img3.png");
+
+        let d1 = ImageData::from_rgba8(10, 10, vec![1; 400]).unwrap();
+        let d2 = ImageData::from_rgba8(10, 10, vec![2; 400]).unwrap();
+        let d3 = ImageData::from_rgba8(10, 10, vec![3; 400]).unwrap();
+
+        cache.insert(p1.clone(), d1);
+        cache.insert(p2.clone(), d2);
+
+        // Access p1 so p2 becomes oldest
+        let _ = cache.get(&p1);
+
+        // Insert p3 -> should evict p2
+        cache.insert(p3.clone(), d3);
+
+        assert!(cache.get(&p1).is_some());
+        assert!(cache.get(&p2).is_none(), "p2 should be evicted by LRU");
+        assert!(cache.get(&p3).is_some());
+        assert!(cache.current_bytes() <= 1000);
+    }
+
+    #[test]
+    fn test_downscale_rgba8() {
+        let original_pixels = vec![255u8; 100 * 100 * 4];
+        let (w, h, scaled) = downscale_rgba8(100, 100, &original_pixels, 20, 20);
+
+        assert_eq!(w, 20);
+        assert_eq!(h, 20);
+        assert_eq!(scaled.len(), 20 * 20 * 4);
+        assert_eq!(scaled[0], 255);
     }
 }
