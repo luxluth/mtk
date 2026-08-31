@@ -82,18 +82,18 @@ impl InputText {
         let display_text = element.editor.display_text();
         let show_placeholder = display_text.is_empty() && self.placeholder.is_some();
 
-        let base_text_style = if let Some(ref style) = self.custom_style {
+        let mut base_text_style = element.base_text_style.clone();
+        if let Some(ref style) = self.custom_style {
             let is_focused = Some(element.node.clone()) == ctx.focused_node();
-            if is_focused && let Some(focus) = &style.focus {
-                focus.base_text_style.clone()
+            let custom_text_style = if is_focused && let Some(focus) = &style.focus {
+                &focus.base_text_style
             } else {
-                style.base_text_style.clone()
-            }
+                &style.base_text_style
+            };
+            base_text_style.merge(custom_text_style);
         } else if let Some(ref style) = self.text_style {
-            style.clone()
-        } else {
-            element.base_text_style.clone()
-        };
+            base_text_style.merge(style);
+        }
         element.base_text_style = base_text_style.clone();
 
         let is_focused = Some(element.node.clone()) == ctx.focused_node();
@@ -489,15 +489,22 @@ impl View<String> for InputText {
                         }
                         Key::Character(s) if ctrl_alt && (s == "v" || s == "V") => {
                             if let Some(crate::ClipboardData::Text(pasted)) = ctx.clipboard_get() {
-                                element.editor.insert(&pasted);
+                                let sanitized = pasted
+                                    .replace("\r\n", " ")
+                                    .replace('\n', " ")
+                                    .replace('\r', " ");
+                                element.editor.insert(&sanitized);
                                 text_changed = true;
                             }
                         }
                         _ => {
                             if let Some(text) = &key_event.text {
                                 if !text.is_empty() && !ctrl_alt {
-                                    // NOTE: we avoid inserting control chars
-                                    if text.chars().all(|c| !c.is_control()) {
+                                    // NOTE: we avoid inserting control chars and newlines in single-line input
+                                    if text
+                                        .chars()
+                                        .all(|c| !c.is_control() && c != '\n' && c != '\r')
+                                    {
                                         element.editor.insert(text.as_str());
                                         text_changed = true;
                                     }
@@ -523,7 +530,11 @@ impl View<String> for InputText {
                             handled = EventResult::Handled;
                         }
                         Ime::Commit(text) => {
-                            element.editor.commit_ime(&text);
+                            let sanitized = text
+                                .replace("\r\n", " ")
+                                .replace('\n', " ")
+                                .replace('\r', " ");
+                            element.editor.commit_ime(&sanitized);
                             emitted_msg = Some(element.editor.display_text().to_string());
                             ctx.request_frame();
                             handled = EventResult::Handled;
@@ -615,5 +626,52 @@ impl View<String> for InputText {
         self.sync_render_nodes(ctx, element);
 
         (handled, emitted_msg)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::style::{Size, Style, VerticalAlignment};
+
+    #[test]
+    fn test_input_text_vertical_alignment_preservation() {
+        let mut ctx = Context::new();
+        let widget = input_text().style(Style::new().height(Size::Fixed(40)).padding(8.0));
+
+        let mut element = widget.build(&mut ctx);
+        assert_eq!(
+            element.base_text_style.vertical_alignment,
+            VerticalAlignment::Center
+        );
+
+        let info = element
+            .node
+            .get_text_userdata::<TextRenderInfo>(&ctx)
+            .unwrap();
+        assert_eq!(info.style.vertical_alignment, VerticalAlignment::Center);
+
+        widget.teardown(&mut ctx, &mut element);
+    }
+
+    #[test]
+    fn test_input_text_newline_sanitization() {
+        let mut ctx = Context::new();
+        let widget = input_text();
+        let mut element = widget.build(&mut ctx);
+        let state = String::new();
+
+        // Focus node
+        ctx.request_focus(element.node.clone());
+
+        // Simulate committing multiline text
+        let paste_event = Event::Ime(winit::event::Ime::Commit("Hello\nWorld\r\nFoo".to_string()));
+
+        let (_handled, emitted) = widget.handle_event(&mut element, &state, paste_event, &mut ctx);
+        assert_eq!(emitted, Some("Hello World Foo".to_string()));
+        assert!(!element.editor.text().contains('\n'));
+        assert!(!element.editor.text().contains('\r'));
+
+        widget.teardown(&mut ctx, &mut element);
     }
 }
