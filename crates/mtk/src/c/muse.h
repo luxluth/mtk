@@ -579,7 +579,8 @@ MUSEDEF void muse_node_destroy(muContext *ctx, muNode node) {
     while (muse_muid_is_valid(current_child)) {
       muHierarchy *child_hrc =
           muse_sparse_get(&ctx->hierarchies, current_child);
-      muNode next = child_hrc->next_sibling;
+      muNode next =
+          (child_hrc != NULL) ? child_hrc->next_sibling : MUSE_UNDEFINED_MUID;
 
       muse_node_destroy(ctx, current_child);
       current_child = next;
