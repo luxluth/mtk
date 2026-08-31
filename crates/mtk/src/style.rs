@@ -95,6 +95,23 @@ impl Edges {
             right: 0.0,
         }
     }
+
+    pub fn top(mut self, v: f32) -> Self {
+        self.top = v;
+        self
+    }
+    pub fn bottom(mut self, v: f32) -> Self {
+        self.bottom = v;
+        self
+    }
+    pub fn right(mut self, v: f32) -> Self {
+        self.right = v;
+        self
+    }
+    pub fn left(mut self, v: f32) -> Self {
+        self.left = v;
+        self
+    }
 }
 
 impl Into<sys::muEdges> for Edges {
