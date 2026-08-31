@@ -68,6 +68,50 @@ pub struct Renderer<'w> {
     pub(crate) next_svg_gen: u64,
 }
 
+fn generate_rgba8_mipmaps(width: u32, height: u32, base_pixels: &[u8]) -> Vec<(u32, u32, Vec<u8>)> {
+    let mut mips = Vec::new();
+    let mut cur_w = width;
+    let mut cur_h = height;
+    let mut cur_pixels = base_pixels.to_vec();
+
+    while cur_w > 1 || cur_h > 1 {
+        let next_w = (cur_w / 2).max(1);
+        let next_h = (cur_h / 2).max(1);
+        let mut next_pixels = vec![0u8; (next_w * next_h * 4) as usize];
+
+        for y in 0..next_h {
+            for x in 0..next_w {
+                let src_x0 = x * 2;
+                let src_x1 = (src_x0 + 1).min(cur_w - 1);
+                let src_y0 = y * 2;
+                let src_y1 = (src_y0 + 1).min(cur_h - 1);
+
+                let p00_idx = ((src_y0 * cur_w + src_x0) * 4) as usize;
+                let p10_idx = ((src_y0 * cur_w + src_x1) * 4) as usize;
+                let p01_idx = ((src_y1 * cur_w + src_x0) * 4) as usize;
+                let p11_idx = ((src_y1 * cur_w + src_x1) * 4) as usize;
+
+                let dst_idx = ((y * next_w + x) * 4) as usize;
+
+                for c in 0..4 {
+                    let sum = cur_pixels[p00_idx + c] as u32
+                        + cur_pixels[p10_idx + c] as u32
+                        + cur_pixels[p01_idx + c] as u32
+                        + cur_pixels[p11_idx + c] as u32;
+                    next_pixels[dst_idx + c] = ((sum + 2) / 4) as u8;
+                }
+            }
+        }
+
+        mips.push((next_w, next_h, next_pixels.clone()));
+        cur_w = next_w;
+        cur_h = next_h;
+        cur_pixels = next_pixels;
+    }
+
+    mips
+}
+
 impl<'w> Renderer<'w> {
     pub async fn new(display: OwnedDisplayHandle, window: Arc<Window>) -> Self {
         let size = window.inner_size();
@@ -623,6 +667,10 @@ impl<'w> Renderer<'w> {
             keep
         });
 
+        self.upload_image_texture(context);
+    }
+
+    fn upload_image_texture(&mut self, context: &crate::Context) {
         let images = context.images.borrow();
         for (node, (image_data, _fit)) in images.iter() {
             let needs_upload = match self.image_textures.get(node) {
@@ -633,6 +681,8 @@ impl<'w> Renderer<'w> {
             if needs_upload {
                 let w = image_data.width.max(1);
                 let h = image_data.height.max(1);
+                let mipmaps = generate_rgba8_mipmaps(w, h, &image_data.pixels);
+                let mip_level_count = 1 + mipmaps.len() as u32;
 
                 let texture = self.device.create_texture(&wgpu::TextureDescriptor {
                     label: Some("Image Offscreen Texture"),
@@ -641,7 +691,7 @@ impl<'w> Renderer<'w> {
                         height: h,
                         depth_or_array_layers: 1,
                     },
-                    mip_level_count: 1,
+                    mip_level_count,
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
                     format: wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -668,6 +718,28 @@ impl<'w> Renderer<'w> {
                         depth_or_array_layers: 1,
                     },
                 );
+
+                for (idx, (mip_w, mip_h, mip_data)) in mipmaps.iter().enumerate() {
+                    self.queue.write_texture(
+                        wgpu::TexelCopyTextureInfo {
+                            texture: &texture,
+                            mip_level: (idx + 1) as u32,
+                            origin: wgpu::Origin3d::ZERO,
+                            aspect: wgpu::TextureAspect::All,
+                        },
+                        mip_data,
+                        wgpu::TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(4 * mip_w),
+                            rows_per_image: Some(*mip_h),
+                        },
+                        wgpu::Extent3d {
+                            width: *mip_w,
+                            height: *mip_h,
+                            depth_or_array_layers: 1,
+                        },
+                    );
+                }
 
                 let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
                 let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -837,11 +909,12 @@ impl<'w> Renderer<'w> {
             }
         }
 
+        let scale_factor = context.scale_factor.max(0.1);
         let svgs = context.svgs.borrow();
         for (node, (svg_data, fit)) in svgs.iter() {
             if let Some(computed) = node.get_computed(context) {
-                let target_w = (computed.w.round() as u32).max(1);
-                let target_h = (computed.h.round() as u32).max(1);
+                let target_w = ((computed.w * scale_factor).round() as u32).max(1);
+                let target_h = ((computed.h * scale_factor).round() as u32).max(1);
 
                 match self.svg_textures.get(node) {
                     None => {

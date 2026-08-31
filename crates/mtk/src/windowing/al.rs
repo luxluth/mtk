@@ -677,11 +677,17 @@ where
             window_attributes = window_attributes.with_max_inner_size(max_size);
         }
 
-        self.context
-            .compute_layout(attr.size.width as f32, attr.size.height as f32);
-
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
         window.set_ime_allowed(true);
+
+        let scale_factor = window.scale_factor() as f32;
+        self.context.scale_factor = scale_factor;
+
+        let phys_size = window.inner_size();
+        let logical_w = phys_size.width as f32 / scale_factor;
+        let logical_h = phys_size.height as f32 / scale_factor;
+
+        self.context.compute_layout(logical_w, logical_h);
 
         self.window = Some(window.clone());
         self.context.window = Some(window.clone());
@@ -737,6 +743,9 @@ where
                 self.dispatch_and_rebuild(mtk_event);
             }
             WindowEvent::Resized(size) => {
+                let scale_factor = window.scale_factor() as f32;
+                self.context.scale_factor = scale_factor;
+
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize(size);
                 }
@@ -746,16 +755,28 @@ where
                     root.set_dirty(&mut self.context);
                 }
 
+                let logical_w = (size.width as f32 / scale_factor).round() as u32;
+                let logical_h = (size.height as f32 / scale_factor).round() as u32;
+
                 self.dispatch_and_rebuild(Event::WindowResized(WindowDimension {
-                    width: size.width,
-                    height: size.height,
+                    width: logical_w,
+                    height: logical_h,
                 }));
 
                 window.request_redraw();
             }
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                self.context.scale_factor = scale_factor as f32;
+                if let (Some(view), Some(element)) = (&self.view, &self.element) {
+                    let root = view.get_node(element);
+                    root.set_dirty(&mut self.context);
+                }
+                window.request_redraw();
+            }
             WindowEvent::CursorMoved { position, .. } => {
-                let x = position.x as f32;
-                let y = position.y as f32;
+                let scale_factor = window.scale_factor();
+                let x = (position.x / scale_factor) as f32;
+                let y = (position.y / scale_factor) as f32;
                 self.cursor_pos = (x, y);
                 let hit_nodes = self.context.pick(x, y);
 
@@ -784,9 +805,14 @@ where
                 self.dispatch_and_rebuild(mtk_event);
             }
             WindowEvent::MouseWheel { delta, phase, .. } => {
+                let scale_factor = window.scale_factor();
                 let (dx, dy, is_touchpad) = match delta {
                     MouseScrollDelta::LineDelta(x, y) => (x * 20.0, y * 20.0, false),
-                    MouseScrollDelta::PixelDelta(pos) => (pos.x as f32, pos.y as f32, true),
+                    MouseScrollDelta::PixelDelta(pos) => (
+                        (pos.x / scale_factor) as f32,
+                        (pos.y / scale_factor) as f32,
+                        true,
+                    ),
                 };
                 let hit_nodes = self.context.pick(self.cursor_pos.0, self.cursor_pos.1);
                 let mtk_event = Event::MouseWheel {
@@ -812,13 +838,15 @@ where
                                 });
                             }
                             crate::debugger::DebugCommand::RequestSnapshot => {
+                                let scale_factor = window.scale_factor() as f32;
                                 let size = window.inner_size();
-                                self.context
-                                    .compute_layout(size.width as f32, size.height as f32);
+                                let logical_w = size.width as f32 / scale_factor;
+                                let logical_h = size.height as f32 / scale_factor;
+                                self.context.compute_layout(logical_w, logical_h);
                                 if let Some(tx) = &self.debug_tx {
                                     let snapshot = self.context.build_debug_snapshot(
-                                        size.width as f32,
-                                        size.height as f32,
+                                        logical_w,
+                                        logical_h,
                                         self.hovered_node,
                                     );
                                     let _ = tx.send(crate::debugger::DebugEvent::LayoutUpdated(
@@ -836,16 +864,19 @@ where
                 self.context.dt = dt;
                 self.dispatch_and_rebuild(Event::Tick { dt });
 
-                let size = window.inner_size();
-                self.context
-                    .compute_layout(size.width as f32, size.height as f32);
+                let scale_factor = window.scale_factor() as f32;
+                self.context.scale_factor = scale_factor;
+
+                let phys_size = window.inner_size();
+                let logical_w = phys_size.width as f32 / scale_factor;
+                let logical_h = phys_size.height as f32 / scale_factor;
+
+                self.context.compute_layout(logical_w, logical_h);
 
                 if let Some(tx) = &self.debug_tx {
-                    let snapshot = self.context.build_debug_snapshot(
-                        size.width as f32,
-                        size.height as f32,
-                        self.hovered_node,
-                    );
+                    let snapshot =
+                        self.context
+                            .build_debug_snapshot(logical_w, logical_h, self.hovered_node);
                     let _ = tx.send(crate::debugger::DebugEvent::LayoutUpdated(Box::new(
                         snapshot,
                     )));
@@ -854,8 +885,8 @@ where
                 let viewport = crate::style::Rect {
                     x: 0.0,
                     y: 0.0,
-                    w: size.width as f32,
-                    h: size.height as f32,
+                    w: logical_w,
+                    h: logical_h,
                 };
                 self.context.build_render_list(viewport);
 
@@ -863,8 +894,14 @@ where
                     let focused_caret = renderer.render(&self.context);
                     if let Some(window) = &self.window {
                         if let Some(caret) = focused_caret {
-                            let position = PhysicalPosition::new(caret[0] as u32, caret[1] as u32);
-                            let size = PhysicalSize::new(caret[2] as u32, caret[3] as u32);
+                            let position = PhysicalPosition::new(
+                                (caret[0] * scale_factor) as u32,
+                                (caret[1] * scale_factor) as u32,
+                            );
+                            let size = PhysicalSize::new(
+                                (caret[2] * scale_factor) as u32,
+                                (caret[3] * scale_factor) as u32,
+                            );
                             window.set_ime_cursor_area(position, size);
                         }
                     }

@@ -94,6 +94,7 @@ pub struct Context {
     pub(crate) dt: f32,
     pub(crate) node_sources: HashMap<Node, SourceLocation>,
     pub(crate) highlight_node: Option<Node>,
+    pub scale_factor: f32,
 
     // Core-level Super Layers and User Intermediate Layers
     pub base_layer: InternalLayer,
@@ -113,10 +114,19 @@ impl Context {
     /// Creates a new `Context` initialized with a zeroed C layout context, text context,
     /// and persistent system clipboard handle.
     pub fn new() -> Self {
-        let ctx = Box::into_raw(Box::new(unsafe { std::mem::zeroed::<sys::muContext>() }));
-        let clipboard = Arc::new(Mutex::new(arboard::Clipboard::new().ok()));
+        let (clip_tx, clip_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let clipboard = arboard::Clipboard::new().ok();
+            let _ = clip_tx.send(clipboard);
+        });
+        let clipboard = Arc::new(Mutex::new(
+            clip_rx
+                .recv_timeout(std::time::Duration::from_millis(50))
+                .unwrap_or(None),
+        ));
+
         Self {
-            ctx,
+            ctx: Box::into_raw(Box::new(unsafe { std::mem::zeroed::<sys::muContext>() })),
             texts: HashMap::new(),
             effects: HashMap::new(),
             dirty_effects: HashSet::new(),
@@ -125,7 +135,7 @@ impl Context {
             focused_node: None,
             focusable_nodes: Vec::new(),
             window: None,
-            modifiers: winit::keyboard::ModifiersState::default(),
+            modifiers: ModifiersState::default(),
             ensure_visible_requests: HashMap::new(),
             clipboard,
             canvases: RefCell::new(HashMap::new()),
@@ -134,6 +144,7 @@ impl Context {
             dt: 0.016,
             node_sources: HashMap::new(),
             highlight_node: None,
+            scale_factor: 1.0,
 
             base_layer: InternalLayer::new(true),
             intermediate_layers: Vec::new(),
