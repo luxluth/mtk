@@ -14,7 +14,6 @@ pub struct Image<Msg> {
     pub(crate) data: ImageData,
     pub(crate) fit: ObjectFit,
     pub(crate) style: Option<Style>,
-    pub(crate) on_click: Option<Msg>,
     pub(crate) source_loc: Option<SourceLocation>,
     _marker: PhantomData<Msg>,
 }
@@ -26,7 +25,6 @@ pub fn image<Msg>(data: ImageData) -> Image<Msg> {
         data,
         fit: ObjectFit::default(),
         style: None,
-        on_click: None,
         source_loc: Some(SourceLocation::here("Image")),
         _marker: PhantomData,
     }
@@ -44,21 +42,13 @@ impl<Msg> Image<Msg> {
         self.style = Some(style);
         self
     }
-
-    /// Sets the message to emit when the image is clicked.
-    pub fn on_click(mut self, msg: Msg) -> Self {
-        self.on_click = Some(msg);
-        self
-    }
 }
 
 pub struct ImageElement {
     pub(crate) node: Node,
-    is_pressed: bool,
-    is_hovered: bool,
 }
 
-impl<State, Msg: Clone> View<State> for Image<Msg> {
+impl<State, Msg> View<State> for Image<Msg> {
     type Element = ImageElement;
     type Message = Msg;
 
@@ -68,7 +58,6 @@ impl<State, Msg: Clone> View<State> for Image<Msg> {
             ctx.set_node_source(node, loc);
         }
 
-        // Set default intrinsic sizing if no style overrides width/height
         if let Some(ref style) = self.style {
             style.apply_to_node(ctx, node);
         }
@@ -86,11 +75,7 @@ impl<State, Msg: Clone> View<State> for Image<Msg> {
             .borrow_mut()
             .insert(node, (self.data.clone(), self.fit));
 
-        ImageElement {
-            node,
-            is_pressed: false,
-            is_hovered: false,
-        }
+        ImageElement { node }
     }
 
     fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
@@ -127,49 +112,11 @@ impl<State, Msg: Clone> View<State> for Image<Msg> {
 
     fn handle_event(
         &self,
-        element: &mut Self::Element,
+        _element: &mut Self::Element,
         _state: &State,
-        event: Event,
-        ctx: &mut Context,
+        _event: Event,
+        _ctx: &mut Context,
     ) -> (EventResult, Option<Self::Message>) {
-        if self.on_click.is_none() {
-            return (EventResult::Ignored, None);
-        }
-
-        match event {
-            Event::CursorMoved { hit_nodes, .. } => {
-                let is_hit = hit_nodes.contains(&element.node);
-                if is_hit != element.is_hovered {
-                    element.is_hovered = is_hit;
-                    element.node.set_dirty(ctx);
-                }
-                (EventResult::Ignored, None)
-            }
-            Event::MouseInput {
-                pressed, hit_nodes, ..
-            } => {
-                let is_hit = hit_nodes.contains(&element.node);
-                if is_hit {
-                    if pressed {
-                        element.is_pressed = true;
-                        element.node.set_dirty(ctx);
-                        (EventResult::Handled, None)
-                    } else if element.is_pressed {
-                        element.is_pressed = false;
-                        element.node.set_dirty(ctx);
-                        (EventResult::Handled, self.on_click.clone())
-                    } else {
-                        (EventResult::Ignored, None)
-                    }
-                } else {
-                    if element.is_pressed {
-                        element.is_pressed = false;
-                        element.node.set_dirty(ctx);
-                    }
-                    (EventResult::Ignored, None)
-                }
-            }
-            _ => (EventResult::Ignored, None),
-        }
+        (EventResult::Ignored, None)
     }
 }

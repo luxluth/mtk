@@ -13,7 +13,6 @@ pub struct AsyncImage<Msg> {
     pub(crate) path: PathBuf,
     pub(crate) fit: ObjectFit,
     pub(crate) style: Option<Style>,
-    pub(crate) on_click: Option<Msg>,
     pub(crate) source_loc: Option<SourceLocation>,
     _marker: PhantomData<Msg>,
 }
@@ -25,7 +24,6 @@ pub fn async_image<Msg>(path: impl Into<PathBuf>) -> AsyncImage<Msg> {
         path: path.into(),
         fit: ObjectFit::default(),
         style: None,
-        on_click: None,
         source_loc: Some(SourceLocation::here("AsyncImage")),
         _marker: PhantomData,
     }
@@ -43,23 +41,15 @@ impl<Msg> AsyncImage<Msg> {
         self.style = Some(style);
         self
     }
-
-    /// Sets the message to emit when the image is clicked.
-    pub fn on_click(mut self, msg: Msg) -> Self {
-        self.on_click = Some(msg);
-        self
-    }
 }
 
 pub struct AsyncImageElement {
     pub(crate) node: Node,
     pub(crate) current_path: PathBuf,
     pub(crate) attached_image_id: Option<u64>,
-    is_pressed: bool,
-    is_hovered: bool,
 }
 
-impl<State, Msg: Clone> View<State> for AsyncImage<Msg> {
+impl<State, Msg> View<State> for AsyncImage<Msg> {
     type Element = AsyncImageElement;
     type Message = Msg;
 
@@ -105,8 +95,6 @@ impl<State, Msg: Clone> View<State> for AsyncImage<Msg> {
             node,
             current_path: self.path.clone(),
             attached_image_id,
-            is_pressed: false,
-            is_hovered: false,
         }
     }
 
@@ -169,45 +157,28 @@ impl<State, Msg: Clone> View<State> for AsyncImage<Msg> {
         event: Event,
         ctx: &mut Context,
     ) -> (EventResult, Option<Self::Message>) {
-        if self.on_click.is_none() {
-            return (EventResult::Ignored, None);
+        if matches!(event, Event::Tick { .. }) {
+            if element.attached_image_id.is_none() {
+                if let Some(data) = ImageCache::global().get(&element.current_path) {
+                    if data.height > 0 && data.width > 0 {
+                        let intrinsic_ar = data.width as f32 / data.height as f32;
+                        element.node.update_constraints(ctx, |c| {
+                            if c.aspect_ratio == 0.0 {
+                                c.aspect_ratio = intrinsic_ar;
+                            }
+                        });
+                    }
+                    ctx.images
+                        .borrow_mut()
+                        .insert(element.node, (data.clone(), self.fit));
+                    element.attached_image_id = Some(data.id);
+                    element.node.set_dirty(ctx);
+                    ctx.request_frame();
+                }
+            }
         }
 
-        match event {
-            Event::CursorMoved { hit_nodes, .. } => {
-                let is_hit = hit_nodes.contains(&element.node);
-                if is_hit != element.is_hovered {
-                    element.is_hovered = is_hit;
-                    element.node.set_dirty(ctx);
-                }
-                (EventResult::Ignored, None)
-            }
-            Event::MouseInput {
-                pressed, hit_nodes, ..
-            } => {
-                let is_hit = hit_nodes.contains(&element.node);
-                if is_hit {
-                    if pressed {
-                        element.is_pressed = true;
-                        element.node.set_dirty(ctx);
-                        (EventResult::Handled, None)
-                    } else if element.is_pressed {
-                        element.is_pressed = false;
-                        element.node.set_dirty(ctx);
-                        (EventResult::Handled, self.on_click.clone())
-                    } else {
-                        (EventResult::Ignored, None)
-                    }
-                } else {
-                    if !pressed && element.is_pressed {
-                        element.is_pressed = false;
-                        element.node.set_dirty(ctx);
-                    }
-                    (EventResult::Ignored, None)
-                }
-            }
-            _ => (EventResult::Ignored, None),
-        }
+        (EventResult::Ignored, None)
     }
 }
 
@@ -231,6 +202,30 @@ mod tests {
         assert_eq!(element.attached_image_id, Some(dummy_data.id));
 
         View::<()>::rebuild(&widget, &widget, &mut ctx, &mut element);
+        View::<()>::teardown(&widget, &mut ctx, &mut element);
+    }
+
+    #[test]
+    fn test_async_image_tick_resolution() {
+        let mut ctx = Context::new();
+        let path = std::path::PathBuf::from("/virtual/delayed_image.png");
+
+        // Build before image is in cache
+        let widget: AsyncImage<()> = async_image(path.clone());
+        let mut element = View::<()>::build(&widget, &mut ctx);
+        assert_eq!(element.attached_image_id, None);
+
+        // Later, image finishes decoding into cache
+        let dummy_data = ImageData::from_rgba8(4, 4, vec![100; 64]).unwrap();
+        ImageCache::global().insert(path.clone(), dummy_data.clone());
+
+        // Event::Tick arrives
+        widget.handle_event(&mut element, &(), Event::Tick { dt: 0.016 }, &mut ctx);
+
+        // Should now be attached immediately on first tick
+        assert_eq!(element.attached_image_id, Some(dummy_data.id));
+        assert!(ctx.images.borrow().contains_key(&element.node));
+
         View::<()>::teardown(&widget, &mut ctx, &mut element);
     }
 }

@@ -16,7 +16,6 @@ pub struct Svg<Msg> {
     pub(crate) fit: ObjectFit,
     pub(crate) style_opts: SvgStyle,
     pub(crate) style: Option<Style>,
-    pub(crate) on_click: Option<Msg>,
     pub(crate) source_loc: Option<SourceLocation>,
     _marker: PhantomData<Msg>,
 }
@@ -29,7 +28,6 @@ pub fn svg<Msg>(data: SvgData) -> Svg<Msg> {
         fit: ObjectFit::default(),
         style_opts: SvgStyle::default(),
         style: None,
-        on_click: None,
         source_loc: Some(SourceLocation::here("Svg")),
         _marker: PhantomData,
     }
@@ -83,21 +81,13 @@ impl<Msg> Svg<Msg> {
         self.style = Some(style);
         self
     }
-
-    /// Sets the message to emit when the SVG is clicked.
-    pub fn on_click(mut self, msg: Msg) -> Self {
-        self.on_click = Some(msg);
-        self
-    }
 }
 
 pub struct SvgElement {
     pub(crate) node: Node,
-    is_pressed: bool,
-    is_hovered: bool,
 }
 
-impl<State, Msg: Clone> View<State> for Svg<Msg> {
+impl<State, Msg> View<State> for Svg<Msg> {
     type Element = SvgElement;
     type Message = Msg;
 
@@ -130,11 +120,7 @@ impl<State, Msg: Clone> View<State> for Svg<Msg> {
 
         ctx.svgs.borrow_mut().insert(node, (data, self.fit));
 
-        SvgElement {
-            node,
-            is_pressed: false,
-            is_hovered: false,
-        }
+        SvgElement { node }
     }
 
     fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
@@ -180,49 +166,11 @@ impl<State, Msg: Clone> View<State> for Svg<Msg> {
 
     fn handle_event(
         &self,
-        element: &mut Self::Element,
+        _element: &mut Self::Element,
         _state: &State,
-        event: Event,
-        ctx: &mut Context,
+        _event: Event,
+        _ctx: &mut Context,
     ) -> (EventResult, Option<Self::Message>) {
-        if self.on_click.is_none() {
-            return (EventResult::Ignored, None);
-        }
-
-        match event {
-            Event::CursorMoved { hit_nodes, .. } => {
-                let is_hit = hit_nodes.contains(&element.node);
-                if is_hit != element.is_hovered {
-                    element.is_hovered = is_hit;
-                    element.node.set_dirty(ctx);
-                }
-                (EventResult::Ignored, None)
-            }
-            Event::MouseInput {
-                pressed, hit_nodes, ..
-            } => {
-                let is_hit = hit_nodes.contains(&element.node);
-                if is_hit {
-                    if pressed {
-                        element.is_pressed = true;
-                        element.node.set_dirty(ctx);
-                        (EventResult::Handled, None)
-                    } else if element.is_pressed {
-                        element.is_pressed = false;
-                        element.node.set_dirty(ctx);
-                        (EventResult::Handled, self.on_click.clone())
-                    } else {
-                        (EventResult::Ignored, None)
-                    }
-                } else {
-                    if element.is_pressed {
-                        element.is_pressed = false;
-                        element.node.set_dirty(ctx);
-                    }
-                    (EventResult::Ignored, None)
-                }
-            }
-            _ => (EventResult::Ignored, None),
-        }
+        (EventResult::Ignored, None)
     }
 }
