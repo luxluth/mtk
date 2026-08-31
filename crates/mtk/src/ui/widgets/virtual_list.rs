@@ -4,10 +4,7 @@ use crate::{
     ui::{Event, View, event::EventResult},
 };
 
-/// A high-performance virtualized list widget that renders only visible items within the viewport.
-///
-/// Designed to effortlessly render $10{,}000$ to $1{,}000{,}000+$ items with sub-millisecond
-/// layout times, 120Hz/144Hz momentum scrolling, and minimal memory overhead.
+/// A virtualized list widget that renders only visible items within the viewport.
 pub struct VirtualList<T, F, V> {
     pub(crate) count: usize,
     pub(crate) items: Option<Vec<T>>,
@@ -19,14 +16,6 @@ pub struct VirtualList<T, F, V> {
 }
 
 /// Creates a new `VirtualList` widget from a vector of items with a fixed item height.
-///
-/// # Examples
-/// ```rust,ignore
-/// let items: Vec<String> = (0..100_000).map(|i| format!("Item #{i}")).collect();
-/// virtual_list(items, 40.0, |idx, item| {
-///     text(item).style(Style::new().height(Size::Fixed(40.0)))
-/// })
-/// ```
 pub fn virtual_list<T, F, V>(items: Vec<T>, item_height: f32, render_fn: F) -> VirtualList<T, F, V>
 where
     F: Fn(usize, &T) -> V,
@@ -44,15 +33,6 @@ where
 }
 
 /// Creates a new `VirtualList` widget from a total item count and an index-based render closure.
-///
-/// Useful for indexed datasets, databases, or large generated sequences.
-///
-/// # Examples
-/// ```rust,ignore
-/// virtual_list_count(1_000_000, 36.0, |idx| {
-///     text(format!("Row #{idx}")).style(Style::new().height(Size::Fixed(36.0)))
-/// })
-/// ```
 pub fn virtual_list_count<F, V>(
     count: usize,
     item_height: f32,
@@ -74,8 +54,6 @@ where
 
 impl<T, F, V> VirtualList<T, F, V> {
     /// Sets the number of overscan buffer items instantiated above and below the visible viewport.
-    ///
-    /// Defaults to `4`. Increasing this avoids brief blank frames during ultra-fast flings.
     pub fn buffer(mut self, buffer: usize) -> Self {
         self.buffer = buffer;
         self
@@ -88,12 +66,12 @@ impl<T, F, V> VirtualList<T, F, V> {
     }
 }
 
-pub struct VirtualListElement<E> {
+pub struct VirtualListElement<V, E> {
     container_node: Node,
     content_node: Node,
     top_spacer: Node,
     bottom_spacer: Node,
-    visible_elements: Vec<(usize, E)>,
+    visible_elements: Vec<(usize, V, E)>,
     rendered_range: (usize, usize),
 }
 
@@ -103,7 +81,7 @@ where
     V: View<State, Message = Msg>,
     T: 'static,
 {
-    type Element = VirtualListElement<V::Element>;
+    type Element = VirtualListElement<V, V::Element>;
     type Message = Msg;
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
@@ -118,10 +96,15 @@ where
             style.apply_to_node(ctx, container_node);
         }
 
+        let total_h = (self.count as f32 * self.item_height).round() as u32;
         let content_node = ctx.create_node();
         content_node.update_constraints(ctx, |c| {
             c.width = Size::Percent(1.0);
-            c.height = Size::Fixed((self.count as f32 * self.item_height).round() as u32);
+            c.height = Size::Fixed(total_h);
+            c.min_height = total_h as f32;
+            c.max_height = total_h as f32;
+            c.flex_shrink = 0.0;
+            c.flex_grow = 0.0;
             c.flex_direction = FlexDirection::Column;
         });
         container_node.append(ctx, content_node);
@@ -130,13 +113,21 @@ where
         top_spacer.update_constraints(ctx, |c| {
             c.width = Size::Percent(1.0);
             c.height = Size::Fixed(0);
+            c.min_height = 0.0;
+            c.max_height = 0.0;
+            c.flex_shrink = 0.0;
+            c.flex_grow = 0.0;
         });
         content_node.append(ctx, top_spacer);
 
         let bottom_spacer = ctx.create_node();
         bottom_spacer.update_constraints(ctx, |c| {
             c.width = Size::Percent(1.0);
-            c.height = Size::Fixed((self.count as f32 * self.item_height).round() as u32);
+            c.height = Size::Fixed(total_h);
+            c.min_height = total_h as f32;
+            c.max_height = total_h as f32;
+            c.flex_shrink = 0.0;
+            c.flex_grow = 0.0;
         });
         content_node.append(ctx, bottom_spacer);
 
@@ -149,7 +140,7 @@ where
             rendered_range: (0, 0),
         };
 
-        self.sync_visible_range(ctx, &mut element);
+        self.sync_visible_range(ctx, &mut element, true);
         element
     }
 
@@ -158,16 +149,20 @@ where
             style.apply_to_node(ctx, element.container_node);
         }
 
+        let total_h = (self.count as f32 * self.item_height).round() as u32;
         element.content_node.update_constraints(ctx, |c| {
-            c.height = Size::Fixed((self.count as f32 * self.item_height).round() as u32);
+            c.height = Size::Fixed(total_h);
+            c.min_height = total_h as f32;
+            c.max_height = total_h as f32;
+            c.flex_shrink = 0.0;
+            c.flex_grow = 0.0;
         });
 
-        self.sync_visible_range(ctx, element);
+        self.sync_visible_range(ctx, element, true);
     }
 
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
-        for (idx, mut elem) in element.visible_elements.drain(..) {
-            let view = self.render_fn.call(idx, self.items.as_ref());
+        for (_idx, view, mut elem) in element.visible_elements.drain(..) {
             view.teardown(ctx, &mut elem);
         }
         element.top_spacer.remove(ctx);
@@ -194,8 +189,7 @@ where
         let mut handled = EventResult::Ignored;
         let mut emitted_msg = None;
 
-        for (idx, elem) in element.visible_elements.iter_mut() {
-            let view = self.render_fn.call(*idx, self.items.as_ref());
+        for (_idx, view, elem) in element.visible_elements.iter_mut() {
             let (res, msg) = view.handle_event(elem, state, event.clone(), ctx);
             if res == EventResult::Handled {
                 handled = EventResult::Handled;
@@ -205,12 +199,8 @@ where
             }
         }
 
-        // On scroll / wheel / tick events, keep visible window synchronized
-        if matches!(
-            event,
-            Event::MouseWheel { .. } | Event::Tick { .. } | Event::CursorMoved { .. }
-        ) {
-            self.sync_visible_range(ctx, element);
+        if matches!(event, Event::MouseWheel { .. } | Event::Tick { .. }) {
+            self.sync_visible_range(ctx, element, false);
         }
 
         (handled, emitted_msg)
@@ -221,7 +211,8 @@ impl<T, F, V> VirtualList<T, F, V> {
     fn sync_visible_range<State, Msg>(
         &self,
         ctx: &mut Context,
-        element: &mut VirtualListElement<V::Element>,
+        element: &mut VirtualListElement<V, V::Element>,
+        force_rebuild: bool,
     ) where
         F: VirtualListRenderHelper<T, V, State, Msg>,
         V: View<State, Message = Msg>,
@@ -231,76 +222,107 @@ impl<T, F, V> VirtualList<T, F, V> {
             .container_node
             .get_constraints(ctx)
             .map(|c| c.scroll.y)
-            .unwrap_or(0.0);
+            .unwrap_or(0.0)
+            .max(0.0);
 
         let viewport_h = element
             .container_node
             .get_computed(ctx)
             .map(|c| c.h)
             .unwrap_or(800.0)
-            .max(100.0);
+            .max(50.0);
 
-        let start_idx =
-            ((scroll_y / self.item_height).floor() as usize).saturating_sub(self.buffer);
-        let visible_count = ((viewport_h / self.item_height).ceil() as usize) + (self.buffer * 2);
+        let item_h = self.item_height.max(1.0);
+        let start_idx = ((scroll_y / item_h).floor() as usize).saturating_sub(self.buffer);
+        let visible_count = ((viewport_h / item_h).ceil() as usize) + (self.buffer * 2);
         let end_idx = (start_idx + visible_count).min(self.count);
 
         let new_range = (start_idx, end_idx);
 
-        if new_range == element.rendered_range && !element.visible_elements.is_empty() {
+        if !force_rebuild
+            && new_range == element.rendered_range
+            && !element.visible_elements.is_empty()
+        {
             return;
         }
 
-        // 1. Remove and teardown elements that are outside the new range
+        // 1. Separate preserved elements from those outside the range
         let mut old_elements = std::mem::take(&mut element.visible_elements);
-        let mut preserved_elements = std::collections::HashMap::new();
+        let mut preserved = std::collections::HashMap::new();
 
-        for (idx, mut elem) in old_elements.drain(..) {
+        for (idx, prev_view, mut elem) in old_elements.drain(..) {
             if idx >= start_idx && idx < end_idx {
-                preserved_elements.insert(idx, elem);
-            } else {
-                let view = self.render_fn.call(idx, self.items.as_ref());
-                let node = view.get_node(&elem);
+                let node = prev_view.get_node(&elem);
                 node.remove(ctx);
-                view.teardown(ctx, &mut elem);
-                ctx.destroy_node(node);
+                preserved.insert(idx, (prev_view, elem));
+            } else {
+                let node = prev_view.get_node(&elem);
+                node.remove(ctx);
+                prev_view.teardown(ctx, &mut elem);
             }
         }
 
-        // 2. Build or keep elements in the new range
+        // 2. Detach spacers before appending children in strict sequential order
+        element.top_spacer.remove(ctx);
         element.bottom_spacer.remove(ctx);
 
+        // 3. Append in exact sequential order: top_spacer -> child[start..end] -> bottom_spacer
+        element.content_node.append(ctx, element.top_spacer);
+
         for idx in start_idx..end_idx {
-            if let Some(mut elem) = preserved_elements.remove(&idx) {
-                let view = self.render_fn.call(idx, self.items.as_ref());
-                view.rebuild(&view, ctx, &mut elem);
-                element.visible_elements.push((idx, elem));
-            } else {
-                let view = self.render_fn.call(idx, self.items.as_ref());
-                let elem = view.build(ctx);
-                let node = view.get_node(&elem);
+            if let Some((prev_view, mut elem)) = preserved.remove(&idx) {
+                let new_view = self.render_fn.call(idx, self.items.as_ref());
+                new_view.rebuild(&prev_view, ctx, &mut elem);
+                let node = new_view.get_node(&elem);
                 element.content_node.append(ctx, node);
-                element.visible_elements.push((idx, elem));
+                element.visible_elements.push((idx, new_view, elem));
+            } else {
+                let new_view = self.render_fn.call(idx, self.items.as_ref());
+                let elem = new_view.build(ctx);
+                let node = new_view.get_node(&elem);
+                element.content_node.append(ctx, node);
+                element.visible_elements.push((idx, new_view, elem));
             }
         }
 
-        // Re-append bottom spacer to the very end
         element.content_node.append(ctx, element.bottom_spacer);
 
-        // 3. Update spacers height
-        let top_spacer_h = (start_idx as f32 * self.item_height).round() as u32;
-        let bottom_spacer_h =
-            ((self.count.saturating_sub(end_idx)) as f32 * self.item_height).round() as u32;
+        // 4. Update spacer constraints
+        let top_spacer_h = (start_idx as f32 * item_h).round() as u32;
+        let bottom_spacer_h = ((self.count.saturating_sub(end_idx)) as f32 * item_h).round() as u32;
 
         element.top_spacer.update_constraints(ctx, |c| {
+            c.width = Size::Percent(1.0);
             c.height = Size::Fixed(top_spacer_h);
+            c.min_height = top_spacer_h as f32;
+            c.max_height = top_spacer_h as f32;
+            c.flex_shrink = 0.0;
+            c.flex_grow = 0.0;
         });
 
         element.bottom_spacer.update_constraints(ctx, |c| {
+            c.width = Size::Percent(1.0);
             c.height = Size::Fixed(bottom_spacer_h);
+            c.min_height = bottom_spacer_h as f32;
+            c.max_height = bottom_spacer_h as f32;
+            c.flex_shrink = 0.0;
+            c.flex_grow = 0.0;
+        });
+
+        let total_h = (self.count as f32 * item_h).round() as u32;
+        element.content_node.update_constraints(ctx, |c| {
+            c.width = Size::Percent(1.0);
+            c.height = Size::Fixed(total_h);
+            c.min_height = total_h as f32;
+            c.max_height = total_h as f32;
+            c.flex_shrink = 0.0;
+            c.flex_grow = 0.0;
+            c.flex_direction = FlexDirection::Column;
         });
 
         element.rendered_range = new_range;
+        element.content_node.set_dirty(ctx);
+        element.container_node.set_dirty(ctx);
     }
 }
 
@@ -352,9 +374,8 @@ mod tests {
 
         let mut element = View::<()>::build(&widget, &mut ctx);
 
-        // Virtualized content should only instantiate a small slice of nodes (~30 instead of 10,000!)
         assert!(element.visible_elements.len() < 50);
-        assert!(element.visible_elements.len() > 0);
+        assert!(!element.visible_elements.is_empty());
 
         // Simulate scrolling down by 3,000 pixels (to item #100)
         element.container_node.update_constraints(&mut ctx, |c| {
@@ -367,6 +388,14 @@ mod tests {
         assert!(start >= 90 && start <= 100);
         assert!(end > start && end <= 140);
         assert!(element.visible_elements.len() < 50);
+
+        // Verify sequential scrolling and reverse scrolling
+        for scroll in [500.0, 12000.0, 200.0, 8000.0, 0.0, 50000.0] {
+            element.container_node.update_constraints(&mut ctx, |c| {
+                c.scroll.y = scroll;
+            });
+            View::<()>::rebuild(&widget, &widget, &mut ctx, &mut element);
+        }
 
         View::<()>::teardown(&widget, &mut ctx, &mut element);
     }

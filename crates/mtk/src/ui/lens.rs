@@ -3,7 +3,10 @@ pub trait Lens<Outer: ?Sized, Inner: ?Sized> {
     fn get<'a>(&self, outer: &'a Outer) -> &'a Inner;
 }
 
-impl<Outer: ?Sized, Inner: ?Sized> Lens<Outer, Inner> for fn(&Outer) -> &Inner {
+impl<Outer: ?Sized, Inner: ?Sized, F> Lens<Outer, Inner> for F
+where
+    F: Fn(&Outer) -> &Inner,
+{
     fn get<'a>(&self, outer: &'a Outer) -> &'a Inner {
         (self)(outer)
     }
