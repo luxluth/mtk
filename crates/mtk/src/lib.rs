@@ -21,7 +21,7 @@ pub use mtk_macro::Lens;
 pub use crate::colors::Color;
 use crate::debugger::{LayoutSnapshot, NodeDebugInfo, SourceLocation};
 use crate::effects::Effects;
-pub use crate::image::{ImageData, ObjectFit, SvgData, SvgStyle};
+pub use crate::image::{ImageCache, ImageData, ObjectFit, SvgData, SvgStyle};
 pub use crate::layer::*;
 pub use crate::node::Node;
 pub use crate::render::RenderCommand;
@@ -419,6 +419,11 @@ impl Context {
             sys::muse_constraints_set(self.ctx, node.0, default_cons);
         }
         node
+    }
+
+    /// Returns a reference-counted handle to the underlying window, if attached.
+    pub fn window(&self) -> Option<Arc<winit::window::Window>> {
+        self.window.clone()
     }
 
     /// Requests a new frame redraw on the associated window.

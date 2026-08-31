@@ -1,4 +1,5 @@
-//! Image and SVG vector data structures, decoding, and fitting algorithms.
+pub mod cache;
+pub use cache::ImageCache;
 
 use std::io::Cursor;
 use std::sync::Arc;
@@ -102,11 +103,27 @@ impl ImageData {
         })
     }
 
-    /// Decodes an image from a file path on disk.
+    /// Decodes an image from a file path on disk, utilizing the global in-memory texture cache.
+    ///
+    /// Subsequent calls with the same path will return the cached `ImageData` in $O(1)$ time,
+    /// avoiding redundant disk reads and GPU texture allocations.
     pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, String> {
+        ImageCache::global().get_or_load(path)
+    }
+
+    /// Decodes an image directly from disk without reading or writing to the global texture cache.
+    pub fn from_file_uncached<P: AsRef<std::path::Path>>(path: P) -> Result<Self, String> {
         let bytes = std::fs::read(path.as_ref())
             .map_err(|e| format!("Failed to read image file '{:?}': {e}", path.as_ref()))?;
         Self::from_bytes(&bytes)
+    }
+
+    /// Requests background streaming and decoding for an image file without blocking the UI thread.
+    pub fn load_async<P: AsRef<std::path::Path>, F>(path: P, on_complete: F)
+    where
+        F: FnOnce(Result<ImageData, String>) + Send + 'static,
+    {
+        ImageCache::global().load_async(path, Some(on_complete));
     }
 }
 
@@ -606,5 +623,22 @@ mod tests {
             ),
             (0, 255, 0, 255)
         );
+    }
+
+    #[test]
+    fn test_image_cache_deduplication() {
+        let cache = ImageCache::new();
+        let path = std::path::PathBuf::from("/virtual/test_image.png");
+        let dummy = ImageData::from_rgba8(2, 2, vec![0; 16]).unwrap();
+
+        cache.insert(path.clone(), dummy.clone());
+
+        let retrieved = cache.get(&path).expect("Must retrieve cached image");
+        assert_eq!(retrieved.id, dummy.id);
+        assert_eq!(retrieved.width, 2);
+        assert_eq!(retrieved.height, 2);
+
+        cache.clear();
+        assert!(cache.get(&path).is_none());
     }
 }

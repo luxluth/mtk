@@ -34,6 +34,7 @@ use crate::{
 };
 
 pub use crate::ui::router::router;
+pub use async_image::*;
 pub use badge::*;
 pub use button::*;
 pub use canvas::*;
@@ -53,6 +54,7 @@ pub use textarea::*;
 pub use tooltip::*;
 pub use virtual_list::*;
 
+mod async_image;
 mod badge;
 mod button;
 mod canvas;
