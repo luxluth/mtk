@@ -112,19 +112,7 @@ impl Default for Context {
 
 impl Context {
     /// Creates a new `Context` initialized with a zeroed C layout context, text context,
-    /// and persistent system clipboard handle.
     pub fn new() -> Self {
-        let (clip_tx, clip_rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let clipboard = arboard::Clipboard::new().ok();
-            let _ = clip_tx.send(clipboard);
-        });
-        let clipboard = Arc::new(Mutex::new(
-            clip_rx
-                .recv_timeout(std::time::Duration::from_millis(50))
-                .unwrap_or(None),
-        ));
-
         Self {
             ctx: Box::into_raw(Box::new(unsafe { std::mem::zeroed::<sys::muContext>() })),
             texts: HashMap::new(),
@@ -137,7 +125,7 @@ impl Context {
             window: None,
             modifiers: ModifiersState::default(),
             ensure_visible_requests: HashMap::new(),
-            clipboard,
+            clipboard: Arc::new(Mutex::new(None)),
             canvases: RefCell::new(HashMap::new()),
             images: RefCell::new(HashMap::new()),
             svgs: RefCell::new(HashMap::new()),
@@ -368,13 +356,23 @@ impl Context {
     /// ctx.clipboard_copy(ClipboardData::Text("Hello, World!".to_string()));
     /// ```
     pub fn clipboard_copy(&self, data: ClipboardData) {
-        if let Ok(mut guard) = self.clipboard.lock()
-            && let Some(cb) = guard.as_mut()
-        {
-            match data {
-                ClipboardData::Text(text) => {
-                    let _ = cb.set_text(text);
+        if let Ok(mut guard) = self.clipboard.lock() {
+            if guard.is_none() {
+                *guard = arboard::Clipboard::new().ok();
+            }
+            if let Some(cb) = guard.as_mut() {
+                match data {
+                    ClipboardData::Text(text) => {
+                        let _ = cb.set_text(text);
+                    }
                 }
+            } else if let Ok(mut new_cb) = arboard::Clipboard::new() {
+                match data {
+                    ClipboardData::Text(text) => {
+                        let _ = new_cb.set_text(text);
+                    }
+                }
+                *guard = Some(new_cb);
             }
         }
     }
@@ -391,11 +389,24 @@ impl Context {
     /// }
     /// ```
     pub fn clipboard_get(&self) -> Option<ClipboardData> {
-        if let Ok(mut guard) = self.clipboard.lock()
-            && let Some(cb) = guard.as_mut()
-            && let Ok(text) = cb.get_text()
-        {
-            return Some(ClipboardData::Text(text));
+        if let Ok(mut guard) = self.clipboard.lock() {
+            if guard.is_none() {
+                *guard = arboard::Clipboard::new().ok();
+            }
+            if let Some(cb) = guard.as_mut() {
+                if let Ok(text) = cb.get_text() {
+                    return Some(ClipboardData::Text(text));
+                }
+            }
+            // If get_text() failed (e.g. stale connection, or guard was None), retry with a fresh Clipboard instance
+            if let Ok(mut new_cb) = arboard::Clipboard::new() {
+                if let Ok(text) = new_cb.get_text() {
+                    let result = Some(ClipboardData::Text(text));
+                    *guard = Some(new_cb);
+                    return result;
+                }
+                *guard = Some(new_cb);
+            }
         }
         None
     }

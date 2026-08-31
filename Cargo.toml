@@ -20,4 +20,4 @@ wgpu = "30.0.1"
 winit = "0.30.13"
 zune-image = "0.5"
 zune-core = "0.5"
-arboard = "3"
+arboard = { version = "3", features = ["wayland-data-control"] }
