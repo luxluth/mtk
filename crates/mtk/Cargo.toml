@@ -3,6 +3,7 @@ name = "mtk"
 edition.workspace = true
 version.workspace = true
 authors.workspace = true
+description.workspace = true
 
 [dependencies]
 bytemuck = { workspace = true }

@@ -6,7 +6,7 @@ resolver = "3"
 version = "0.0.1"
 edition = "2024"
 authors = ["luxluth <delphin.blehoussi93@gmail.com>"]
-description = "Muse GUI Toolkit"
+description = "Muse Toolkit"
 
 [workspace.dependencies]
 bytemuck = "1.25"
