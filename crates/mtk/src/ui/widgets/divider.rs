@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use crate::colors::Color;
+use crate::debugger::SourceLocation;
 use crate::style::{Size, Style};
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
@@ -11,25 +12,30 @@ pub struct Divider<Msg> {
     pub(crate) is_vertical: bool,
     pub(crate) thickness: f32,
     pub(crate) color: Color,
+    pub(crate) source_loc: Option<SourceLocation>,
     _marker: PhantomData<Msg>,
 }
 
 /// Creates a horizontal 1px divider.
+#[track_caller]
 pub fn divider<Msg>() -> Divider<Msg> {
     Divider {
         is_vertical: false,
         thickness: 1.0,
         color: rgb!(226, 232, 240),
+        source_loc: Some(SourceLocation::here("Divider")),
         _marker: PhantomData,
     }
 }
 
 /// Creates a vertical 1px divider.
+#[track_caller]
 pub fn v_divider<Msg>() -> Divider<Msg> {
     Divider {
         is_vertical: true,
         thickness: 1.0,
         color: rgb!(226, 232, 240),
+        source_loc: Some(SourceLocation::here("Divider")),
         _marker: PhantomData,
     }
 }
@@ -58,6 +64,9 @@ impl<State, Msg> View<State> for Divider<Msg> {
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let node = ctx.create_node();
+        if let Some(loc) = self.source_loc {
+            ctx.set_node_source(node, loc);
+        }
 
         let mut style = Style::new().bg_color(self.color);
         if self.is_vertical {
@@ -104,12 +113,15 @@ impl<State, Msg> View<State> for Divider<Msg> {
 
 /// A flexible layout spacer that expands to fill available space (`flex_grow: 1.0`).
 pub struct Spacer<Msg> {
+    pub(crate) source_loc: Option<SourceLocation>,
     _marker: PhantomData<Msg>,
 }
 
 /// Creates a flexible layout spacer.
+#[track_caller]
 pub fn spacer<Msg>() -> Spacer<Msg> {
     Spacer {
+        source_loc: Some(SourceLocation::here("Spacer")),
         _marker: PhantomData,
     }
 }
@@ -124,6 +136,9 @@ impl<State, Msg> View<State> for Spacer<Msg> {
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let node = ctx.create_node();
+        if let Some(loc) = self.source_loc {
+            ctx.set_node_source(node, loc);
+        }
         Style::new().flex_grow(1.0).apply_to_node(ctx, node);
         SpacerElement { node }
     }

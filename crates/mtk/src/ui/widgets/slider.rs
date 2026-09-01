@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 use winit::keyboard::{Key, NamedKey};
 
+use crate::debugger::SourceLocation;
 use crate::style::{AlignItems, FlexDirection, JustifyContent, Size, Style};
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
@@ -15,6 +16,7 @@ pub struct Slider<Msg, F = fn(f32) -> Msg> {
     pub(crate) on_change: Option<F>,
     pub(crate) disabled: bool,
     pub(crate) width: Option<Size>,
+    pub(crate) source_loc: Option<SourceLocation>,
     _marker: PhantomData<Msg>,
 }
 
@@ -24,6 +26,7 @@ pub struct Slider<Msg, F = fn(f32) -> Msg> {
 /// ```rust,ignore
 /// slider(state.volume, 0.0, 100.0).on_change(|val| AppMsg::SetVolume(val))
 /// ```
+#[track_caller]
 pub fn slider<Msg>(value: f32, min: f32, max: f32) -> Slider<Msg, fn(f32) -> Msg> {
     Slider {
         value,
@@ -33,6 +36,7 @@ pub fn slider<Msg>(value: f32, min: f32, max: f32) -> Slider<Msg, fn(f32) -> Msg
         on_change: None,
         disabled: false,
         width: None,
+        source_loc: Some(SourceLocation::here("Slider")),
         _marker: PhantomData,
     }
 }
@@ -54,6 +58,7 @@ impl<Msg, F> Slider<Msg, F> {
             on_change: Some(on_change),
             disabled: self.disabled,
             width: self.width,
+            source_loc: self.source_loc,
             _marker: PhantomData,
         }
     }
@@ -95,6 +100,9 @@ where
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let container_node = ctx.create_node();
+        if let Some(loc) = self.source_loc {
+            ctx.set_node_source(container_node, loc);
+        }
         let track_node = ctx.create_node();
         let fill_node = ctx.create_node();
 

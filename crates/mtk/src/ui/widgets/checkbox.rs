@@ -2,6 +2,7 @@ use std::marker::PhantomData;
 use winit::keyboard::{Key, NamedKey};
 
 use crate::animation::Curve;
+use crate::debugger::SourceLocation;
 use crate::style::{
     AlignItems, FlexDirection, JustifyContent, Size, Style, TextStyle, VerticalAlignment,
 };
@@ -16,6 +17,7 @@ pub struct Checkbox<Msg, F = fn(bool) -> Msg> {
     pub(crate) label: Option<String>,
     pub(crate) on_toggle: Option<F>,
     pub(crate) disabled: bool,
+    pub(crate) source_loc: Option<SourceLocation>,
     _marker: PhantomData<Msg>,
 }
 
@@ -25,12 +27,14 @@ pub struct Checkbox<Msg, F = fn(bool) -> Msg> {
 /// ```rust,ignore
 /// checkbox(state.is_completed).on_toggle(|checked| AppMsg::ToggleDone(checked))
 /// ```
+#[track_caller]
 pub fn checkbox<Msg>(checked: bool) -> Checkbox<Msg, fn(bool) -> Msg> {
     Checkbox {
         checked,
         label: None,
         on_toggle: None,
         disabled: false,
+        source_loc: Some(SourceLocation::here("Checkbox")),
         _marker: PhantomData,
     }
 }
@@ -49,6 +53,7 @@ impl<Msg, F> Checkbox<Msg, F> {
             label: self.label,
             on_toggle: Some(on_toggle),
             disabled: self.disabled,
+            source_loc: self.source_loc,
             _marker: PhantomData,
         }
     }
@@ -76,6 +81,9 @@ where
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let container_node = ctx.create_node();
+        if let Some(loc) = self.source_loc {
+            ctx.set_node_source(container_node, loc);
+        }
         let box_node = ctx.create_node();
 
         let box_bg = if self.disabled {

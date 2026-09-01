@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use crate::debugger::SourceLocation;
 use crate::style::Overflow;
 use crate::ui::event::EventResult;
 use crate::ui::widgets::editor::Editor;
@@ -16,6 +17,7 @@ use winit::keyboard::{Key, NamedKey};
 pub struct TextArea {
     pub(crate) captures_tab: bool,
     pub(crate) custom_style: Option<crate::style::Style>,
+    pub(crate) source_loc: Option<SourceLocation>,
 }
 
 /// Creates a new `TextArea` widget.
@@ -28,10 +30,12 @@ pub struct TextArea {
 ///     AppMsg::UpdateBio,
 /// )
 /// ```
+#[track_caller]
 pub fn text_area() -> TextArea {
     TextArea {
         captures_tab: true,
         custom_style: None,
+        source_loc: Some(SourceLocation::here("TextArea")),
     }
 }
 
@@ -130,6 +134,9 @@ impl View<String> for TextArea {
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let node = ctx.create_node();
+        if let Some(loc) = self.source_loc {
+            ctx.set_node_source(node.clone(), loc);
+        }
         let mut editor = Editor::new();
         editor.set_text("");
 

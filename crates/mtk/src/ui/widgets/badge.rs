@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use crate::colors::Color;
+use crate::debugger::SourceLocation;
 use crate::style::{AlignItems, JustifyContent, Style, TextStyle};
 use crate::text_property::FontWeight;
 use crate::ui::event::EventResult;
@@ -12,6 +13,7 @@ pub struct Badge<Msg> {
     pub(crate) text: String,
     pub(crate) bg_color: Color,
     pub(crate) text_color: Color,
+    pub(crate) source_loc: Option<SourceLocation>,
     _marker: PhantomData<Msg>,
 }
 
@@ -21,11 +23,13 @@ pub struct Badge<Msg> {
 /// ```rust,ignore
 /// badge("Active").success()
 /// ```
+#[track_caller]
 pub fn badge<Msg>(text: impl Into<String>) -> Badge<Msg> {
     Badge {
         text: text.into(),
         bg_color: rgb!(241, 245, 249),
         text_color: rgb!(71, 85, 105),
+        source_loc: Some(SourceLocation::here("Badge")),
         _marker: PhantomData,
     }
 }
@@ -77,6 +81,9 @@ impl<State, Msg> View<State> for Badge<Msg> {
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let node = ctx.create_node();
+        if let Some(loc) = self.source_loc {
+            ctx.set_node_source(node, loc);
+        }
 
         node.set_text_with_userdata(
             ctx,
@@ -148,16 +155,19 @@ pub struct Chip<Msg, F = fn() -> Msg> {
     pub(crate) on_delete: Option<F>,
     pub(crate) bg_color: Color,
     pub(crate) text_color: Color,
+    pub(crate) source_loc: Option<SourceLocation>,
     _marker: std::marker::PhantomData<Msg>,
 }
 
 /// Creates a new interactive `Chip` tag widget.
+#[track_caller]
 pub fn chip<Msg>(label: impl Into<String>) -> Chip<Msg, fn() -> Msg> {
     Chip {
         label: label.into(),
         on_delete: None,
         bg_color: rgb!(241, 245, 249),
         text_color: rgb!(30, 41, 59),
+        source_loc: Some(SourceLocation::here("Chip")),
         _marker: std::marker::PhantomData,
     }
 }
@@ -170,6 +180,7 @@ impl<Msg, F> Chip<Msg, F> {
             on_delete: Some(on_delete),
             bg_color: self.bg_color,
             text_color: self.text_color,
+            source_loc: self.source_loc,
             _marker: std::marker::PhantomData,
         }
     }
@@ -202,6 +213,9 @@ where
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let container_node = ctx.create_node();
+        if let Some(loc) = self.source_loc {
+            ctx.set_node_source(container_node, loc);
+        }
         let label_node = ctx.create_node();
 
         label_node.set_text_with_userdata(

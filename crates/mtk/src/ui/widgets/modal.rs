@@ -1,3 +1,4 @@
+use crate::debugger::SourceLocation;
 use crate::rgba;
 use crate::ui::layer::{Layer, layer};
 use crate::ui::transition::Transition;
@@ -15,12 +16,14 @@ use crate::ui::transition::Transition;
 ///     )).style(Style::new().bg_color(clr!(white)).padding(20.0).corner_radius(12.0)),
 /// ).on_close(|| AppMsg::CloseDialog)
 /// ```
+#[track_caller]
 pub fn modal<MainV, DialogV, Msg>(
     is_open: bool,
     main_view: MainV,
     dialog_view: DialogV,
 ) -> Layer<MainV, DialogV, Msg, fn() -> Msg> {
     layer(main_view, is_open, dialog_view)
+        .source_loc(Some(SourceLocation::here("Modal")))
         .layer_id(crate::layer::ActiveLayerId::Modal)
         .transition(Transition::scale())
         .dim_background(true)

@@ -1,3 +1,4 @@
+use crate::debugger::SourceLocation;
 use crate::{
     Context, Node,
     style::{FlexDirection, Overflow, Size, Style},
@@ -12,10 +13,12 @@ pub struct VirtualList<T, F, V> {
     pub(crate) render_fn: F,
     pub(crate) buffer: usize,
     pub(crate) custom_style: Option<Style>,
+    pub(crate) source_loc: Option<SourceLocation>,
     pub(crate) _marker: std::marker::PhantomData<V>,
 }
 
 /// Creates a new `VirtualList` widget from a vector of items with a fixed item height.
+#[track_caller]
 pub fn virtual_list<T, F, V>(items: Vec<T>, item_height: f32, render_fn: F) -> VirtualList<T, F, V>
 where
     F: Fn(usize, &T) -> V,
@@ -28,11 +31,13 @@ where
         render_fn,
         buffer: 4,
         custom_style: None,
+        source_loc: Some(SourceLocation::here("VirtualList")),
         _marker: std::marker::PhantomData,
     }
 }
 
 /// Creates a new `VirtualList` widget from a total item count and an index-based render closure.
+#[track_caller]
 pub fn virtual_list_count<F, V>(
     count: usize,
     item_height: f32,
@@ -48,6 +53,7 @@ where
         render_fn: CountRenderFn(render_fn),
         buffer: 4,
         custom_style: None,
+        source_loc: Some(SourceLocation::here("VirtualList")),
         _marker: std::marker::PhantomData,
     }
 }
@@ -86,6 +92,9 @@ where
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let container_node = ctx.create_node();
+        if let Some(loc) = self.source_loc {
+            ctx.set_node_source(container_node, loc);
+        }
         container_node.update_constraints(ctx, |c| {
             c.width = Size::Percent(1.0);
             c.height = Size::Percent(1.0);

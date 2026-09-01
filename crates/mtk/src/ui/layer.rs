@@ -4,6 +4,7 @@ use winit::keyboard::{Key, NamedKey};
 
 use crate::animation::AnimatedValue;
 use crate::colors::Color;
+use crate::debugger::SourceLocation;
 use crate::layer::ActiveLayerId;
 use crate::layer::UserLayer;
 use crate::style::{AlignItems, JustifyContent, PositionStrategy, Size, Style};
@@ -26,10 +27,12 @@ pub struct Layer<BaseV, LayerV, Msg, F = fn() -> Msg> {
     pub(crate) close_on_escape: bool,
     pub(crate) close_on_backdrop: bool,
     pub(crate) on_dismiss: Option<F>,
+    pub(crate) source_loc: Option<SourceLocation>,
     pub(crate) _marker: PhantomData<Msg>,
 }
 
 /// Creates a new `Layer` stacking an overlay view over a base view.
+#[track_caller]
 pub fn layer<BaseV, LayerV, Msg>(
     base_view: BaseV,
     is_active: bool,
@@ -47,6 +50,7 @@ pub fn layer<BaseV, LayerV, Msg>(
         close_on_escape: true,
         close_on_backdrop: true,
         on_dismiss: None,
+        source_loc: Some(SourceLocation::here("Layer")),
         _marker: PhantomData,
     }
 }
@@ -111,8 +115,15 @@ impl<BaseV, LayerV, Msg, F> Layer<BaseV, LayerV, Msg, F> {
             close_on_escape: self.close_on_escape,
             close_on_backdrop: self.close_on_backdrop,
             on_dismiss: Some(on_dismiss),
+            source_loc: self.source_loc,
             _marker: PhantomData,
         }
+    }
+
+    /// Sets the source location for debugging.
+    pub fn source_loc(mut self, loc: Option<SourceLocation>) -> Self {
+        self.source_loc = loc;
+        self
     }
 
     /// Sets the callback invoked when the layer is closed (alias for `on_dismiss`).
@@ -145,6 +156,9 @@ where
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let root_node = ctx.create_node();
+        if let Some(loc) = self.source_loc {
+            ctx.set_node_source(root_node, loc);
+        }
         let overlay_node = ctx.create_node();
         let scrim_node = ctx.create_node();
         let content_wrapper_node = ctx.create_node();

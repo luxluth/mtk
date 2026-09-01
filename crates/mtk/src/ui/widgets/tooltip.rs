@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use crate::debugger::SourceLocation;
 use crate::style::{PositionStrategy, Style, TextStyle};
 use crate::text_property::FontWeight;
 use crate::ui::event::EventResult;
@@ -10,6 +11,7 @@ use crate::{Context, Node, clr, rgb, rgba};
 pub struct Tooltip<V> {
     pub(crate) inner: V,
     pub(crate) text: String,
+    pub(crate) source_loc: Option<SourceLocation>,
 }
 
 /// Wraps a view with a hover tooltip.
@@ -18,10 +20,12 @@ pub struct Tooltip<V> {
 /// ```rust,ignore
 /// tooltip(button("Save"), "Saves current changes to disk")
 /// ```
+#[track_caller]
 pub fn tooltip<V>(inner: V, text: impl Into<String>) -> Tooltip<V> {
     Tooltip {
         inner,
         text: text.into(),
+        source_loc: Some(SourceLocation::here("Tooltip")),
     }
 }
 
@@ -39,6 +43,9 @@ impl<State, V: View<State>> View<State> for Tooltip<V> {
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let inner_el = self.inner.build(ctx);
         let tooltip_node = ctx.create_node();
+        if let Some(loc) = self.source_loc {
+            ctx.set_node_source(tooltip_node, loc);
+        }
 
         tooltip_node.set_text(ctx, &self.text);
 

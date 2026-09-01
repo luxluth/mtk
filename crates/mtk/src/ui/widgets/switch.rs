@@ -4,6 +4,7 @@ use winit::keyboard::{Key, NamedKey};
 
 use crate::animation::{Animatable, AnimatedValue, Curve};
 use crate::colors::Color;
+use crate::debugger::SourceLocation;
 use crate::style::{
     AlignItems, FlexDirection, JustifyContent, Size, Style, TextStyle, VerticalAlignment,
 };
@@ -18,6 +19,7 @@ pub struct Switch<Msg, F = fn(bool) -> Msg> {
     pub(crate) label: Option<String>,
     pub(crate) on_toggle: Option<F>,
     pub(crate) disabled: bool,
+    pub(crate) source_loc: Option<SourceLocation>,
     _marker: PhantomData<Msg>,
 }
 
@@ -29,12 +31,14 @@ pub struct Switch<Msg, F = fn(bool) -> Msg> {
 ///     .label("Notifications")
 ///     .on_toggle(|on| AppMsg::SetNotifications(on))
 /// ```
+#[track_caller]
 pub fn switch<Msg>(is_on: bool) -> Switch<Msg, fn(bool) -> Msg> {
     Switch {
         is_on,
         label: None,
         on_toggle: None,
         disabled: false,
+        source_loc: Some(SourceLocation::here("Switch")),
         _marker: PhantomData,
     }
 }
@@ -53,6 +57,7 @@ impl<Msg, F> Switch<Msg, F> {
             label: self.label,
             on_toggle: Some(on_toggle),
             disabled: self.disabled,
+            source_loc: self.source_loc,
             _marker: PhantomData,
         }
     }
@@ -83,6 +88,9 @@ where
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let container_node = ctx.create_node();
+        if let Some(loc) = self.source_loc {
+            ctx.set_node_source(container_node, loc);
+        }
         let track_node = ctx.create_node();
         let knob_node = ctx.create_node();
 

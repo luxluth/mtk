@@ -2,6 +2,7 @@ use std::marker::PhantomData;
 use std::time::Instant;
 
 use crate::colors::Color;
+use crate::debugger::SourceLocation;
 use crate::style::{Overflow, PositionStrategy, Size, Style};
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
@@ -14,6 +15,7 @@ pub struct ProgressBar<Msg> {
     pub(crate) height: f32,
     pub(crate) fill_color: Color,
     pub(crate) track_color: Color,
+    pub(crate) source_loc: Option<SourceLocation>,
     _marker: PhantomData<Msg>,
 }
 
@@ -23,6 +25,7 @@ pub struct ProgressBar<Msg> {
 /// ```rust,ignore
 /// progress_bar(state.download_percent / 100.0)
 /// ```
+#[track_caller]
 pub fn progress_bar<Msg>(progress: f32) -> ProgressBar<Msg> {
     ProgressBar {
         progress: progress.clamp(0.0, 1.0),
@@ -30,6 +33,7 @@ pub fn progress_bar<Msg>(progress: f32) -> ProgressBar<Msg> {
         height: 8.0,
         fill_color: rgb!(59, 130, 246),
         track_color: rgb!(226, 232, 240),
+        source_loc: Some(SourceLocation::here("ProgressBar")),
         _marker: PhantomData,
     }
 }
@@ -72,6 +76,9 @@ impl<State, Msg> View<State> for ProgressBar<Msg> {
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let track_node = ctx.create_node();
+        if let Some(loc) = self.source_loc {
+            ctx.set_node_source(track_node, loc);
+        }
         let fill_node = ctx.create_node();
         let anim_start = Instant::now();
 

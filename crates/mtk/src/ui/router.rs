@@ -7,6 +7,7 @@ use std::marker::PhantomData;
 use std::time::Instant;
 
 use crate::animation::AnimatedValue;
+use crate::debugger::SourceLocation;
 use crate::style::{PositionStrategy, Size, Style};
 use crate::ui::event::EventResult;
 use crate::ui::transition::Transition;
@@ -18,6 +19,7 @@ pub struct Router<Key, V, Msg> {
     pub(crate) key: Key,
     pub(crate) view: V,
     pub(crate) transition: Transition,
+    pub(crate) source_loc: Option<SourceLocation>,
     _marker: PhantomData<Msg>,
 }
 
@@ -31,6 +33,7 @@ pub struct Router<Key, V, Msg> {
 /// router(state.current_page, render_page(state.current_page, state))
 ///     .transition(Transition::fade())
 /// ```
+#[track_caller]
 pub fn router<Key, V, Msg>(key: Key, view: V) -> Router<Key, V, Msg>
 where
     Key: PartialEq + Clone + 'static,
@@ -39,6 +42,7 @@ where
         key,
         view,
         transition: Transition::fade(),
+        source_loc: Some(SourceLocation::here("Router")),
         _marker: PhantomData,
     }
 }
@@ -72,6 +76,9 @@ where
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let container_node = ctx.create_node();
+        if let Some(loc) = self.source_loc {
+            ctx.set_node_source(container_node, loc);
+        }
 
         Style::new()
             .width(Size::Percent(1.0))

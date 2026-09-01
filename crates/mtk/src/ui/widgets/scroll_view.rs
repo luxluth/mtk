@@ -1,3 +1,4 @@
+use crate::debugger::SourceLocation;
 use crate::{
     Context, Node,
     style::Overflow,
@@ -32,6 +33,7 @@ pub struct ScrollView<V> {
     pub(crate) axis: ScrollAxis,
     pub(crate) initial_x: Option<ScrollOffset>,
     pub(crate) initial_y: Option<ScrollOffset>,
+    pub(crate) source_loc: Option<SourceLocation>,
 }
 
 pub struct ScrollViewElement<E> {
@@ -44,12 +46,14 @@ pub struct ScrollViewElement<E> {
 /// A `ScrollView` automatically uses MTK's intrinsic seamless scrolling engine,
 /// rendering floating overlay scrollbars and supporting kinetic 120Hz scrolling,
 /// mouse drag interactivity, touch panning, and keyboard navigation.
+#[track_caller]
 pub fn scroll_view<V>(inner: V) -> ScrollView<V> {
     ScrollView {
         inner,
         axis: ScrollAxis::Both,
         initial_x: None,
         initial_y: None,
+        source_loc: Some(SourceLocation::here("ScrollView")),
     }
 }
 
@@ -87,6 +91,9 @@ where
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let container_node = ctx.create_node();
+        if let Some(loc) = self.source_loc {
+            ctx.set_node_source(container_node, loc);
+        }
         container_node.update_constraints(ctx, |c| {
             c.width = crate::style::Size::Percent(1.0);
             c.height = match self.axis {

@@ -2,6 +2,7 @@ use std::marker::PhantomData;
 use winit::keyboard::{Key, NamedKey};
 
 use crate::colors::Color;
+use crate::debugger::SourceLocation;
 use crate::style::{
     AlignItems, FlexDirection, JustifyContent, PositionStrategy, Size, Style, TextStyle,
 };
@@ -20,6 +21,7 @@ pub struct Dropdown<Msg, F = fn(usize) -> Msg> {
     pub(crate) bg_color: Color,
     pub(crate) text_color: Color,
     pub(crate) border_color: Color,
+    pub(crate) source_loc: Option<SourceLocation>,
     _marker: PhantomData<Msg>,
 }
 
@@ -30,6 +32,7 @@ pub struct Dropdown<Msg, F = fn(usize) -> Msg> {
 /// dropdown(Some(state.theme_index), vec!["Light".into(), "Dark".into(), "System".into()])
 ///     .on_select(|idx| AppMsg::SetTheme(idx))
 /// ```
+#[track_caller]
 pub fn dropdown<Msg>(
     selected_index: Option<usize>,
     options: Vec<String>,
@@ -43,6 +46,7 @@ pub fn dropdown<Msg>(
         bg_color: clr!(white),
         text_color: rgb!(15, 23, 42),
         border_color: rgb!(203, 213, 225),
+        source_loc: Some(SourceLocation::here("Dropdown")),
         _marker: PhantomData,
     }
 }
@@ -65,6 +69,7 @@ impl<Msg, F> Dropdown<Msg, F> {
             bg_color: self.bg_color,
             text_color: self.text_color,
             border_color: self.border_color,
+            source_loc: self.source_loc,
             _marker: PhantomData,
         }
     }
@@ -113,6 +118,9 @@ where
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let container_node = ctx.create_node();
+        if let Some(loc) = self.source_loc {
+            ctx.set_node_source(container_node, loc);
+        }
         let trigger_node = ctx.create_node();
         let label_node = ctx.create_node();
         let icon_node = ctx.create_node();

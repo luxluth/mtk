@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use crate::debugger::SourceLocation;
 use crate::ui::event::EventResult;
 use crate::ui::widgets::editor::Editor;
 use crate::ui::{Event, View};
@@ -16,6 +17,7 @@ pub struct InputText {
     pub(crate) placeholder: Option<String>,
     pub(crate) text_style: Option<TextStyle>,
     pub(crate) custom_style: Option<crate::style::Style>,
+    pub(crate) source_loc: Option<SourceLocation>,
 }
 
 /// Creates a new `InputText` widget.
@@ -28,12 +30,14 @@ pub struct InputText {
 ///     AppMsg::UpdateUsername,
 /// )
 /// ```
+#[track_caller]
 pub fn input_text() -> InputText {
     InputText {
         captures_tab: false,
         placeholder: None,
         text_style: None,
         custom_style: None,
+        source_loc: Some(SourceLocation::here("InputText")),
     }
 }
 
@@ -182,6 +186,9 @@ impl View<String> for InputText {
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let node = ctx.create_node();
+        if let Some(loc) = self.source_loc {
+            ctx.set_node_source(node.clone(), loc);
+        }
         let mut editor = Editor::new();
         editor.set_text("");
 

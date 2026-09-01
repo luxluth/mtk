@@ -349,6 +349,7 @@ pub struct CanvasEventDetails {
 pub struct Canvas<State, Msg> {
     painter_fn: Box<dyn Fn() -> CanvasPainterKind>,
     on_event_fn: Option<Box<dyn Fn(&State, Event, CanvasEventDetails) -> Option<Msg>>>,
+    source_loc: Option<crate::debugger::SourceLocation>,
     _marker: PhantomData<(State, Msg)>,
 }
 
@@ -361,6 +362,7 @@ pub struct Canvas<State, Msg> {
 ///     buf.set_pixel(10, 10, 0xFFFFFFFF);
 /// })
 /// ```
+#[track_caller]
 pub fn pixel_canvas<P, State, Msg>(painter: P) -> Canvas<State, Msg>
 where
     P: PixelPainter + Clone,
@@ -368,6 +370,7 @@ where
     Canvas {
         painter_fn: Box::new(move || CanvasPainterKind::Pixel(Box::new(painter.clone()))),
         on_event_fn: None,
+        source_loc: Some(crate::debugger::SourceLocation::here("PixelCanvas")),
         _marker: PhantomData,
     }
 }
@@ -393,6 +396,7 @@ where
 ///     });
 /// })
 /// ```
+#[track_caller]
 pub fn wgpu_canvas<P, State, Msg>(painter: P) -> Canvas<State, Msg>
 where
     P: WgpuPainter + Clone,
@@ -400,6 +404,7 @@ where
     Canvas {
         painter_fn: Box::new(move || CanvasPainterKind::Wgpu(Box::new(painter.clone()))),
         on_event_fn: None,
+        source_loc: Some(crate::debugger::SourceLocation::here("WgpuCanvas")),
         _marker: PhantomData,
     }
 }
@@ -421,6 +426,9 @@ impl<State: 'static, Msg: 'static> View<State> for Canvas<State, Msg> {
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
         let node = ctx.create_node();
+        if let Some(loc) = self.source_loc {
+            ctx.set_node_source(node, loc);
+        }
         let painter = (self.painter_fn)();
         ctx.canvases.borrow_mut().insert(
             node,
