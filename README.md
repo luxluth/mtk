@@ -1,17 +1,44 @@
 # MTK — Muse UI Toolkit
 
-MTK is a responsive, reactive GUI framework built for Rust, inspired by [Xilem](https://github.com/linebender/xilem). It is powered by a high-performance C layout engine (`muse.h`), native WGPU hardware rendering, fluid layout flexing, and Parley typography.
+MTK is a declarative, retained-mode GUI toolkit for Rust. It pairs an Elm-inspired functional interface with a C-based Flexbox layout engine, native WGPU hardware rendering, and Parley typography.
 
-![Todo App Example](https://raw.github.com/luxluth/mtk/master/assets/todoapp.png)
+<div align="center">
+
+![MTK Logo](https://raw.github.com/luxluth/mtk/master/assets/mtk-logo.png)
+
+</div>
 
 > [!WARNING]
-> _Still experimental. Not for production use_
+> _Still experimental and under active development. Not recommended for production use._
+
+---
+
+## Philosophy
+
+- **Declarative Views, Retained Elements**: Write functional, declarative views (`view(&state) -> impl View<State>`). MTK retains layout nodes and updates only changed properties via `rebuild()`.
+- **Primitives Over Monoliths**: Focus on flexible, unopinionated primitives rather than a rigid widget set, making it easy to build custom workstation tools, editors, and domain components.
+- **Accessible Core**: The coordinator (`Context`), layout engine (`muse.h`), typography metrics, and GPU canvas passes are public so developers can build on top of MTK without fighting the framework.
+- **Source Introspection**: Every widget tracks its call site with `#[track_caller]` for live in-tree debugging and inspection.
+
+---
+
+## Core Technologies
+
+MTK brings together proven technologies from across the systems and graphics ecosystem:
+
+- **Layout**: [`muse.h`](crates/mtk/src/c/muse.h) — C-based Flexbox engine with incremental layout passes, aspect-ratio resolution, and scroll clamping.
+- **Graphics**: [WGPU](https://wgpu.rs/) — Cross-platform GPU rendering targeting Vulkan, Metal, and DirectX 12.
+- **Typography**: [Parley](https://github.com/linebender/parley), [Swash](https://github.com/dfrg/swash) — Multi-font styling, dynamic font fallback, OpenType ligatures, and inline span geometry.
+- **Windowing**: [winit](https://github.com/rust-windowing/winit) — Native window creation, DPI scaling, and event handling.
+- **Images**: [image](https://github.com/image-rs/image), [resvg](https://github.com/RazrFalcon/resvg) — Asynchronous streaming loader (`mtk-image-loader`) with byte-bounded LRU caching.
+- **Inspector**: [Ratatui](https://github.com/ratatui/ratatui) — Built-in terminal UI layout inspector.
+- **Clipboard**: [arboard](https://github.com/1Password/arboard) — Cross-platform clipboard read and write support.
 
 ---
 
 ## Quick Start Example
 
-Below is a simple, complete example that launches a window displaying text:
+Below is a complete, minimal example that creates a window displaying text:
 
 ```rust,no_run
 use mtk::clr;
@@ -45,46 +72,14 @@ fn main() {
 
 ---
 
-## Key Capabilities
+## State Management and Lenses
 
-- **Declarative View Hierarchy**: Compose user interfaces cleanly using reactive view trees (`View`).
-- **Lenses and State Adaptation**: Decouple stateful sub-widgets from root application state using zero-cost `Lens` accessors.
-- **Unidirectional Data Flow**: State updates pass through pure `update` functions driven by typed messages.
-- **Rich UI Widgets**: Includes `container`, `column`, `row`, `text`, `scroll_view`, `input_text`, and `text_area`.
-- **Seamless Intrinsic Scrolling**: Automatic content bounds calculation, smooth kinetic scrolling, and overlay shadow scrollbars.
-- **Persistent System Clipboard**: Cross-platform system clipboard integration (`ClipboardData`, `ctx.clipboard_copy`, `ctx.clipboard_get`).
-
----
-
-## State Management, Lenses and The Adapter Pattern
-
-MTK uses **Lenses** and the **Adapter Pattern** to focus large global application states into isolated, reusable sub-views while keeping state flow 100% type-safe.
-
-### 1. What is a `Lens`?
-
-A `Lens<Outer, Inner>` provides a functional view abstraction for focusing into a sub-field of a parent state without mutating or cloning the parent structure.
-
-- Derive lenses automatically using `#[derive(Lens)]` on your application state struct:
-  ```rust,ignore
-  #[derive(Lens)]
-  struct AppState {
-      search_query: String,
-      bio: String,
-  }
-  ```
-- Closures matching `fn(&Outer) -> &Inner` also automatically implement `Lens<Outer, Inner>`.
-
-### 2. Adapting Views with `adapt` and `.adapt()`
-
-Leaf components like `input_text()` or `text_area()` expect a specific slice of state (e.g. `String`) and emit specific messages. The `adapt()` helper or `.adapt()` extension method maps:
-
-1. **State Down**: Projects the parent state (`Outer`) down to the sub-view (`Inner`) using the lens.
-2. **Messages Up**: Maps local child messages into parent application domain messages (`OuterMsg`).
+MTK uses unidirectional data flow with typed messages. To decompose large application states into reusable sub-views without cloning, MTK provides **Lenses** and the **Adapter Pattern**:
 
 ```rust,no_run
 use mtk::Lens;
 use mtk::ui::widgets::*;
-use mtk::ui::{adapt, ViewAdaptExt};
+use mtk::ui::{adapt, ViewAdaptExt, View};
 
 #[derive(Lens)]
 struct AppState {
@@ -97,10 +92,10 @@ enum AppMsg {
     SetBio(String),
 }
 
-fn view(state: &AppState) -> impl mtk::ui::View<AppState, Message = AppMsg> {
+fn view(state: &AppState) -> impl View<AppState, Message = AppMsg> {
     column((
         text("Profile Editor"),
-        // Adapt via standalone helper and derived lens:
+        // Adapt via the standalone helper and derived lens:
         adapt(input_text(), AppState::username, AppMsg::SetUsername),
         // Or adapt via method chaining extension trait:
         text_area().adapt(AppState::bio, AppMsg::SetBio),
@@ -110,23 +105,12 @@ fn view(state: &AppState) -> impl mtk::ui::View<AppState, Message = AppMsg> {
 
 ---
 
-## Core Architecture and Execution Model
-
-The lifetime of a frame inside MTK follows a structured multi-pass execution model managed by `Context`:
-
-1. **Tree Construction**: Widgets create and attach layout primitives (`Node`) to the context.
-2. **Layout Pass (`compute_layout`)**: A multi-pass algorithm calculates intrinsic text sizes, flex dimensions, percentages, and absolute bounds across the tree.
-3. **Render List Generation (`build_render_list`)**: The layout tree is flattened into a Z-indexed array of draw commands (`RenderCommand`), applying scissor clipping rectangles for scroll views and containers.
-4. **Event Dispatch and Picking (`pick`)**: Coordinate hit-testing determines mouse target nodes and routes keyboard/focus events.
-
----
-
 ## Examples
 
-To run the included MTK demos:
+To run the included widget gallery:
 
 ```bash
-cargo run --example scroll_demo
+cargo run --example widget_gallery
 ```
 
 ---
