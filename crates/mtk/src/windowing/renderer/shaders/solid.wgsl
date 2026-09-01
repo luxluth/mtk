@@ -3,8 +3,9 @@ struct ImmediateData {
     pos: vec2<f32>,
     screen_size: vec2<f32>,
     quad_size: vec2<f32>,
-    border_radius: f32,
     alpha: f32,
+    _pad0: f32,
+    border_radii: vec4<f32>, // tl, tr, br, bl
     border_color: vec4<f32>,
     shadow_color: vec4<f32>,
     border_widths: vec4<f32>, // top, right, bottom, left
@@ -26,7 +27,7 @@ struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) fragP: vec2<f32>,
     @location(1) fragQuadSize: vec2<f32>,
-    @location(2) fragBorderRadius: f32,
+    @location(2) fragBorderRadii: vec4<f32>,
     @location(3) fragAlpha: f32,
 }
 
@@ -50,15 +51,16 @@ fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> VertexOutput {
     out.clip_position = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
     out.fragP = physical_p - logical_center;
     out.fragQuadSize = imm.quad_size;
-    out.fragBorderRadius = imm.border_radius;
+    out.fragBorderRadii = imm.border_radii;
     out.fragAlpha = imm.alpha;
     return out;
 }
 
-fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, radius: f32) -> f32 {
-    let r = min(radius, min(b.x, b.y));
-    let q = abs(p) - b + vec2<f32>(r, r);
-    return min(max(q.x, q.y), 0.0) + length(max(q, vec2<f32>(0.0, 0.0))) - r;
+fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: vec4<f32>) -> f32 {
+    let rad = select(vec2<f32>(r.x, r.w), vec2<f32>(r.y, r.z), p.x > 0.0);
+    let radius = min(select(rad.x, rad.y, p.y > 0.0), min(b.x, b.y));
+    let q = abs(p) - b + vec2<f32>(radius, radius);
+    return min(max(q.x, q.y), 0.0) + length(max(q, vec2<f32>(0.0, 0.0))) - radius;
 }
 
 @fragment
@@ -66,7 +68,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let p = in.fragP;
     let b = in.fragQuadSize * 0.5;
 
-    let dist = sdRoundedBox(p, b, in.fragBorderRadius);
+    let dist = sdRoundedBox(p, b, in.fragBorderRadii);
 
     // Outer edge alpha (smooth anti-aliasing)
     let outer_alpha = clamp(1.0 - smoothstep(-0.75, 0.75, dist), 0.0, 1.0);
@@ -95,8 +97,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
         let p_inner = p - inner_offset;
         let min_border = min(min(imm.border_widths.x, imm.border_widths.y), min(imm.border_widths.z, imm.border_widths.w));
-        let inner_radius = max(0.0, in.fragBorderRadius - min_border);
-        let inner_dist = sdRoundedBox(p_inner, inner_b, inner_radius);
+        let inner_radii = max(vec4<f32>(0.0), in.fragBorderRadii - vec4<f32>(min_border));
+        let inner_dist = sdRoundedBox(p_inner, inner_b, inner_radii);
 
         let inner_alpha = clamp(1.0 - smoothstep(-0.75, 0.75, inner_dist), 0.0, 1.0);
 

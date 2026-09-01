@@ -20,6 +20,58 @@ macro_rules! corners_component {
                     br: val,
                 }
             }
+
+            /// Creates an instance with the value applied to top corners only.
+            pub fn top(val: $t) -> Self
+            where
+                $t: Default,
+            {
+                Self {
+                    tl: val,
+                    tr: val,
+                    bl: <$t>::default(),
+                    br: <$t>::default(),
+                }
+            }
+
+            /// Creates an instance with the value applied to bottom corners only.
+            pub fn bottom(val: $t) -> Self
+            where
+                $t: Default,
+            {
+                Self {
+                    tl: <$t>::default(),
+                    tr: <$t>::default(),
+                    bl: val,
+                    br: val,
+                }
+            }
+
+            /// Creates an instance with the value applied to left corners only.
+            pub fn left(val: $t) -> Self
+            where
+                $t: Default,
+            {
+                Self {
+                    tl: val,
+                    tr: <$t>::default(),
+                    bl: val,
+                    br: <$t>::default(),
+                }
+            }
+
+            /// Creates an instance with the value applied to right corners only.
+            pub fn right(val: $t) -> Self
+            where
+                $t: Default,
+            {
+                Self {
+                    tl: <$t>::default(),
+                    tr: val,
+                    bl: <$t>::default(),
+                    br: val,
+                }
+            }
         }
     };
 }

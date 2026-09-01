@@ -1234,8 +1234,44 @@ impl Style {
         self
     }
 
+    pub fn border_bottom(mut self, width: f32, color: Color) -> Self {
+        self.base_constraints.border.bottom = width;
+        self.base_effects.border.color = color;
+        self
+    }
+
+    pub fn border_top(mut self, width: f32, color: Color) -> Self {
+        self.base_constraints.border.top = width;
+        self.base_effects.border.color = color;
+        self
+    }
+
+    pub fn border_left(mut self, width: f32, color: Color) -> Self {
+        self.base_constraints.border.left = width;
+        self.base_effects.border.color = color;
+        self
+    }
+
+    pub fn border_right(mut self, width: f32, color: Color) -> Self {
+        self.base_constraints.border.right = width;
+        self.base_effects.border.color = color;
+        self
+    }
+
     pub fn corner_radius(mut self, radius: f32) -> Self {
         self.base_effects.border.radius = Radius::all(radius);
+        self
+    }
+
+    pub fn corner_radius_top(mut self, radius: f32) -> Self {
+        self.base_effects.border.radius.tl = radius;
+        self.base_effects.border.radius.tr = radius;
+        self
+    }
+
+    pub fn corner_radius_bottom(mut self, radius: f32) -> Self {
+        self.base_effects.border.radius.bl = radius;
+        self.base_effects.border.radius.br = radius;
         self
     }
 

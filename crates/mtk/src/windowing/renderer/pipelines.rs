@@ -9,8 +9,9 @@ pub struct ImmediateData {
     pub pos: [f32; 2],
     pub screen_size: [f32; 2],
     pub quad_size: [f32; 2],
-    pub border_radius: f32,
     pub alpha: f32,
+    pub _pad0: f32,
+    pub border_radii: [f32; 4], // tl, tr, br, bl
     pub border_color: [f32; 4],
     pub shadow_color: [f32; 4],
     pub border_widths: [f32; 4], // top, right, bottom, left

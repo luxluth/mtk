@@ -27,7 +27,8 @@ fn main() {
                             .width(Size::Fixed(400))
                             .height(Size::Fixed(400))
                             .corner_radius(12.0)
-                            .border(1.0, rgb!(226, 232, 240)),
+                            .border(1.0, rgb!(226, 232, 240))
+                            .shadow(rgb!(0, 0, 0), 20.0, 0.25),
                     ),
                 text("Image of Lena Forsén used in many image processing experiments.").style(
                     Style::new().set_text_style(
