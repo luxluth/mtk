@@ -81,6 +81,23 @@ where
             .rebuild(&prev.inner, ctx, &mut element.inner_element);
     }
 
+    fn rebuild_with_parent(
+        &self,
+        prev: &Self,
+        ctx: &mut Context,
+        element: &mut Self::Element,
+        parent: Node,
+        next_sibling: Option<Node>,
+    ) {
+        self.inner.rebuild_with_parent(
+            &prev.inner,
+            ctx,
+            &mut element.inner_element,
+            parent,
+            next_sibling,
+        );
+    }
+
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
         self.inner.teardown(ctx, &mut element.inner_element);
     }

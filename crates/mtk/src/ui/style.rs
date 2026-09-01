@@ -159,9 +159,10 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
         ctx: &mut Context,
         element: &mut Self::Element,
         parent: Node,
+        next_sibling: Option<Node>,
     ) {
         self.inner
-            .rebuild_with_parent(&prev.inner, ctx, &mut element.0, parent);
+            .rebuild_with_parent(&prev.inner, ctx, &mut element.0, parent, next_sibling);
         let node = self.inner.get_node(&element.0);
         element.1.is_focused = Some(node) == ctx.focused_node();
         element.1.is_animating = self.apply_style(ctx, &mut element.1, node);

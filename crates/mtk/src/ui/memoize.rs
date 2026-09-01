@@ -66,6 +66,22 @@ where
         }
     }
 
+    fn rebuild_with_parent(
+        &self,
+        _prev: &Self,
+        ctx: &mut Context,
+        element: &mut Self::Element,
+        parent: crate::Node,
+        next_sibling: Option<crate::Node>,
+    ) {
+        if self.data != element.0 {
+            let new_view = (self.builder)(&self.data);
+            new_view.rebuild_with_parent(&element.1, ctx, &mut element.2, parent, next_sibling);
+            element.0 = self.data.clone();
+            element.1 = new_view;
+        }
+    }
+
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
         element.1.teardown(ctx, &mut element.2);
     }

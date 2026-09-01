@@ -57,6 +57,18 @@ where
         self.view.rebuild(&prev.view, ctx, element)
     }
 
+    fn rebuild_with_parent(
+        &self,
+        prev: &Self,
+        ctx: &mut Context,
+        element: &mut Self::Element,
+        parent: crate::Node,
+        next_sibling: Option<crate::Node>,
+    ) {
+        self.view
+            .rebuild_with_parent(&prev.view, ctx, element, parent, next_sibling)
+    }
+
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
         self.view.teardown(ctx, element)
     }

@@ -100,6 +100,7 @@ pub trait View<State> {
         ctx: &mut Context,
         element: &mut Self::Element,
         _parent: Node,
+        _next_sibling: Option<Node>,
     ) {
         self.rebuild(prev, ctx, element);
     }
@@ -166,9 +167,18 @@ macro_rules! impl_view_tuple {
             }
 
             fn rebuild(&self, prev: &Self, ctx: &mut Context, elements: &mut Self::Elements, parent: Node) {
-                $(
-                    self.$idx.rebuild_with_parent(&prev.$idx, ctx, &mut elements.$idx, parent);
-                )*
+                let mut nodes = [
+                    $(self.$idx.get_node(&elements.$idx),)*
+                ];
+
+                #[allow(unused_assignments)]
+                {
+                    $(
+                        let next_sibling = nodes[($idx + 1)..].iter().copied().find(|n| n.is_valid());
+                        self.$idx.rebuild_with_parent(&prev.$idx, ctx, &mut elements.$idx, parent, next_sibling);
+                        nodes[$idx] = self.$idx.get_node(&elements.$idx);
+                    )*
+                }
             }
 
             fn teardown(&self, ctx: &mut Context, elements: &mut Self::Elements) {
@@ -312,14 +322,20 @@ where
         ctx: &mut Context,
         element: &mut Self::Element,
         parent: Node,
+        next_sibling: Option<Node>,
     ) {
         match (self, prev, element) {
             (Some(new_view), Some(old_view), Some(el)) => {
-                new_view.rebuild_with_parent(old_view, ctx, el, parent);
+                new_view.rebuild_with_parent(old_view, ctx, el, parent, next_sibling);
             }
             (Some(new_view), _, el_slot @ None) => {
                 let el = new_view.build(ctx);
-                parent.append(ctx, new_view.get_node(&el));
+                let node = new_view.get_node(&el);
+                if let Some(sibling) = next_sibling {
+                    node.put_before(ctx, sibling);
+                } else {
+                    parent.append(ctx, node);
+                }
                 *el_slot = Some(el);
             }
             (None, Some(old_view), el_slot @ Some(_)) => {
@@ -402,7 +418,7 @@ where
     fn rebuild(&self, prev: &Self, ctx: &mut Context, elements: &mut Self::Elements, parent: Node) {
         match (self, prev, elements) {
             (Some(new_view), Some(old_view), Some(el)) => {
-                new_view.rebuild_with_parent(old_view, ctx, el, parent);
+                new_view.rebuild_with_parent(old_view, ctx, el, parent, None);
             }
             (Some(new_view), _, el_slot @ None) => {
                 let el = new_view.build(ctx);
@@ -458,5 +474,53 @@ mod tests {
         let mut el = View::<()>::build(&row_view5, &mut ctx);
         View::<()>::rebuild(&row_view6, &row_view5, &mut ctx, &mut el);
         View::<()>::teardown(&row_view6, &mut ctx, &mut el);
+    }
+
+    #[test]
+    fn test_option_view_sequence_sibling_ordering() {
+        use crate::ui::widgets::{Text, column, text};
+
+        type OptText = Option<Text<()>>;
+
+        let mut ctx = Context::new();
+
+        // 1. Initial: Slot 0 (BANNER), Slot 1 (music_dir), Slot 2 (None), Slot 3 (None), Slot 4 (log)
+        let view_1 = column((
+            text::<_, ()>("BANNER"),
+            Some(text::<_, ()>("music_dir")),
+            None as OptText,
+            None as OptText,
+            text::<_, ()>("log"),
+        ));
+
+        let mut el = View::<()>::build(&view_1, &mut ctx);
+        let parent_node = View::<()>::get_node(&view_1, &el);
+
+        let initial_children = parent_node.children(&ctx);
+        assert_eq!(initial_children.len(), 3);
+        let banner_node = initial_children[0];
+        let music_node = initial_children[1];
+        let log_node = initial_children[2];
+
+        // 2. Rebuild: Slot 1 becomes None, Slot 2 becomes Some("progress_bar")
+        let view_2 = column((
+            text::<_, ()>("BANNER"),
+            None as OptText,
+            Some(text::<_, ()>("progress_bar")),
+            None as OptText,
+            text::<_, ()>("log"),
+        ));
+
+        View::<()>::rebuild(&view_2, &view_1, &mut ctx, &mut el);
+
+        let updated_children = parent_node.children(&ctx);
+        assert_eq!(updated_children.len(), 3);
+        assert_eq!(updated_children[0], banner_node);
+        // Progress bar MUST be inserted before log, preserving declaration order!
+        let progress_node = updated_children[1];
+        assert_ne!(progress_node, music_node);
+        assert_eq!(updated_children[2], log_node);
+
+        View::<()>::teardown(&view_2, &mut ctx, &mut el);
     }
 }
