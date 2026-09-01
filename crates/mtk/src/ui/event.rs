@@ -96,11 +96,24 @@ where
         event: Event,
         ctx: &mut Context,
     ) -> (EventResult, Option<Self::Message>) {
+        let self_node = self.get_node(element);
+
+        // Pre-track is_pressed on mouse-down for this node regardless of whether inner handles it
+        if let Event::MouseInput {
+            pressed, hit_nodes, ..
+        } = &event
+        {
+            if *pressed && hit_nodes.contains(&self_node) {
+                element.is_pressed = true;
+            }
+        }
+
         let (inner_res, inner_msg) =
             self.inner
                 .handle_event(&mut element.inner_element, state, event.clone(), ctx);
 
-        if inner_res == EventResult::Handled || inner_msg.is_some() {
+        // If an inner child already produced a message, prioritize child and avoid duplicate parent actions
+        if inner_msg.is_some() {
             if let Event::MouseInput { pressed, .. } = &event {
                 if !*pressed {
                     element.is_pressed = false;
@@ -109,13 +122,35 @@ where
             return (inner_res, inner_msg);
         }
 
+        // If inner handled the event, check if this handler should still inspect and process it:
+        // 1. Submit on KeyboardInput when this node is focused
+        // 2. Release / Click on MouseInput release when this node was previously pressed
+        if inner_res == EventResult::Handled {
+            let allow_outer_processing = match &event {
+                Event::KeyboardInput { .. } => self.kind == EventKind::Submit,
+                Event::MouseInput { pressed: false, .. } => {
+                    element.is_pressed
+                        && (self.kind == EventKind::Release || self.kind == EventKind::Click)
+                }
+                _ => false,
+            };
+
+            if !allow_outer_processing {
+                if let Event::MouseInput { pressed, .. } = &event {
+                    if !*pressed {
+                        element.is_pressed = false;
+                    }
+                }
+                return (inner_res, inner_msg);
+            }
+        }
+
         let mut handled = EventResult::Ignored;
         let mut emitted_msg = None;
 
         match &event {
             Event::CursorMoved { hit_nodes, .. } => {
-                let node = self.get_node(element);
-                let newly_hovered = hit_nodes.contains(&node);
+                let newly_hovered = hit_nodes.contains(&self_node);
 
                 if newly_hovered != element.is_hovered {
                     element.is_hovered = newly_hovered;
@@ -131,8 +166,7 @@ where
             Event::MouseInput {
                 pressed, hit_nodes, ..
             } => {
-                let node = self.get_node(element);
-                let is_hit = hit_nodes.contains(&node);
+                let is_hit = hit_nodes.contains(&self_node);
                 if *pressed {
                     if is_hit {
                         element.is_pressed = true;
@@ -158,7 +192,6 @@ where
                 event: key_event, ..
             } => {
                 if self.kind == EventKind::Submit && key_event.state.is_pressed() {
-                    let self_node = self.get_node(element);
                     if Some(self_node) == ctx.focused_node() {
                         let is_enter = match key_event.logical_key.as_ref() {
                             winit::keyboard::Key::Named(winit::keyboard::NamedKey::Enter) => true,
@@ -294,5 +327,54 @@ mod tests {
         );
         assert_eq!(p_up_res, EventResult::Handled);
         assert_eq!(p_up_msg, Some(TestMsg::ParentClick));
+    }
+
+    #[test]
+    fn test_chained_press_and_release() {
+        #[derive(Clone, Debug, PartialEq)]
+        enum BtnMsg {
+            Press,
+            Release,
+        }
+
+        let mut ctx = Context::new();
+        let btn_view = text::<_, BtnMsg>("7")
+            .on_event(EventKind::Press, |_| Some(BtnMsg::Press))
+            .on_event(EventKind::Release, |_| Some(BtnMsg::Release));
+
+        let mut element = View::<()>::build(&btn_view, &mut ctx);
+        let btn_node = View::<()>::get_node(&btn_view, &element);
+
+        // 1. Mouse down on button
+        let (down_res, down_msg) = View::<()>::handle_event(
+            &btn_view,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                pressed: true,
+                hit_nodes: vec![btn_node],
+                x: 0.0,
+                y: 0.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(down_res, EventResult::Handled);
+        assert_eq!(down_msg, Some(BtnMsg::Press));
+
+        // 2. Mouse up on button -> Release MUST fire
+        let (up_res, up_msg) = View::<()>::handle_event(
+            &btn_view,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                pressed: false,
+                hit_nodes: vec![btn_node],
+                x: 0.0,
+                y: 0.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(up_res, EventResult::Handled);
+        assert_eq!(up_msg, Some(BtnMsg::Release));
     }
 }
