@@ -1,12 +1,11 @@
-# MTK — Muse UI Toolkit
-
-MTK is a declarative, retained-mode GUI toolkit for Rust. It pairs an Elm-inspired functional interface with a C-based Flexbox layout engine, native WGPU hardware rendering, and Parley typography.
-
 <div align="center">
+  <img src="https://raw.github.com/luxluth/mtk/master/assets/mtk-logo.png" alt="MTK Logo" width="200" />
 
-![MTK Logo](https://raw.github.com/luxluth/mtk/master/assets/mtk-logo.png)
+# _Muse Toolkit_
 
 </div>
+
+MTK is a declarative, retained-mode GUI toolkit for Rust. It pairs an Elm-inspired functional interface with a C-based Flexbox layout engine, native WGPU hardware rendering, and Parley typography.
 
 > [!WARNING]
 > _Still experimental and under active development. Not recommended for production use._
