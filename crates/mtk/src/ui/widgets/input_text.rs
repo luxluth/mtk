@@ -230,11 +230,13 @@ impl View<String> for InputText {
         let mut handled = EventResult::Ignored;
         let mut emitted_msg = None;
 
-        let is_focused = Some(element.node.clone()) == ctx.focused_node();
-
-        // Immediately sync editor state from incoming state if not actively editing with focus
-        if element.editor.text() != *state && !is_focused {
+        // Immediately sync editor state from incoming state if external state changed
+        if element.editor.text() != *state {
             element.editor.set_text(state);
+            element.node.update_constraints(ctx, |c| {
+                c.scroll.x = 0.0;
+                c.scroll.y = 0.0;
+            });
             self.sync_render_nodes(ctx, element);
         }
 
@@ -675,6 +677,32 @@ mod tests {
         assert_eq!(emitted, Some("Hello World Foo".to_string()));
         assert!(!element.editor.text().contains('\n'));
         assert!(!element.editor.text().contains('\r'));
+
+        widget.teardown(&mut ctx, &mut element);
+    }
+
+    #[test]
+    fn test_input_text_state_sync_while_focused() {
+        let mut ctx = Context::new();
+        let widget = input_text();
+        let mut element = widget.build(&mut ctx);
+
+        // Focus node and simulate having typed text
+        ctx.request_focus(element.node.clone());
+        element.editor.set_text("buy milk");
+        assert_eq!(element.editor.text(), "buy milk");
+
+        // Simulate external state clearing (e.g. state.new_input.clear() on submit)
+        let cleared_state = String::new();
+        let _ = widget.handle_event(
+            &mut element,
+            &cleared_state,
+            Event::Tick { dt: 0.016 },
+            &mut ctx,
+        );
+
+        // Editor MUST sync and clear even though it remains focused
+        assert_eq!(element.editor.text(), "");
 
         widget.teardown(&mut ctx, &mut element);
     }

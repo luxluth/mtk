@@ -178,10 +178,13 @@ impl View<String> for TextArea {
         let mut handled = EventResult::Ignored;
         let mut emitted_msg: Option<String> = None;
 
-        let is_focused = Some(element.node.clone()) == ctx.focused_node();
-
-        if element.editor.text() != *state && !is_focused {
+        // Immediately sync editor state from incoming state if external state changed
+        if element.editor.text() != *state {
             element.editor.set_text(state);
+            element.node.update_constraints(ctx, |c| {
+                c.scroll.x = 0.0;
+                c.scroll.y = 0.0;
+            });
             self.sync_render_nodes(ctx, element);
         }
 
