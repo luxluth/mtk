@@ -7,9 +7,175 @@ use parley::{
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::Arc;
 use std::sync::Mutex;
 use swash::scale::ScaleContext;
+
+/// Visual styling applied to a specific sub-range of text in a rich text layout.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SpanStyle {
+    pub color: Option<Color>,
+    pub font_weight: Option<parley::style::FontWeight>,
+    pub font_style: Option<FontStyle>,
+    pub font_size: Option<f32>,
+    pub underline: bool,
+    pub strikethrough: bool,
+}
+
+impl SpanStyle {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn color(mut self, color: Color) -> Self {
+        self.color = Some(color);
+        self
+    }
+
+    pub fn bold(mut self) -> Self {
+        self.font_weight = Some(parley::style::FontWeight::BOLD);
+        self
+    }
+
+    pub fn weight(mut self, weight: parley::style::FontWeight) -> Self {
+        self.font_weight = Some(weight);
+        self
+    }
+
+    pub fn italic(mut self) -> Self {
+        self.font_style = Some(FontStyle::Italic);
+        self
+    }
+
+    pub fn font_style(mut self, style: FontStyle) -> Self {
+        self.font_style = Some(style);
+        self
+    }
+
+    pub fn font_size(mut self, size: f32) -> Self {
+        self.font_size = Some(size);
+        self
+    }
+
+    pub fn underline(mut self, underline: bool) -> Self {
+        self.underline = underline;
+        self
+    }
+
+    pub fn strikethrough(mut self, strikethrough: bool) -> Self {
+        self.strikethrough = strikethrough;
+        self
+    }
+}
+
+/// A styled range of text with an optional identifier tag for interactivity.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextSpan<Id = ()> {
+    pub range: Range<usize>,
+    pub style: SpanStyle,
+    pub id: Option<Id>,
+}
+
+impl<Id> TextSpan<Id> {
+    pub fn new(range: Range<usize>) -> Self {
+        Self {
+            range,
+            style: SpanStyle::default(),
+            id: None,
+        }
+    }
+
+    pub fn id(mut self, id: Id) -> Self {
+        self.id = Some(id);
+        self
+    }
+
+    pub fn color(mut self, color: Color) -> Self {
+        self.style.color = Some(color);
+        self
+    }
+
+    pub fn bold(mut self) -> Self {
+        self.style.font_weight = Some(parley::style::FontWeight::BOLD);
+        self
+    }
+
+    pub fn weight(mut self, weight: parley::style::FontWeight) -> Self {
+        self.style.font_weight = Some(weight);
+        self
+    }
+
+    pub fn italic(mut self) -> Self {
+        self.style.font_style = Some(FontStyle::Italic);
+        self
+    }
+
+    pub fn font_style(mut self, style: FontStyle) -> Self {
+        self.style.font_style = Some(style);
+        self
+    }
+
+    pub fn font_size(mut self, size: f32) -> Self {
+        self.style.font_size = Some(size);
+        self
+    }
+
+    pub fn underline(mut self) -> Self {
+        self.style.underline = true;
+        self
+    }
+
+    pub fn strikethrough(mut self) -> Self {
+        self.style.strikethrough = true;
+        self
+    }
+
+    pub fn style(mut self, style: SpanStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    /// Converts this span to an untyped span for layout and rendering.
+    pub fn to_untyped(&self) -> TextSpan<()> {
+        TextSpan {
+            range: self.range.clone(),
+            style: self.style.clone(),
+            id: None,
+        }
+    }
+}
+
+pub(crate) fn hash_spans(spans: &[TextSpan<()>]) -> u64 {
+    if spans.is_empty() {
+        return 0;
+    }
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for span in spans {
+        span.range.start.hash(&mut hasher);
+        span.range.end.hash(&mut hasher);
+        if let Some(c) = span.style.color {
+            c.as_u32().hash(&mut hasher);
+        }
+        if let Some(w) = span.style.font_weight {
+            w.value().to_bits().hash(&mut hasher);
+        }
+        if let Some(s) = span.style.font_style {
+            match s {
+                FontStyle::Normal => 0u8.hash(&mut hasher),
+                FontStyle::Italic => 1u8.hash(&mut hasher),
+                FontStyle::Oblique(_) => 2u8.hash(&mut hasher),
+            }
+        }
+        if let Some(sz) = span.style.font_size {
+            sz.to_bits().hash(&mut hasher);
+        }
+        span.style.underline.hash(&mut hasher);
+        span.style.strikethrough.hash(&mut hasher);
+    }
+    hasher.finish()
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct TextLayoutCacheKey {
@@ -25,6 +191,7 @@ pub(crate) struct TextLayoutCacheKey {
     pub selection: Option<(usize, usize)>,
     pub preedit_range: Option<(usize, usize)>,
     pub inner_w_bits: u32,
+    pub spans_hash: u64,
 }
 
 pub(crate) struct TextLayoutCacheEntry {
@@ -73,6 +240,7 @@ impl TextContext {
         avail_w: f32,
         selection: Option<(usize, usize)>,
         preedit_range: Option<(usize, usize)>,
+        spans: &[TextSpan<()>],
     ) -> Arc<TextLayoutCacheEntry> {
         let font_style_u8 = match text_style.font_style {
             FontStyle::Normal => 0,
@@ -85,6 +253,8 @@ impl TextContext {
         } else {
             u32::MAX
         };
+
+        let spans_hash = hash_spans(spans);
 
         let key = TextLayoutCacheKey {
             text: text.to_string(),
@@ -99,6 +269,7 @@ impl TextContext {
             selection,
             preedit_range,
             inner_w_bits,
+            spans_hash,
         };
 
         if let Some(entry) = self.layout_cache.get(&key) {
@@ -142,6 +313,33 @@ impl TextContext {
             builder.push(StyleProperty::Brush(text_style.selection_color), start..end);
         }
 
+        for span in spans {
+            let start = span.range.start.min(text.len());
+            let end = span.range.end.min(text.len());
+            if start >= end {
+                continue;
+            }
+
+            if let Some(color) = span.style.color {
+                builder.push(StyleProperty::Brush(color), start..end);
+            }
+            if let Some(weight) = span.style.font_weight {
+                builder.push(StyleProperty::FontWeight(weight), start..end);
+            }
+            if let Some(style) = span.style.font_style {
+                builder.push(StyleProperty::FontStyle(style), start..end);
+            }
+            if let Some(size) = span.style.font_size {
+                builder.push(StyleProperty::FontSize(size), start..end);
+            }
+            if span.style.underline {
+                builder.push(StyleProperty::Underline(true), start..end);
+            }
+            if span.style.strikethrough {
+                builder.push(StyleProperty::Strikethrough(true), start..end);
+            }
+        }
+
         let mut layout = builder.build(text);
 
         let max_advance = if text_style.wrap && avail_w.is_finite() && avail_w > 0.0 {
@@ -176,9 +374,10 @@ pub(crate) fn measure_text(
     avail_w: f32,
     _avail_h: f32,
     shared_ctx: &SharedTextContext,
+    spans: &[TextSpan<()>],
 ) -> TextComputedOutput {
     let mut ctx_guard = shared_ctx.lock().unwrap();
-    let entry = ctx_guard.get_or_create_layout(text, text_style, avail_w, None, None);
+    let entry = ctx_guard.get_or_create_layout(text, text_style, avail_w, None, None, spans);
 
     TextComputedOutput {
         computed_width: entry.actual_text_width.ceil(),
@@ -196,49 +395,17 @@ pub(crate) fn hit_test_text(
     text: &str,
     text_style: &TextStyle,
     avail_w: f32,
-    _avail_h: f32,
+    avail_h: f32,
     x: f32,
     y: f32,
     shared_ctx: &SharedTextContext,
+    spans: &[TextSpan<()>],
 ) -> usize {
-    let mut text_context = shared_ctx.lock().unwrap();
-    let TextContext {
-        font_cx, layout_cx, ..
-    } = &mut *text_context;
-
-    let mut builder = layout_cx.ranged_builder(font_cx, text, 1.0, true);
-
-    builder.push_default(StyleProperty::FontSize(text_style.font_size));
-    builder.push_default(parley::style::FontFamily::from(
-        text_style.font_family.as_str(),
-    ));
-    builder.push_default(StyleProperty::FontWeight(text_style.font_weight));
-    builder.push_default(StyleProperty::FontStyle(text_style.font_style));
-
-    if text_style.wrap {
-        builder.push_default(StyleProperty::OverflowWrap(text_style.overflow_wrap));
-    }
-
-    if text_style.strikethrough {
-        builder.push_default(StyleProperty::Strikethrough(true));
-    }
-
-    if text_style.underline {
-        builder.push_default(StyleProperty::Underline(true));
-    }
-
-    let mut layout = builder.build(text);
-    let max_advance = if text_style.wrap && avail_w.is_finite() && avail_w > 0.0 {
-        Some(avail_w)
-    } else {
-        None
-    };
-
-    layout.break_all_lines(max_advance);
-    layout.align(text_style.alignment, AlignmentOptions::default());
-
-    let actual_text_width = layout.width();
-    let actual_text_height = layout.height();
+    let mut ctx_guard = shared_ctx.lock().unwrap();
+    let entry = ctx_guard.get_or_create_layout(text, text_style, avail_w, None, None, spans);
+    let layout = &entry.layout;
+    let actual_text_width = entry.actual_text_width;
+    let actual_text_height = entry.actual_text_height;
 
     let horizontal_offset = match text_style.alignment {
         parley::layout::Alignment::Center => {
@@ -261,15 +428,15 @@ pub(crate) fn hit_test_text(
     let vertical_offset = match text_style.vertical_alignment {
         crate::style::VerticalAlignment::Top => 0.0,
         crate::style::VerticalAlignment::Center => {
-            if _avail_h.is_finite() && _avail_h > 0.0 {
-                ((_avail_h - actual_text_height) / 2.0).max(0.0)
+            if avail_h.is_finite() && avail_h > 0.0 {
+                ((avail_h - actual_text_height) / 2.0).max(0.0)
             } else {
                 0.0
             }
         }
         crate::style::VerticalAlignment::Bottom => {
-            if _avail_h.is_finite() && _avail_h > 0.0 {
-                (_avail_h - actual_text_height).max(0.0)
+            if avail_h.is_finite() && avail_h > 0.0 {
+                (avail_h - actual_text_height).max(0.0)
             } else {
                 0.0
             }
@@ -279,7 +446,7 @@ pub(crate) fn hit_test_text(
     let rel_x = x - horizontal_offset;
     let rel_y = y - vertical_offset;
 
-    if let Some((cluster, side)) = Cluster::from_point(&layout, rel_x, rel_y) {
+    if let Some((cluster, side)) = Cluster::from_point(layout, rel_x, rel_y) {
         let is_leading = side == ClusterSide::Left;
         if cluster.is_rtl() {
             if is_leading {
@@ -295,10 +462,84 @@ pub(crate) fn hit_test_text(
             }
         }
     } else {
-        // If we didn't hit a cluster, let's just use from_point which gets closest
-        let cursor = Cursor::from_point(&layout, rel_x, rel_y);
+        let cursor = Cursor::from_point(layout, rel_x, rel_y);
         cursor.index()
     }
+}
+
+/// Returns the bounding rectangles (in local text coordinates `[x, y, w, h]`) of a byte range in the text.
+pub(crate) fn get_range_geometry(
+    text: &str,
+    text_style: &TextStyle,
+    avail_w: f32,
+    avail_h: f32,
+    range: std::ops::Range<usize>,
+    shared_ctx: &SharedTextContext,
+    spans: &[TextSpan<()>],
+) -> Vec<[f32; 4]> {
+    let mut ctx_guard = shared_ctx.lock().unwrap();
+    let entry = ctx_guard.get_or_create_layout(text, text_style, avail_w, None, None, spans);
+    let layout = &entry.layout;
+    let actual_text_width = entry.actual_text_width;
+    let actual_text_height = entry.actual_text_height;
+
+    let horizontal_offset = match text_style.alignment {
+        parley::layout::Alignment::Center => {
+            if avail_w.is_finite() && avail_w > 0.0 {
+                ((avail_w - actual_text_width) / 2.0).max(0.0)
+            } else {
+                0.0
+            }
+        }
+        parley::layout::Alignment::End | parley::layout::Alignment::Right => {
+            if avail_w.is_finite() && avail_w > 0.0 {
+                (avail_w - actual_text_width).max(0.0)
+            } else {
+                0.0
+            }
+        }
+        _ => 0.0,
+    };
+
+    let vertical_offset = match text_style.vertical_alignment {
+        crate::style::VerticalAlignment::Top => 0.0,
+        crate::style::VerticalAlignment::Center => {
+            if avail_h.is_finite() && avail_h > 0.0 {
+                ((avail_h - actual_text_height) / 2.0).max(0.0)
+            } else {
+                0.0
+            }
+        }
+        crate::style::VerticalAlignment::Bottom => {
+            if avail_h.is_finite() && avail_h > 0.0 {
+                (avail_h - actual_text_height).max(0.0)
+            } else {
+                0.0
+            }
+        }
+    };
+
+    let start = range.start.min(text.len());
+    let end = range.end.min(text.len());
+    if start >= end {
+        return Vec::new();
+    }
+
+    use parley::Selection;
+    let start_cursor = Cursor::from_byte_index(layout, start, parley::layout::Affinity::Downstream);
+    let end_cursor = Cursor::from_byte_index(layout, end, parley::layout::Affinity::Upstream);
+    let selection_obj = Selection::new(start_cursor, end_cursor);
+
+    let mut rects = Vec::new();
+    for (bbox, _line_idx) in selection_obj.geometry(layout) {
+        rects.push([
+            horizontal_offset + bbox.x0 as f32,
+            vertical_offset + bbox.y0 as f32,
+            (bbox.x1 - bbox.x0) as f32,
+            (bbox.y1 - bbox.y0) as f32,
+        ]);
+    }
+    rects
 }
 
 pub(crate) fn get_cursor_geometry(
@@ -470,4 +711,29 @@ pub struct TextRenderInfo {
     pub cursor: Option<usize>,
     pub selection: Option<(usize, usize)>,
     pub preedit_range: Option<(usize, usize)>,
+    pub spans: Vec<TextSpan<()>>,
+}
+
+impl Default for TextRenderInfo {
+    fn default() -> Self {
+        Self {
+            style: TextStyle::default(),
+            cursor: None,
+            selection: None,
+            preedit_range: None,
+            spans: Vec::new(),
+        }
+    }
+}
+
+impl TextRenderInfo {
+    pub fn new(style: TextStyle) -> Self {
+        Self {
+            style,
+            cursor: None,
+            selection: None,
+            preedit_range: None,
+            spans: Vec::new(),
+        }
+    }
 }

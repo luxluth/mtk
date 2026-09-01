@@ -310,4 +310,40 @@ impl Node {
             b.downcast_mut::<T>()
         })
     }
+
+    /// Returns the bounding rectangles (in local coordinates `[x, y, w, h]`) of a byte range in the node's text.
+    pub fn get_text_range_geometry(
+        &self,
+        ctx: &Context,
+        range: std::ops::Range<usize>,
+    ) -> Vec<[f32; 4]> {
+        let Some(text) = self.get_text(ctx) else {
+            return Vec::new();
+        };
+
+        let default_style = crate::TextStyle::default();
+        let (style, spans) =
+            if let Some(info) = self.get_text_userdata::<crate::TextRenderInfo>(ctx) {
+                (&info.style, &info.spans[..])
+            } else if let Some(style) = self.get_text_userdata::<crate::TextStyle>(ctx) {
+                (style, &[][..])
+            } else {
+                (&default_style, &[][..])
+            };
+
+        let computed = self.get_computed(ctx).unwrap_or_default();
+        let constraints = self.get_constraints(ctx).unwrap_or_default();
+        let inner_w = (computed.w - constraints.padding.left - constraints.padding.right).max(0.0);
+        let inner_h = (computed.h - constraints.padding.top - constraints.padding.bottom).max(0.0);
+
+        crate::text::get_range_geometry(
+            text,
+            style,
+            inner_w,
+            inner_h,
+            range,
+            &ctx.text_context,
+            spans,
+        )
+    }
 }

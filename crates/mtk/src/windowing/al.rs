@@ -208,18 +208,18 @@ where
 
         ctx.set_text_sizing_func(move |ctx, _node, text, userdata, avail_w, avail_h| {
             let default_style = TextStyle::default();
-            let style = if let Some(info) =
+            let (style, spans) = if let Some(info) =
                 userdata.and_then(|u| u.downcast_ref::<crate::TextRenderInfo>())
             {
-                &info.style
+                (&info.style, &info.spans[..])
             } else if let Some(style) = userdata.and_then(|u| u.downcast_ref::<TextStyle>()) {
-                style
+                (style, &[][..])
             } else {
-                &default_style
+                (&default_style, &[][..])
             };
 
             let text_ctx = ctx.text_context.clone();
-            crate::text::measure_text(text, style, avail_w, avail_h, &text_ctx)
+            crate::text::measure_text(text, style, avail_w, avail_h, &text_ctx, spans)
         });
 
         Self {

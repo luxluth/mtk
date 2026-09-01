@@ -116,13 +116,19 @@ impl TextBatch {
                     (computed.h - constraints.padding.top - constraints.padding.bottom).max(0.0);
 
                 let default_style = TextStyle::default();
-                let (text_style, cursor, selection, preedit_range) =
+                let (text_style, cursor, selection, preedit_range, spans) =
                     if let Some(info) = node.get_text_userdata::<TextRenderInfo>(context) {
-                        (&info.style, info.cursor, info.selection, info.preedit_range)
+                        (
+                            &info.style,
+                            info.cursor,
+                            info.selection,
+                            info.preedit_range,
+                            &info.spans[..],
+                        )
                     } else if let Some(style) = node.get_text_userdata::<TextStyle>(context) {
-                        (style, None, None, None)
+                        (style, None, None, None, &[][..])
                     } else {
-                        (&default_style, None, None, None)
+                        (&default_style, None, None, None, &[][..])
                     };
 
                 let text_ctx_ref = &mut *text_ctx;
@@ -132,6 +138,7 @@ impl TextBatch {
                     inner_w,
                     selection,
                     preedit_range,
+                    spans,
                 );
                 let layout = &layout_entry.layout;
                 let actual_text_width = layout_entry.actual_text_width;

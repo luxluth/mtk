@@ -131,6 +131,7 @@ impl InputText {
             } else {
                 element.editor.preedit_range()
             },
+            spans: Vec::new(),
         };
 
         let current_text = element.node.get_text(ctx);
@@ -286,6 +287,7 @@ impl View<String> for InputText {
                                 rel_x,
                                 rel_y,
                                 &ctx.text_context,
+                                &[],
                             );
 
                             let now = Instant::now();
@@ -365,6 +367,7 @@ impl View<String> for InputText {
                             rel_x,
                             rel_y,
                             &ctx.text_context,
+                            &[],
                         );
 
                         if element.editor.selection_anchor().is_none() {
@@ -585,6 +588,7 @@ impl View<String> for InputText {
                         f32::INFINITY,
                         inner_h,
                         &ctx.text_context,
+                        &[],
                     );
 
                     let mut scroll_x = constraints.scroll.x;

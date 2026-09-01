@@ -94,6 +94,7 @@ impl TextArea {
                 None
             },
             preedit_range: element.editor.preedit_range(),
+            spans: Vec::new(),
         };
         element
             .node
@@ -233,6 +234,7 @@ impl View<String> for TextArea {
                                 rel_x,
                                 rel_y,
                                 &ctx.text_context,
+                                &[],
                             );
 
                             let now = Instant::now();
@@ -310,6 +312,7 @@ impl View<String> for TextArea {
                             rel_x,
                             rel_y,
                             &ctx.text_context,
+                            &[],
                         );
 
                         if element.editor.selection_anchor().is_none() {
@@ -563,6 +566,7 @@ impl View<String> for TextArea {
                         inner_w,
                         inner_h,
                         &ctx.text_context,
+                        &[],
                     );
 
                     let mut scroll_x = constraints.scroll.x;
