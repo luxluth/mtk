@@ -473,7 +473,73 @@ impl Context {
         unsafe {
             sys::muse_compute_layout(self.ctx, viewport_width, viewport_height);
         }
+        self.clamp_scroll_offsets(viewport_width, viewport_height);
         crate::text::CURRENT_CONTEXT.with(|c| c.set(std::ptr::null_mut()));
+    }
+
+    fn clamp_scroll_offsets(&mut self, viewport_width: f32, viewport_height: f32) {
+        let order = unsafe { &(*self.ctx).layout_order };
+        if order.items.is_null() || order.count == 0 {
+            return;
+        }
+
+        let nodes: Vec<Node> = unsafe {
+            std::slice::from_raw_parts(order.items, order.count)
+                .iter()
+                .map(|&n| Node(n))
+                .collect()
+        };
+
+        let mut any_clamped = false;
+        for node in nodes {
+            if !node.is_valid() {
+                continue;
+            }
+
+            if let Some(constraints) = node.get_constraints(self) {
+                let is_scrollable_y = constraints.overflow == crate::Overflow::Scroll
+                    || constraints.overflow == crate::Overflow::Auto;
+                let is_scrollable_x = constraints.overflow == crate::Overflow::Scroll
+                    || constraints.overflow == crate::Overflow::Auto
+                    || constraints.overflow == crate::Overflow::Hidden;
+
+                if is_scrollable_y || is_scrollable_x {
+                    if let Some(computed) = node.get_computed(self) {
+                        let content_h = node.compute_content_height(self);
+                        let max_scroll_y = (content_h - computed.h).max(0.0);
+
+                        let content_w = computed.content_w.max(computed.w);
+                        let max_scroll_x = (content_w - computed.w).max(0.0);
+
+                        let mut new_y = constraints.scroll.y;
+                        let mut new_x = constraints.scroll.x;
+
+                        if is_scrollable_y && new_y > max_scroll_y {
+                            new_y = max_scroll_y;
+                        }
+                        if is_scrollable_x && new_x > max_scroll_x {
+                            new_x = max_scroll_x;
+                        }
+
+                        if (new_y - constraints.scroll.y).abs() > 0.001
+                            || (new_x - constraints.scroll.x).abs() > 0.001
+                        {
+                            node.update_constraints(self, |c| {
+                                c.scroll.y = new_y;
+                                c.scroll.x = new_x;
+                            });
+                            any_clamped = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if any_clamped {
+            unsafe {
+                sys::muse_compute_layout(self.ctx, viewport_width, viewport_height);
+            }
+        }
     }
 
     /// Flattens the layout hierarchy into a Z-sorted render command queue clipped to `viewport`.

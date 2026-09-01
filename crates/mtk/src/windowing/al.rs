@@ -337,7 +337,9 @@ where
                         let mut next_scroll_y = constraints.scroll.y;
                         let mut next_scroll_x = constraints.scroll.x;
 
-                        if vy.abs() > 1.0 && max_scroll_y > 0.0 {
+                        if vy.abs() > 1.0
+                            && (max_scroll_y > 0.0 || constraints.scroll.y > max_scroll_y)
+                        {
                             next_scroll_y =
                                 (constraints.scroll.y + vy * dt_clamped).clamp(0.0, max_scroll_y);
                             if next_scroll_y == 0.0 || next_scroll_y == max_scroll_y {
@@ -349,7 +351,9 @@ where
                             vy = 0.0;
                         }
 
-                        if vx.abs() > 1.0 && max_scroll_x > 0.0 {
+                        if vx.abs() > 1.0
+                            && (max_scroll_x > 0.0 || constraints.scroll.x > max_scroll_x)
+                        {
                             next_scroll_x =
                                 (constraints.scroll.x + vx * dt_clamped).clamp(0.0, max_scroll_x);
                             if next_scroll_x == 0.0 || next_scroll_x == max_scroll_x {
@@ -543,11 +547,17 @@ where
                                             let mut new_scroll_y = constraints.scroll.y;
                                             let mut new_scroll_x = constraints.scroll.x;
 
-                                            if is_scrollable_y && max_scroll_y > 0.0 {
+                                            if is_scrollable_y
+                                                && (max_scroll_y > 0.0
+                                                    || constraints.scroll.y > max_scroll_y)
+                                            {
                                                 new_scroll_y = (constraints.scroll.y - delta_y)
                                                     .clamp(0.0, max_scroll_y);
                                             }
-                                            if is_scrollable_x && max_scroll_x > 0.0 {
+                                            if is_scrollable_x
+                                                && (max_scroll_x > 0.0
+                                                    || constraints.scroll.x > max_scroll_x)
+                                            {
                                                 new_scroll_x = (constraints.scroll.x - delta_x)
                                                     .clamp(0.0, max_scroll_x);
                                             }
@@ -591,7 +601,10 @@ where
                                     let mut new_vy = cur_vy;
                                     let mut new_vx = cur_vx;
 
-                                    if is_scrollable_y && max_scroll_y > 0.0 && delta_y.abs() > 0.0
+                                    if is_scrollable_y
+                                        && (max_scroll_y > 0.0
+                                            || constraints.scroll.y > max_scroll_y)
+                                        && delta_y.abs() > 0.0
                                     {
                                         let impulse_y = -delta_y * 45.0;
                                         new_vy = if (cur_vy > 0.0 && impulse_y > 0.0)
@@ -613,7 +626,8 @@ where
                                     };
 
                                     if is_scrollable_x
-                                        && max_scroll_x > 0.0
+                                        && (max_scroll_x > 0.0
+                                            || constraints.scroll.x > max_scroll_x)
                                         && scroll_delta_x.abs() > 0.0
                                     {
                                         let impulse_x = -scroll_delta_x * 45.0;

@@ -1878,4 +1878,47 @@ pub(crate) mod tests {
         assert_eq!(b4.w, 300.0);
         assert_eq!(b4.h, 200.0);
     }
+
+    #[test]
+    fn test_scroll_clamping_on_content_shrink() {
+        let mut ctx = crate::Context::new();
+
+        let container = ctx.create_node();
+        container.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(200);
+            c.height = Size::Fixed(200);
+            c.overflow = Overflow::Scroll;
+            c.flex_direction = FlexDirection::Column;
+        });
+
+        let child = ctx.create_node();
+        child.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(200);
+            c.height = Size::Fixed(600);
+        });
+        container.append(&mut ctx, child);
+        ctx.root_attach(container);
+
+        // Scroll to 300px (max scroll is 400px)
+        container.update_constraints(&mut ctx, |c| {
+            c.scroll.y = 300.0;
+        });
+
+        ctx.compute_layout(400.0, 400.0);
+        let cons = container.get_constraints(&ctx).unwrap();
+        assert_eq!(cons.scroll.y, 300.0);
+
+        // Shrink child to 100px (now fits in 200px container, max scroll is 0.0)
+        child.update_constraints(&mut ctx, |c| {
+            c.height = Size::Fixed(100);
+        });
+
+        ctx.compute_layout(400.0, 400.0);
+        let cons = container.get_constraints(&ctx).unwrap();
+        assert_eq!(cons.scroll.y, 0.0);
+
+        let child_comp = child.get_computed(&ctx).unwrap();
+        let container_comp = container.get_computed(&ctx).unwrap();
+        assert_eq!(child_comp.y, container_comp.y);
+    }
 }
