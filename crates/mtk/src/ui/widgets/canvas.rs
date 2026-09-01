@@ -8,7 +8,7 @@
 //!    pipelines, shaders, uniform buffers, and offscreen render targets.
 //!
 //! Because canvases render into offscreen GPU textures, MTK seamlessly composites them with
-//! native SDF rounded corners ([`border_radius`](crate::style::BorderRadius)), opacity, borders,
+//! native SDF rounded corners ([`corner_radius`](crate::style::Style::corner_radius)), opacity, borders,
 //! scale, and scissor clipping without requiring extra boilerplate from the painter.
 
 use std::cell::Cell;
@@ -28,7 +28,7 @@ use crate::{
 ///
 /// When accessing raw `u32` values:
 /// * On native little-endian architectures, `0xAABBGGRR` maps directly to bytes `[R, G, B, A]`.
-/// * You can use [`Color`](crate::colors::Color) directly with [`set_pixel_with_color`](PixelBuffer::set_pixel_with_color),
+/// * You can use [`Color`] directly with [`set_pixel_with_color`](PixelBuffer::set_pixel_with_color),
 ///   [`get_pixel_by_color`](PixelBuffer::get_pixel_by_color), [`fill_with_color`](PixelBuffer::fill_with_color), etc.
 /// * You can also construct raw RGBA `u32` values with [`PixelBuffer::rgba`](PixelBuffer::rgba) or [`PixelBuffer::rgb`](PixelBuffer::rgb).
 pub struct PixelBuffer<'a> {
@@ -87,7 +87,7 @@ impl<'a> PixelBuffer<'a> {
         }
     }
 
-    /// Sets the color of a single pixel at `(x, y)` using MTK's [`Color`](crate::colors::Color). Out-of-bounds coordinates are ignored.
+    /// Sets the color of a single pixel at `(x, y)` using MTK's [`Color`]. Out-of-bounds coordinates are ignored.
     #[inline]
     pub fn set_pixel_with_color(&mut self, x: u32, y: u32, color: Color) {
         self.set_pixel(x, y, color.to_rgba_u32());
@@ -110,7 +110,7 @@ impl<'a> PixelBuffer<'a> {
         }
     }
 
-    /// Gets the decoded [`Color`](crate::colors::Color) of a single pixel at `(x, y)`. Returns `None` if out of bounds.
+    /// Gets the decoded [`Color`] of a single pixel at `(x, y)`. Returns `None` if out of bounds.
     #[inline]
     pub fn get_pixel_by_color(&self, x: u32, y: u32) -> Option<Color> {
         self.get_pixel(x, y).map(Color::from_rgba_u32)
@@ -128,7 +128,7 @@ impl<'a> PixelBuffer<'a> {
         self.pixels.fill(color);
     }
 
-    /// Fills the entire buffer with a single solid [`Color`](crate::colors::Color).
+    /// Fills the entire buffer with a single solid [`Color`].
     #[inline]
     pub fn fill_with_color(&mut self, color: Color) {
         self.fill(color.to_rgba_u32());
@@ -164,7 +164,7 @@ impl<'a> PixelBuffer<'a> {
         }
     }
 
-    /// Fills a rectangular region with MTK's [`Color`](crate::colors::Color). Coordinates are clamped to buffer bounds.
+    /// Fills a rectangular region with MTK's [`Color`]. Coordinates are clamped to buffer bounds.
     #[inline]
     pub fn fill_rect_with_color(&mut self, x: i32, y: i32, w: u32, h: u32, color: Color) {
         self.fill_rect(x, y, w, h, color.to_rgba_u32());
@@ -197,7 +197,7 @@ impl<'a> PixelBuffer<'a> {
         }
     }
 
-    /// Blits a rectangular slice of [`Color`](crate::colors::Color) onto the canvas at `(dst_x, dst_y)`.
+    /// Blits a rectangular slice of [`Color`] onto the canvas at `(dst_x, dst_y)`.
     #[inline]
     pub fn blit_colors(&mut self, src: &[Color], src_w: u32, src_h: u32, dst_x: i32, dst_y: i32) {
         let src_u32 = bytemuck::cast_slice::<Color, u32>(src);
@@ -211,13 +211,13 @@ impl<'a> PixelBuffer<'a> {
         self.blit(src_u32, src_w, src_h, dst_x, dst_y);
     }
 
-    /// Reinterprets the underlying pixel buffer as a slice of [`Color`](crate::colors::Color).
+    /// Reinterprets the underlying pixel buffer as a slice of [`Color`].
     #[inline]
     pub fn as_colors(&self) -> &[Color] {
         bytemuck::cast_slice(self.pixels)
     }
 
-    /// Reinterprets the underlying pixel buffer as a mutable slice of [`Color`](crate::colors::Color).
+    /// Reinterprets the underlying pixel buffer as a mutable slice of [`Color`].
     #[inline]
     pub fn as_colors_mut(&mut self) -> &mut [Color] {
         bytemuck::cast_slice_mut(self.pixels)

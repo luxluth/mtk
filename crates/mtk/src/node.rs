@@ -9,7 +9,7 @@ use std::hash::Hash;
 /// and carry styling constraints ([`Constraints`](crate::style::Constraints)),
 /// computed layout geometry ([`Computed`](crate::style::Computed)), text content, and visual effects.
 #[derive(Clone, Copy, Debug)]
-pub struct Node(pub(crate) sys::muNode);
+pub struct Node(pub sys::muNode);
 
 impl PartialEq for Node {
     fn eq(&self, other: &Self) -> bool {
@@ -37,6 +37,16 @@ impl Node {
     /// Returns the unique numeric identifier for this layout node.
     pub fn id(&self) -> u64 {
         self.0.numeral as u64
+    }
+
+    /// Returns the raw underlying C layout node handle.
+    pub fn raw(&self) -> sys::muNode {
+        self.0
+    }
+
+    /// Constructs a `Node` from a raw C layout node handle.
+    pub fn from_raw(raw: sys::muNode) -> Self {
+        Node(raw)
     }
 
     pub fn get_invalid() -> Node {

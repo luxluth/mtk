@@ -9,7 +9,7 @@ pub mod layer;
 pub(crate) mod node;
 pub mod render;
 pub mod style;
-pub(crate) mod sys;
+pub mod sys;
 pub mod text;
 pub mod ui;
 pub mod windowing;
@@ -19,14 +19,17 @@ use ::winit::window::Window;
 pub use mtk_macro::Lens;
 
 pub use crate::colors::Color;
-use crate::debugger::{LayoutSnapshot, NodeDebugInfo, SourceLocation};
-use crate::effects::Effects;
+pub use crate::debugger::{LayoutSnapshot, NodeDebugInfo, SourceLocation};
+pub use crate::effects::{Border, Effects, Radius};
 pub use crate::image::{ImageCache, ImageData, ObjectFit, SvgData, SvgStyle};
 pub use crate::layer::*;
 pub use crate::node::Node;
 pub use crate::render::RenderCommand;
 pub use crate::style::*;
 pub use crate::text::*;
+pub use crate::ui::widgets::canvas::{
+    CanvasData, CanvasEventDetails, CanvasPainterKind, PaintContext, PixelPainter, WgpuPainter,
+};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -76,24 +79,24 @@ pub enum ClipboardData {
 /// `Context` acts as the primary bridge between high-level Rust [`View`](crate::ui::View) declarations
 /// and the low-level C layout engine ([`muse.h`](crate::sys)), GPU text rasterizers, and event systems.
 pub struct Context {
-    pub(crate) ctx: *mut sys::muContext,
-    pub(crate) texts: HashMap<Node, CString>,
-    pub(crate) effects: HashMap<Node, Effects>,
-    pub(crate) dirty_effects: HashSet<Node>,
-    pub(crate) text_userdatas: HashMap<Node, *mut Box<dyn std::any::Any>>,
-    pub(crate) text_context: SharedTextContext,
-    pub(crate) focused_node: Option<Node>,
-    pub(crate) focusable_nodes: Vec<Node>,
-    pub(crate) window: Option<Arc<Window>>,
-    pub(crate) modifiers: ModifiersState,
-    pub(crate) ensure_visible_requests: HashMap<Node, crate::style::Rect>,
-    pub(crate) clipboard: Arc<Mutex<Option<arboard::Clipboard>>>,
-    pub(crate) canvases: RefCell<HashMap<Node, crate::ui::widgets::CanvasData>>,
-    pub(crate) images: RefCell<HashMap<Node, (ImageData, ObjectFit)>>,
-    pub(crate) svgs: RefCell<HashMap<Node, (SvgData, ObjectFit)>>,
-    pub(crate) dt: f32,
-    pub(crate) node_sources: HashMap<Node, SourceLocation>,
-    pub(crate) highlight_node: Option<Node>,
+    pub ctx: *mut sys::muContext,
+    pub texts: HashMap<Node, CString>,
+    pub effects: HashMap<Node, Effects>,
+    pub dirty_effects: HashSet<Node>,
+    pub text_userdatas: HashMap<Node, *mut Box<dyn std::any::Any>>,
+    pub text_context: SharedTextContext,
+    pub focused_node: Option<Node>,
+    pub focusable_nodes: Vec<Node>,
+    pub window: Option<Arc<Window>>,
+    pub modifiers: ModifiersState,
+    pub ensure_visible_requests: HashMap<Node, crate::style::Rect>,
+    pub clipboard: Arc<Mutex<Option<arboard::Clipboard>>>,
+    pub canvases: RefCell<HashMap<Node, CanvasData>>,
+    pub images: RefCell<HashMap<Node, (ImageData, ObjectFit)>>,
+    pub svgs: RefCell<HashMap<Node, (SvgData, ObjectFit)>>,
+    pub dt: f32,
+    pub node_sources: HashMap<Node, SourceLocation>,
+    pub highlight_node: Option<Node>,
     pub scale_factor: f32,
 
     // Core-level Super Layers and User Intermediate Layers
@@ -140,6 +143,16 @@ impl Context {
             modal_layer: InternalLayer::new(false),
             active_layer: ActiveLayerId::Base,
         }
+    }
+
+    /// Returns the raw pointer to the underlying C layout engine context (`sys::muContext`).
+    pub fn raw_ctx(&self) -> *mut sys::muContext {
+        self.ctx
+    }
+
+    /// Returns a clone of the shared typography context for font measuring and layout caching.
+    pub fn text_context(&self) -> SharedTextContext {
+        self.text_context.clone()
     }
 
     /// Returns the currently active layer receiving input events.

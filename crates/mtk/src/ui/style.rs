@@ -28,7 +28,7 @@ pub trait ViewStyleExt: Sized {
     /// Attaches a [`Keyframes`] timeline animation sequence to this view.
     fn animate_keyframes(self, keyframes: Keyframes<Style>) -> KeyframedView<Self>;
 
-    /// Wraps this view with a hover [`Tooltip`].
+    /// Wraps this view with a hover [`Tooltip`](crate::ui::widgets::Tooltip).
     fn tooltip(self, text: impl Into<String>) -> crate::ui::widgets::Tooltip<Self> {
         crate::ui::widgets::tooltip(self, text)
     }

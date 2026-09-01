@@ -178,7 +178,7 @@ pub(crate) fn hash_spans(spans: &[TextSpan<()>]) -> u64 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct TextLayoutCacheKey {
+pub struct TextLayoutCacheKey {
     pub text: String,
     pub font_size_bits: u32,
     pub font_family: String,
@@ -194,14 +194,14 @@ pub(crate) struct TextLayoutCacheKey {
     pub spans_hash: u64,
 }
 
-pub(crate) struct TextLayoutCacheEntry {
+pub struct TextLayoutCacheEntry {
     pub layout: parley::Layout<Color>,
     pub actual_text_width: f32,
     pub actual_text_height: f32,
 }
 
 /// Holds the shared text rendering state.
-pub(crate) struct TextContext {
+pub struct TextContext {
     pub font_cx: FontContext,
     pub layout_cx: LayoutContext<Color>,
     pub scale_cx: ScaleContext,
@@ -366,9 +366,9 @@ impl TextContext {
     }
 }
 
-pub(crate) type SharedTextContext = Arc<Mutex<TextContext>>;
+pub type SharedTextContext = Arc<Mutex<TextContext>>;
 
-pub(crate) fn measure_text(
+pub fn measure_text(
     text: &str,
     text_style: &TextStyle,
     avail_w: f32,
@@ -391,7 +391,7 @@ pub(crate) fn measure_text(
     }
 }
 
-pub(crate) fn hit_test_text(
+pub fn hit_test_text(
     text: &str,
     text_style: &TextStyle,
     avail_w: f32,
@@ -468,7 +468,7 @@ pub(crate) fn hit_test_text(
 }
 
 /// Returns the bounding rectangles (in local text coordinates `[x, y, w, h]`) of a byte range in the text.
-pub(crate) fn get_range_geometry(
+pub fn get_range_geometry(
     text: &str,
     text_style: &TextStyle,
     avail_w: f32,
@@ -542,7 +542,7 @@ pub(crate) fn get_range_geometry(
     rects
 }
 
-pub(crate) fn get_cursor_geometry(
+pub fn get_cursor_geometry(
     text: &str,
     text_style: &TextStyle,
     avail_w: f32,
