@@ -29,7 +29,7 @@ MTK brings together proven technologies from across the systems and graphics eco
 - **Graphics**: [WGPU](https://wgpu.rs/) — Cross-platform GPU rendering targeting Vulkan, Metal, and DirectX 12.
 - **Typography**: [Parley](https://github.com/linebender/parley), [Swash](https://github.com/dfrg/swash) — Multi-font styling, dynamic font fallback, OpenType ligatures, and inline span geometry.
 - **Windowing**: [winit](https://github.com/rust-windowing/winit) — Native window creation, DPI scaling, and event handling.
-- **Images**: [image](https://github.com/image-rs/image), [resvg](https://github.com/RazrFalcon/resvg) — Asynchronous streaming loader (`mtk-image-loader`) with byte-bounded LRU caching.
+- **Images**: [zune-image](https://github.com/etemesi254/zune-image), [resvg](https://github.com/linebender/resvg) — Asynchronous streaming loader (`mtk-image-loader`) with byte-bounded LRU caching.
 - **Inspector**: [Ratatui](https://github.com/ratatui/ratatui) — Built-in terminal UI layout inspector.
 - **Clipboard**: [arboard](https://github.com/1Password/arboard) — Cross-platform clipboard read and write support.
 
