@@ -12,6 +12,5 @@ description = "Procedural derive macros for MTK (Muse Toolkit)"
 proc-macro = true
 
 [dependencies]
-proc-macro2 = "1.0.107"
 quote = "1.0.47"
 syn = "3"

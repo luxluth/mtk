@@ -2692,7 +2692,6 @@ dependencies = [
 name = "mtk-macro"
 version = "0.1.0-beta.1"
 dependencies = [
- "proc-macro2",
  "quote",
  "syn 3.0.4",
 ]
@@ -2707,7 +2706,6 @@ dependencies = [
  "cc",
  "crossterm",
  "env_logger",
- "log",
  "mtk-macro",
  "parley",
  "polars",
