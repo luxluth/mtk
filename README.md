@@ -21,6 +21,13 @@ MTK is a declarative, retained-mode GUI toolkit for Rust. It pairs an Elm-inspir
 
 ---
 
+## Use the master branch
+
+```toml
+# Cargo.toml
+mtk-rs = { git = "https://github.com/luxluth/mtk.git", branch = "master" }
+```
+
 ## Core Technologies
 
 MTK brings together proven technologies from across the systems and graphics ecosystem:
