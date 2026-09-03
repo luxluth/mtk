@@ -3,10 +3,12 @@ members = ["crates/*"]
 resolver = "3"
 
 [workspace.package]
-version = "0.0.1"
 edition = "2024"
 authors = ["luxluth <delphin.blehoussi93@gmail.com>"]
 description = "Muse Toolkit"
+license = "MPL-2.0"
+repository = "https://github.com/luxluth/mtk"
+categories = ["gui"]
 
 [workspace.dependencies]
 bytemuck = "1.25"

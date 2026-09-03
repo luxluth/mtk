@@ -2689,8 +2689,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "mtk"
-version = "0.0.1"
+name = "mtk-macro"
+version = "0.1.0-beta.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.4",
+]
+
+[[package]]
+name = "mtk-rs"
+version = "0.1.0-beta.1"
 dependencies = [
  "arboard",
  "bindgen",
@@ -2710,15 +2719,6 @@ dependencies = [
  "winit",
  "zune-core",
  "zune-image",
-]
-
-[[package]]
-name = "mtk-macro"
-version = "0.0.1"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.4",
 ]
 
 [[package]]
