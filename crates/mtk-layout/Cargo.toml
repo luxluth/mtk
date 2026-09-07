@@ -1,0 +1,11 @@
+[package]
+name = "mtk-layout"
+version = "0.1.0-beta.1"
+edition.workspace = true
+authors.workspace = true
+description = "Pure-Rust Data-Oriented Flexbox Layout Engine for MTK"
+license.workspace = true
+repository.workspace = true
+categories.workspace = true
+
+[dependencies]

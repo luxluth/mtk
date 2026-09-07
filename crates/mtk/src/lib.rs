@@ -6,7 +6,7 @@ pub mod debugger;
 pub mod effects;
 pub mod image;
 pub mod layer;
-pub mod layout;
+pub use mtk_layout as layout;
 pub(crate) mod node;
 pub mod render;
 pub mod style;

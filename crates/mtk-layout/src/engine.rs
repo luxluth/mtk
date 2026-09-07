@@ -1,11 +1,21 @@
 use super::sparse_set::{NodeId, SparseSet};
 use super::types::{
-    CachedTextMeasurement, Hierarchy, RenderCommand, RenderCommandKind, TextMetrics, TextNode,
+    AlignItems, AlignSelf, CachedTextMeasurement, Computed, Constraints, FlexDirection, FlexWrap,
+    Hierarchy, JustifyContent, Overflow, PositionStrategy, Rect, RenderCommand, RenderCommandKind,
+    Size, TextMetrics, TextNode,
 };
-use crate::style::{
-    AlignItems, AlignSelf, Computed, Constraints, FlexDirection, FlexWrap, JustifyContent,
-    Overflow, PositionStrategy, Rect, Size,
-};
+
+#[derive(Clone, Copy, Debug, Default)]
+struct FlexItemScratch {
+    node: NodeId,
+    basis: f32,
+    min_size: f32,
+    max_size: f32,
+    flex_grow: f32,
+    flex_shrink: f32,
+    target_size: f32,
+    frozen: bool,
+}
 
 pub struct LayoutEngine {
     pub hierarchies: SparseSet<Hierarchy>,
@@ -26,6 +36,7 @@ pub struct LayoutEngine {
 
     pub pick_list: Vec<NodeId>,
     pub scratch_children: Vec<NodeId>,
+    scratch_flex_items: Vec<FlexItemScratch>,
 }
 
 impl Default for LayoutEngine {
@@ -55,6 +66,7 @@ impl LayoutEngine {
 
             pick_list: Vec::new(),
             scratch_children: Vec::new(),
+            scratch_flex_items: Vec::new(),
         }
     }
 
@@ -1114,9 +1126,9 @@ impl LayoutEngine {
                 curr = self.next_sibling(child);
             }
 
-            // B) Calculate total flex basis & flex grow/shrink sums
+            // B) Collect in-flow flex items into scratch_flex_items
+            self.scratch_flex_items.clear();
             let mut total_basis = 0.0;
-            let mut total_flex_grow = 0.0;
             let mut in_flow_count = 0;
 
             let mut curr = self.first_child(node);
@@ -1142,7 +1154,23 @@ impl LayoutEngine {
                         } else {
                             0.0
                         };
-                        total_flex_grow += grow;
+                        let shrink = c_cons.flex_shrink;
+                        let (min_size, max_size) = if is_row_dir {
+                            (c_cons.min_width, c_cons.max_width)
+                        } else {
+                            (c_cons.min_height, c_cons.max_height)
+                        };
+
+                        self.scratch_flex_items.push(FlexItemScratch {
+                            node: child,
+                            basis,
+                            min_size,
+                            max_size,
+                            flex_grow: grow,
+                            flex_shrink: shrink,
+                            target_size: basis,
+                            frozen: false,
+                        });
                     }
                 }
                 curr = self.next_sibling(child);
@@ -1152,97 +1180,174 @@ impl LayoutEngine {
                 total_basis += cons.gap * (in_flow_count - 1) as f32;
             }
 
-            let free_space = available_main - total_basis;
+            let initial_free_space = available_main - total_basis;
 
-            if total_flex_grow > 0.0 && free_space > 0.0 {
-                // C1) Distribute free space
-                let mut curr = self.first_child(node);
-                while let Some(child) = curr {
-                    let c_cons_opt = self.constraints.get(child).cloned();
-                    if let Some(c_cons) = c_cons_opt {
-                        if !matches!(c_cons.positioning, PositionStrategy::Absolute { .. }) {
-                            let is_main_fill = if is_row_dir {
-                                c_cons.width == Size::Fill
+            if initial_free_space > 0.0 {
+                // C1) W3C Multi-Iteration Flex Grow (Freeze-and-Loop)
+                for item in &mut self.scratch_flex_items {
+                    if item.flex_grow <= 0.0 {
+                        item.frozen = true;
+                    }
+                }
+
+                loop {
+                    let mut used_space = if in_flow_count > 1 {
+                        cons.gap * (in_flow_count - 1) as f32
+                    } else {
+                        0.0
+                    };
+                    let mut unfrozen_grow_sum = 0.0;
+                    let mut has_unfrozen = false;
+
+                    for item in &self.scratch_flex_items {
+                        if item.frozen {
+                            used_space += item.target_size;
+                        } else {
+                            used_space += item.basis;
+                            unfrozen_grow_sum += item.flex_grow;
+                            has_unfrozen = true;
+                        }
+                    }
+
+                    let remaining_free_space = available_main - used_space;
+
+                    if !has_unfrozen || unfrozen_grow_sum <= 0.0 || remaining_free_space <= 0.0 {
+                        break;
+                    }
+
+                    let mut violation_occurred = false;
+
+                    for i in 0..self.scratch_flex_items.len() {
+                        let item = &mut self.scratch_flex_items[i];
+                        if item.frozen {
+                            continue;
+                        }
+
+                        let share = (item.flex_grow / unfrozen_grow_sum) * remaining_free_space;
+                        let tentative_size = item.basis + share;
+
+                        if tentative_size > item.max_size {
+                            item.target_size = item.max_size;
+                            item.frozen = true;
+                            violation_occurred = true;
+                        } else if tentative_size < item.min_size {
+                            item.target_size = item.min_size;
+                            item.frozen = true;
+                            violation_occurred = true;
+                        } else {
+                            item.target_size = tentative_size;
+                        }
+                    }
+
+                    if !violation_occurred {
+                        for item in &mut self.scratch_flex_items {
+                            item.frozen = true;
+                        }
+                        break;
+                    }
+                }
+
+                for item in &self.scratch_flex_items {
+                    if item.flex_grow > 0.0 {
+                        if let Some(c_comp) = self.computed.get_mut(item.node) {
+                            if is_row_dir {
+                                c_comp.w = item.target_size;
                             } else {
-                                c_cons.height == Size::Fill
-                            };
-                            let grow = if c_cons.flex_grow > 0.0 {
-                                c_cons.flex_grow
-                            } else if is_main_fill {
-                                1.0
-                            } else {
-                                0.0
-                            };
-                            if grow > 0.0 {
-                                let basis = self.computed.get(child).map_or(0.0, |c| {
-                                    Self::get_flex_basis(&c_cons, c, is_row_dir, available_main)
-                                });
-                                let allocated = basis + (grow / total_flex_grow) * free_space;
-                                if let Some(c_comp) = self.computed.get_mut(child) {
-                                    if is_row_dir {
-                                        c_comp.w = allocated;
-                                    } else {
-                                        c_comp.h = allocated;
-                                    }
-                                    Self::clamp_min_max(c_comp, &c_cons);
-                                    Self::apply_aspect_ratio(c_comp, &c_cons);
-                                }
+                                c_comp.h = item.target_size;
+                            }
+                            if let Some(c_cons) = self.constraints.get(item.node) {
+                                Self::clamp_min_max(c_comp, c_cons);
+                                Self::apply_aspect_ratio(c_comp, c_cons);
                             }
                         }
                     }
-                    curr = self.next_sibling(child);
                 }
-            } else if free_space < 0.0
+            } else if initial_free_space < 0.0
                 && available_main > 0.0
                 && !matches!(cons.overflow, Overflow::Scroll | Overflow::Auto)
             {
-                // Shrink space
-                let overflow_space = -free_space;
-                let mut total_scaled_shrink = 0.0;
-
-                let mut curr = self.first_child(node);
-                while let Some(child) = curr {
-                    if let (Some(c_cons), Some(c_comp)) =
-                        (self.constraints.get(child), self.computed.get(child))
-                    {
-                        if !matches!(c_cons.positioning, PositionStrategy::Absolute { .. }) {
-                            let basis =
-                                Self::get_flex_basis(c_cons, c_comp, is_row_dir, available_main);
-                            if c_cons.flex_shrink > 0.0 && basis > 0.0 {
-                                total_scaled_shrink += c_cons.flex_shrink * basis;
-                            }
-                        }
+                // C2) W3C Multi-Iteration Flex Shrink (Freeze-and-Loop)
+                for item in &mut self.scratch_flex_items {
+                    if item.flex_shrink <= 0.0 || item.basis <= 0.0 {
+                        item.frozen = true;
                     }
-                    curr = self.next_sibling(child);
                 }
 
-                if total_scaled_shrink > 0.0 {
-                    let mut curr = self.first_child(node);
-                    while let Some(child) = curr {
-                        let c_cons_opt = self.constraints.get(child).cloned();
-                        if let Some(c_cons) = c_cons_opt {
-                            if !matches!(c_cons.positioning, PositionStrategy::Absolute { .. }) {
-                                let basis = self.computed.get(child).map_or(0.0, |c| {
-                                    Self::get_flex_basis(&c_cons, c, is_row_dir, available_main)
-                                });
-                                if c_cons.flex_shrink > 0.0 && basis > 0.0 {
-                                    let shrink_ratio =
-                                        (c_cons.flex_shrink * basis) / total_scaled_shrink;
-                                    let shrink_amount = shrink_ratio * overflow_space;
-                                    let new_main = (basis - shrink_amount).max(0.0);
-                                    if let Some(c_comp) = self.computed.get_mut(child) {
-                                        if is_row_dir {
-                                            c_comp.w = new_main;
-                                        } else {
-                                            c_comp.h = new_main;
-                                        }
-                                        Self::clamp_min_max(c_comp, &c_cons);
-                                        Self::apply_aspect_ratio(c_comp, &c_cons);
-                                    }
-                                }
+                loop {
+                    let mut used_space = if in_flow_count > 1 {
+                        cons.gap * (in_flow_count - 1) as f32
+                    } else {
+                        0.0
+                    };
+                    let mut unfrozen_scaled_shrink_sum = 0.0;
+                    let mut has_unfrozen = false;
+
+                    for item in &self.scratch_flex_items {
+                        if item.frozen {
+                            used_space += item.target_size;
+                        } else {
+                            used_space += item.basis;
+                            unfrozen_scaled_shrink_sum += item.flex_shrink * item.basis;
+                            has_unfrozen = true;
+                        }
+                    }
+
+                    let remaining_overflow = used_space - available_main;
+
+                    if !has_unfrozen
+                        || unfrozen_scaled_shrink_sum <= 0.0
+                        || remaining_overflow <= 0.0
+                    {
+                        break;
+                    }
+
+                    let mut violation_occurred = false;
+
+                    for i in 0..self.scratch_flex_items.len() {
+                        let item = &mut self.scratch_flex_items[i];
+                        if item.frozen {
+                            continue;
+                        }
+
+                        let shrink_ratio =
+                            (item.flex_shrink * item.basis) / unfrozen_scaled_shrink_sum;
+                        let shrink_amount = shrink_ratio * remaining_overflow;
+                        let tentative_size = (item.basis - shrink_amount).max(0.0);
+
+                        if tentative_size < item.min_size {
+                            item.target_size = item.min_size;
+                            item.frozen = true;
+                            violation_occurred = true;
+                        } else if tentative_size > item.max_size {
+                            item.target_size = item.max_size;
+                            item.frozen = true;
+                            violation_occurred = true;
+                        } else {
+                            item.target_size = tentative_size;
+                        }
+                    }
+
+                    if !violation_occurred {
+                        for item in &mut self.scratch_flex_items {
+                            item.frozen = true;
+                        }
+                        break;
+                    }
+                }
+
+                for item in &self.scratch_flex_items {
+                    if item.flex_shrink > 0.0 && item.basis > 0.0 {
+                        if let Some(c_comp) = self.computed.get_mut(item.node) {
+                            if is_row_dir {
+                                c_comp.w = item.target_size;
+                            } else {
+                                c_comp.h = item.target_size;
+                            }
+                            if let Some(c_cons) = self.constraints.get(item.node) {
+                                Self::clamp_min_max(c_comp, c_cons);
+                                Self::apply_aspect_ratio(c_comp, c_cons);
                             }
                         }
-                        curr = self.next_sibling(child);
                     }
                 }
             }
@@ -2061,5 +2166,107 @@ impl LayoutEngine {
         }
 
         &self.pick_list
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dummy_measure(
+        _node: NodeId,
+        _text: &str,
+        _userdata: Option<&dyn std::any::Any>,
+        _avail_w: f32,
+        _avail_h: f32,
+    ) -> TextMetrics {
+        TextMetrics::default()
+    }
+
+    #[test]
+    fn test_w3c_flex_grow_freeze_and_loop_max_violation() {
+        let mut engine = LayoutEngine::new();
+
+        let root = engine.create_node();
+        let mut root_cons = Constraints::default();
+        root_cons.width = Size::Fixed(500);
+        root_cons.height = Size::Fixed(100);
+        root_cons.flex_direction = FlexDirection::Row;
+        engine.set_constraints(root, root_cons);
+
+        let child_a = engine.create_node();
+        let mut cons_a = Constraints::default();
+        cons_a.width = Size::Fixed(100);
+        cons_a.height = Size::Fixed(100);
+        cons_a.flex_grow = 1.0;
+        cons_a.max_width = 150.0;
+        engine.set_constraints(child_a, cons_a);
+
+        let child_b = engine.create_node();
+        let mut cons_b = Constraints::default();
+        cons_b.width = Size::Fixed(100);
+        cons_b.height = Size::Fixed(100);
+        cons_b.flex_grow = 1.0;
+        engine.set_constraints(child_b, cons_b);
+
+        engine.append(root, child_a);
+        engine.append(root, child_b);
+        engine.root_attach(root);
+
+        engine.compute_layout(500.0, 100.0, dummy_measure);
+
+        let comp_a = engine.get_computed(child_a).unwrap();
+        let comp_b = engine.get_computed(child_b).unwrap();
+
+        // Total width: 500. Basis A=100, B=100. Free space=300.
+        // Equal split would give +150 to both (A=250, B=250).
+        // But A has max_width 150, so A freezes at 150 (takes 50).
+        // Remaining free space 250 goes entirely to B (100 + 250 = 350).
+        assert!((comp_a.w - 150.0).abs() < 1e-3, "comp_a.w was {}", comp_a.w);
+        assert!((comp_b.w - 350.0).abs() < 1e-3, "comp_b.w was {}", comp_b.w);
+    }
+
+    #[test]
+    fn test_w3c_flex_shrink_freeze_and_loop_min_violation() {
+        let mut engine = LayoutEngine::new();
+
+        let root = engine.create_node();
+        let mut root_cons = Constraints::default();
+        root_cons.width = Size::Fixed(300);
+        root_cons.height = Size::Fixed(100);
+        root_cons.flex_direction = FlexDirection::Row;
+        engine.set_constraints(root, root_cons);
+
+        let child_a = engine.create_node();
+        let mut cons_a = Constraints::default();
+        cons_a.width = Size::Fixed(200);
+        cons_a.height = Size::Fixed(100);
+        cons_a.flex_shrink = 1.0;
+        cons_a.min_width = 180.0;
+        engine.set_constraints(child_a, cons_a);
+
+        let child_b = engine.create_node();
+        let mut cons_b = Constraints::default();
+        cons_b.width = Size::Fixed(200);
+        cons_b.height = Size::Fixed(100);
+        cons_b.flex_shrink = 1.0;
+        engine.set_constraints(child_b, cons_b);
+
+        engine.append(root, child_a);
+        engine.append(root, child_b);
+        engine.root_attach(root);
+
+        engine.compute_layout(300.0, 100.0, dummy_measure);
+
+        let comp_a = engine.get_computed(child_a).unwrap();
+        let comp_b = engine.get_computed(child_b).unwrap();
+
+        // Total basis: 400. Available: 300. Overflow to shrink: 100.
+        // Equal shrink would shrink each by 50 (A=150, B=150).
+        // But A has min_width 180, so A freezes at 180 (only shrinks by 20).
+        // B absorbs remaining 80 overflow (200 - 80 = 120).
+        // Total = 180 + 120 = 300.
+        assert!((comp_a.w - 180.0).abs() < 1e-3, "comp_a.w was {}", comp_a.w);
+        assert!((comp_b.w - 120.0).abs() < 1e-3, "comp_b.w was {}", comp_b.w);
     }
 }
