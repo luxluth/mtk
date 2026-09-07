@@ -1,3 +1,4 @@
+use super::quad_batch::{QuadInstance, SolidPushConstants};
 use bytemuck::{Pod, Zeroable};
 use std::borrow::Cow;
 
@@ -183,7 +184,7 @@ impl Pipelines {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Solid Pipeline Layout"),
                 bind_group_layouts: &[Some(&solid_bind_group_layout)],
-                immediate_size: std::mem::size_of::<ImmediateData>() as u32,
+                immediate_size: std::mem::size_of::<SolidPushConstants>() as u32,
             });
 
         let text_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -206,7 +207,7 @@ impl Pipelines {
             vertex: wgpu::VertexState {
                 module: &solid_shader,
                 entry_point: Some("vs_main"),
-                buffers: &[],
+                buffers: &[Some(QuadInstance::desc())],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {

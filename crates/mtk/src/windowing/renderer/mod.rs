@@ -1,6 +1,7 @@
 pub(crate) mod atlas;
 pub(crate) mod blur;
 pub(crate) mod pipelines;
+pub(crate) mod quad_batch;
 pub(crate) mod scene;
 pub(crate) mod svg_cache;
 pub(crate) mod text_batch;
@@ -8,6 +9,7 @@ pub(crate) mod text_batch;
 use self::atlas::Atlas;
 use self::blur::BlurPipeline;
 use self::pipelines::{ImmediateData, Pipelines};
+use self::quad_batch::{QuadBatch, QuadInstance, SolidPushConstants};
 use self::scene::SceneTarget;
 use self::svg_cache::{SvgRasterPool, SvgRasterRequest};
 use self::text_batch::{RenderTextData, TextBatch};
@@ -59,6 +61,7 @@ pub struct Renderer<'w> {
     pub blur: BlurPipeline,
     pub scene: SceneTarget,
     pub text_batch: TextBatch,
+    pub quad_batch: QuadBatch,
     pub canvas_textures: HashMap<crate::Node, CanvasGpuResource>,
     pub image_textures: HashMap<crate::Node, ImageGpuResource>,
     pub svg_textures: HashMap<crate::Node, SvgGpuResource>,
@@ -194,6 +197,7 @@ impl<'w> Renderer<'w> {
             &atlas.view,
             &atlas.sampler,
         );
+        let quad_batch = QuadBatch::new(&device);
 
         let svg_pool = SvgRasterPool::new(Arc::clone(&window));
 
@@ -211,6 +215,7 @@ impl<'w> Renderer<'w> {
             blur,
             scene,
             text_batch,
+            quad_batch,
             canvas_textures: HashMap::new(),
             image_textures: HashMap::new(),
             svg_textures: HashMap::new(),
@@ -297,6 +302,42 @@ impl<'w> Renderer<'w> {
         });
 
         if let Some(split_idx) = first_vibrancy_index {
+            let mut quad_instances = Vec::new();
+            let mut batches_pass1 = Vec::new();
+            let mut batches_pass3 = Vec::new();
+
+            prepare_command_slice(
+                context.render_list().enumerate().take(split_idx),
+                self.size.width,
+                self.size.height,
+                &text_ranges,
+                &self.canvas_textures,
+                &self.image_textures,
+                &self.svg_textures,
+                context,
+                &mut quad_instances,
+                &mut batches_pass1,
+            );
+
+            prepare_command_slice(
+                context.render_list().enumerate().skip(split_idx),
+                self.size.width,
+                self.size.height,
+                &text_ranges,
+                &self.canvas_textures,
+                &self.image_textures,
+                &self.svg_textures,
+                context,
+                &mut quad_instances,
+                &mut batches_pass3,
+            );
+
+            prepare_debug_highlight(context, &mut quad_instances, &mut batches_pass3);
+
+            self.quad_batch
+                .ensure_capacity(&self.device, quad_instances.len());
+            self.quad_batch.upload(&self.queue, &quad_instances);
+
             // Ensure offscreen scene target and blur pyramid match window size
             self.scene.resize(
                 &self.device,
@@ -329,20 +370,18 @@ impl<'w> Renderer<'w> {
                     multiview_mask: None,
                 });
 
-                let commands = context.render_list().enumerate().take(split_idx);
-                render_command_slice(
+                execute_draw_batches(
                     &mut scene_pass,
-                    commands,
+                    &batches_pass1,
                     self.size.width,
                     self.size.height,
                     &self.pipelines,
                     &self.pipelines.dummy_solid_bind_group,
                     &self.text_batch.bind_group,
-                    &text_ranges,
+                    &self.quad_batch.buffer,
                     &self.canvas_textures,
                     &self.image_textures,
                     &self.svg_textures,
-                    context,
                 );
             }
 
@@ -426,24 +465,44 @@ impl<'w> Renderer<'w> {
                 surface_pass.set_immediates(0, bytemuck::bytes_of(&blit_immediate));
                 surface_pass.draw(0..6, 0..1);
 
-                let commands = context.render_list().enumerate().skip(split_idx);
-                render_command_slice(
+                execute_draw_batches(
                     &mut surface_pass,
-                    commands,
+                    &batches_pass3,
                     self.size.width,
                     self.size.height,
                     &self.pipelines,
                     &blurred_solid_bind_group,
                     &self.text_batch.bind_group,
-                    &text_ranges,
+                    &self.quad_batch.buffer,
                     &self.canvas_textures,
                     &self.image_textures,
                     &self.svg_textures,
-                    context,
                 );
             }
         } else {
             // SINGLE-PASS FAST PATH FOR NON-BLURRED SCENES //
+            let mut quad_instances = Vec::new();
+            let mut batches = Vec::new();
+
+            prepare_command_slice(
+                context.render_list().enumerate(),
+                self.size.width,
+                self.size.height,
+                &text_ranges,
+                &self.canvas_textures,
+                &self.image_textures,
+                &self.svg_textures,
+                context,
+                &mut quad_instances,
+                &mut batches,
+            );
+
+            prepare_debug_highlight(context, &mut quad_instances, &mut batches);
+
+            self.quad_batch
+                .ensure_capacity(&self.device, quad_instances.len());
+            self.quad_batch.upload(&self.queue, &quad_instances);
+
             let mut surface_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Surface Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -461,29 +520,18 @@ impl<'w> Renderer<'w> {
                 multiview_mask: None,
             });
 
-            let commands = context.render_list().enumerate();
-            render_command_slice(
+            execute_draw_batches(
                 &mut surface_pass,
-                commands,
+                &batches,
                 self.size.width,
                 self.size.height,
                 &self.pipelines,
                 &self.pipelines.dummy_solid_bind_group,
                 &self.text_batch.bind_group,
-                &text_ranges,
+                &self.quad_batch.buffer,
                 &self.canvas_textures,
                 &self.image_textures,
                 &self.svg_textures,
-                context,
-            );
-
-            render_debug_highlight(
-                &mut surface_pass,
-                self.size.width,
-                self.size.height,
-                &self.pipelines,
-                &self.pipelines.dummy_solid_bind_group,
-                context,
             );
         }
 
@@ -510,11 +558,12 @@ impl<'w> Renderer<'w> {
 
         let any_canvas_requested_frame = std::cell::Cell::new(false);
 
+        let scale_factor = context.scale_factor.max(0.1);
         let mut canvases = context.canvases.borrow_mut();
         for (node, canvas_data) in canvases.iter_mut() {
             if let Some(computed) = node.get_computed(context) {
-                let w = (computed.w.round() as u32).max(1);
-                let h = (computed.h.round() as u32).max(1);
+                let w = ((computed.w * scale_factor).round() as u32).max(1);
+                let h = ((computed.h * scale_factor).round() as u32).max(1);
 
                 let needs_recreate = match self.canvas_textures.get(node) {
                     Some(res) => res.width != w || res.height != h,
@@ -1025,13 +1074,14 @@ pub(crate) fn transform_point_ancestors(
     mut node: crate::Node,
     mut pt: (f32, f32),
 ) -> (f32, f32) {
+    let scale_factor = context.scale_factor.max(0.1);
     while let Some(parent) = node.parent(context) {
         if let Some(computed) = parent.get_computed(context) {
             let eff = context.effects.get(&parent).cloned().unwrap_or_default();
             let s = eff.scale;
             if (s - 1.0).abs() > 1e-4 {
-                let cx = computed.x + computed.w / 2.0;
-                let cy = computed.y + computed.h / 2.0;
+                let cx = (computed.x + computed.w / 2.0) * scale_factor;
+                let cy = (computed.y + computed.h / 2.0) * scale_factor;
                 pt.0 = cx + (pt.0 - cx) * s;
                 pt.1 = cy + (pt.1 - cy) * s;
             }
@@ -1047,13 +1097,14 @@ pub(crate) fn transform_node_point(
     node: crate::Node,
     pt: (f32, f32),
 ) -> (f32, f32) {
+    let scale_factor = context.scale_factor.max(0.1);
     let mut curr_pt = pt;
     if let Some(computed) = node.get_computed(context) {
         let eff = context.effects.get(&node).cloned().unwrap_or_default();
         let s = eff.scale;
         if (s - 1.0).abs() > 1e-4 {
-            let cx = computed.x + computed.w / 2.0;
-            let cy = computed.y + computed.h / 2.0;
+            let cx = (computed.x + computed.w / 2.0) * scale_factor;
+            let cy = (computed.y + computed.h / 2.0) * scale_factor;
             curr_pt.0 = cx + (curr_pt.0 - cx) * s;
             curr_pt.1 = cy + (curr_pt.1 - cy) * s;
         }
@@ -1061,39 +1112,88 @@ pub(crate) fn transform_node_point(
     transform_point_ancestors(context, node, curr_pt)
 }
 
-fn render_command_slice<'a, I>(
-    render_pass: &mut wgpu::RenderPass<'a>,
+enum DrawBatch {
+    SolidQuads {
+        start: u32,
+        count: u32,
+    },
+    TextGlyphs {
+        start: u32,
+        count: u32,
+        clip: Option<crate::style::Rect>,
+    },
+    CanvasTexture {
+        node: crate::Node,
+        immediate: ImmediateData,
+        clip: Option<crate::style::Rect>,
+    },
+    ImageTexture {
+        node: crate::Node,
+        immediate: ImmediateData,
+        clip: Option<crate::style::Rect>,
+    },
+    SvgTexture {
+        node: crate::Node,
+        immediate: ImmediateData,
+        clip: Option<crate::style::Rect>,
+    },
+}
+
+#[inline]
+fn push_solid_quad(
+    quad_instances: &mut Vec<QuadInstance>,
+    draw_batches: &mut Vec<DrawBatch>,
+    instance: QuadInstance,
+) {
+    let instance_idx = quad_instances.len() as u32;
+    quad_instances.push(instance);
+    if let Some(DrawBatch::SolidQuads { count, .. }) = draw_batches.last_mut() {
+        *count += 1;
+    } else {
+        draw_batches.push(DrawBatch::SolidQuads {
+            start: instance_idx,
+            count: 1,
+        });
+    }
+}
+
+fn prepare_command_slice<'a, I>(
     commands: I,
     screen_width: u32,
     screen_height: u32,
-    pipelines: &'a Pipelines,
-    solid_bind_group: &'a wgpu::BindGroup,
-    text_bind_group: &'a wgpu::BindGroup,
-    text_ranges: &'a HashMap<usize, RenderTextData>,
-    canvas_textures: &'a HashMap<crate::Node, CanvasGpuResource>,
-    image_textures: &'a HashMap<crate::Node, ImageGpuResource>,
-    svg_textures: &'a HashMap<crate::Node, SvgGpuResource>,
+    text_ranges: &HashMap<usize, RenderTextData>,
+    canvas_textures: &HashMap<crate::Node, CanvasGpuResource>,
+    image_textures: &HashMap<crate::Node, ImageGpuResource>,
+    svg_textures: &HashMap<crate::Node, SvgGpuResource>,
     context: &crate::Context,
+    quad_instances: &mut Vec<QuadInstance>,
+    draw_batches: &mut Vec<DrawBatch>,
 ) where
     I: Iterator<Item = (usize, crate::render::RenderCommand<'a>)>,
 {
+    let screen_w_f32 = screen_width as f32;
+    let screen_h_f32 = screen_height as f32;
+    let scale_factor = context.scale_factor.max(0.1);
+
     for (cmd_index, cmd) in commands {
-        let _active_scissor = if cmd.has_clip() {
-            if let Some(rect) = compute_scissor_rect(cmd.clip(), screen_width, screen_height) {
-                render_pass.set_scissor_rect(rect.0, rect.1, rect.2, rect.3);
-                Some(rect)
-            } else {
+        let clip_rect = if cmd.has_clip() {
+            let c = cmd.clip();
+            let cx = c.x * scale_factor;
+            let cy = c.y * scale_factor;
+            let cw = c.w * scale_factor;
+            let ch = c.h * scale_factor;
+            if cw <= 0.0
+                || ch <= 0.0
+                || cx >= screen_w_f32
+                || cy >= screen_h_f32
+                || cx + cw <= 0.0
+                || cy + ch <= 0.0
+            {
                 continue;
             }
+            [cx, cy, cw, ch]
         } else {
-            let default_rect = (0, 0, screen_width.max(1), screen_height.max(1));
-            render_pass.set_scissor_rect(
-                default_rect.0,
-                default_rect.1,
-                default_rect.2,
-                default_rect.3,
-            );
-            Some(default_rect)
+            [-1.0, -1.0, -1.0, -1.0]
         };
 
         if cmd.kind() == RenderCommandKind::DrawQuad {
@@ -1103,21 +1203,21 @@ fn render_command_slice<'a, I>(
             let effects = context.effects.get(&node).cloned().unwrap_or_default();
             let total_scale = compute_effective_scale(context, node);
 
-            let cx = computed.x + computed.w / 2.0;
-            let cy = computed.y + computed.h / 2.0;
+            let cx = (computed.x + computed.w / 2.0) * scale_factor;
+            let cy = (computed.y + computed.h / 2.0) * scale_factor;
             let (transformed_cx, transformed_cy) =
                 transform_point_ancestors(context, node, (cx, cy));
 
-            let scaled_w = computed.w * total_scale;
-            let scaled_h = computed.h * total_scale;
+            let scaled_w = computed.w * total_scale * scale_factor;
+            let scaled_h = computed.h * total_scale * scale_factor;
             let scaled_x = transformed_cx - scaled_w / 2.0;
             let scaled_y = transformed_cy - scaled_h / 2.0;
 
             let border_widths = [
-                constraints.border.top * total_scale,
-                constraints.border.right * total_scale,
-                constraints.border.bottom * total_scale,
-                constraints.border.left * total_scale,
+                constraints.border.top * total_scale * scale_factor,
+                constraints.border.right * total_scale * scale_factor,
+                constraints.border.bottom * total_scale * scale_factor,
+                constraints.border.left * total_scale * scale_factor,
             ];
 
             let mut vibrancy = 0.0;
@@ -1138,56 +1238,139 @@ fn render_command_slice<'a, I>(
             let effective_alpha = compute_effective_opacity(context, node);
 
             let border_radii = [
-                effects.border.radius.tl * total_scale,
-                effects.border.radius.tr * total_scale,
-                effects.border.radius.br * total_scale,
-                effects.border.radius.bl * total_scale,
+                effects.border.radius.tl * total_scale * scale_factor,
+                effects.border.radius.tr * total_scale * scale_factor,
+                effects.border.radius.br * total_scale * scale_factor,
+                effects.border.radius.bl * total_scale * scale_factor,
             ];
 
-            let mut immediate_data = ImmediateData {
-                color: effects.background_color.into(),
-                pos: [scaled_x, scaled_y],
-                screen_size: [screen_width as f32, screen_height as f32],
-                quad_size: [scaled_w, scaled_h],
-                alpha: effective_alpha,
-                _pad0: 0.0,
-                border_radii,
-                border_color: effects.border.color.into(),
-                shadow_color: effects.shadow.color.into(),
-                border_widths,
-                shadow_spread: effects.shadow.spread * total_scale,
-                shadow_power: effects.shadow.power,
-                vibrancy,
-                vibrancy_darkness: 0.0,
-                passes,
-                _pad1: 0.0,
-                _pad2: 0.0,
-                _pad3: 0.0,
-            };
-
-            if let Some(canvas_res) = canvas_textures.get(&node) {
-                render_pass.set_pipeline(&pipelines.texture);
-                render_pass.set_bind_group(0, &canvas_res.bind_group, &[]);
-                immediate_data.color = [1.0, 1.0, 1.0, effective_alpha];
-                render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
-                render_pass.draw(0..6, 0..1);
-            } else if let Some(image_res) = image_textures.get(&node) {
-                render_pass.set_pipeline(&pipelines.texture);
-                render_pass.set_bind_group(0, &image_res.bind_group, &[]);
-                immediate_data.color = [1.0, 1.0, 1.0, effective_alpha];
-                render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
-                render_pass.draw(0..6, 0..1);
-            } else if let Some(svg_res) = svg_textures.get(&node) {
-                render_pass.set_pipeline(&pipelines.texture);
-                render_pass.set_bind_group(0, &svg_res.bind_group, &[]);
-                immediate_data.color = [1.0, 1.0, 1.0, effective_alpha];
-                render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
-                render_pass.draw(0..6, 0..1);
+            if canvas_textures.contains_key(&node) {
+                let immediate = ImmediateData {
+                    color: [1.0, 1.0, 1.0, effective_alpha],
+                    pos: [scaled_x, scaled_y],
+                    screen_size: [screen_w_f32, screen_h_f32],
+                    quad_size: [scaled_w, scaled_h],
+                    alpha: effective_alpha,
+                    _pad0: 0.0,
+                    border_radii,
+                    border_color: effects.border.color.into(),
+                    shadow_color: effects.shadow.color.into(),
+                    border_widths,
+                    shadow_spread: effects.shadow.spread * total_scale * scale_factor,
+                    shadow_power: effects.shadow.power,
+                    vibrancy,
+                    vibrancy_darkness: 0.0,
+                    passes,
+                    _pad1: 0.0,
+                    _pad2: 0.0,
+                    _pad3: 0.0,
+                };
+                draw_batches.push(DrawBatch::CanvasTexture {
+                    node,
+                    immediate,
+                    clip: if cmd.has_clip() {
+                        let c = cmd.clip();
+                        Some(crate::style::Rect {
+                            x: c.x * scale_factor,
+                            y: c.y * scale_factor,
+                            w: c.w * scale_factor,
+                            h: c.h * scale_factor,
+                        })
+                    } else {
+                        None
+                    },
+                });
+            } else if image_textures.contains_key(&node) {
+                let immediate = ImmediateData {
+                    color: [1.0, 1.0, 1.0, effective_alpha],
+                    pos: [scaled_x, scaled_y],
+                    screen_size: [screen_w_f32, screen_h_f32],
+                    quad_size: [scaled_w, scaled_h],
+                    alpha: effective_alpha,
+                    _pad0: 0.0,
+                    border_radii,
+                    border_color: effects.border.color.into(),
+                    shadow_color: effects.shadow.color.into(),
+                    border_widths,
+                    shadow_spread: effects.shadow.spread * total_scale * scale_factor,
+                    shadow_power: effects.shadow.power,
+                    vibrancy,
+                    vibrancy_darkness: 0.0,
+                    passes,
+                    _pad1: 0.0,
+                    _pad2: 0.0,
+                    _pad3: 0.0,
+                };
+                draw_batches.push(DrawBatch::ImageTexture {
+                    node,
+                    immediate,
+                    clip: if cmd.has_clip() {
+                        let c = cmd.clip();
+                        Some(crate::style::Rect {
+                            x: c.x * scale_factor,
+                            y: c.y * scale_factor,
+                            w: c.w * scale_factor,
+                            h: c.h * scale_factor,
+                        })
+                    } else {
+                        None
+                    },
+                });
+            } else if svg_textures.contains_key(&node) {
+                let immediate = ImmediateData {
+                    color: [1.0, 1.0, 1.0, effective_alpha],
+                    pos: [scaled_x, scaled_y],
+                    screen_size: [screen_w_f32, screen_h_f32],
+                    quad_size: [scaled_w, scaled_h],
+                    alpha: effective_alpha,
+                    _pad0: 0.0,
+                    border_radii,
+                    border_color: effects.border.color.into(),
+                    shadow_color: effects.shadow.color.into(),
+                    border_widths,
+                    shadow_spread: effects.shadow.spread * total_scale * scale_factor,
+                    shadow_power: effects.shadow.power,
+                    vibrancy,
+                    vibrancy_darkness: 0.0,
+                    passes,
+                    _pad1: 0.0,
+                    _pad2: 0.0,
+                    _pad3: 0.0,
+                };
+                draw_batches.push(DrawBatch::SvgTexture {
+                    node,
+                    immediate,
+                    clip: if cmd.has_clip() {
+                        let c = cmd.clip();
+                        Some(crate::style::Rect {
+                            x: c.x * scale_factor,
+                            y: c.y * scale_factor,
+                            w: c.w * scale_factor,
+                            h: c.h * scale_factor,
+                        })
+                    } else {
+                        None
+                    },
+                });
             } else {
-                render_pass.set_pipeline(&pipelines.solid);
-                render_pass.set_bind_group(0, solid_bind_group, &[]);
-                render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
-                render_pass.draw(0..6, 0..1);
+                let quad = QuadInstance {
+                    pos: [scaled_x, scaled_y],
+                    quad_size: [scaled_w, scaled_h],
+                    color: effects.background_color.into(),
+                    border_radii,
+                    border_color: effects.border.color.into(),
+                    border_widths,
+                    shadow_color: effects.shadow.color.into(),
+                    shadow_params: [
+                        effects.shadow.spread * total_scale * scale_factor,
+                        effects.shadow.power,
+                        effective_alpha,
+                        0.0,
+                    ],
+                    effects: [vibrancy, 0.0, passes, 0.0],
+                    clip_rect,
+                };
+                push_solid_quad(quad_instances, draw_batches, quad);
             }
 
             if Some(node) == context.focused_node() {
@@ -1212,374 +1395,419 @@ fn render_command_slice<'a, I>(
                 };
 
                 if should_render {
-                    let ring_thickness = 2.0;
+                    let ring_thickness = 2.0 * scale_factor;
                     let ring_radii = [
                         border_radii[0] + ring_thickness,
                         border_radii[1] + ring_thickness,
                         border_radii[2] + ring_thickness,
                         border_radii[3] + ring_thickness,
                     ];
-                    let ring_data = ImmediateData {
-                        color: [0.0; 4],
+                    let ring_quad = QuadInstance {
                         pos: [scaled_x - ring_thickness, scaled_y - ring_thickness],
-                        screen_size: [screen_width as f32, screen_height as f32],
                         quad_size: [
                             scaled_w + ring_thickness * 2.0,
                             scaled_h + ring_thickness * 2.0,
                         ],
-                        alpha: effective_alpha,
-                        _pad0: 0.0,
+                        color: [0.0; 4],
                         border_radii: ring_radii,
                         border_color: [0.0, 0.47, 1.0, 1.0],
-                        shadow_color: [0.0; 4],
                         border_widths: [ring_thickness; 4],
-                        shadow_spread: 0.0,
-                        shadow_power: 0.0,
-                        vibrancy: 0.0,
-                        vibrancy_darkness: 0.0,
-                        passes: 0.0,
-                        _pad1: 0.0,
-                        _pad2: 0.0,
-                        _pad3: 0.0,
+                        shadow_color: [0.0; 4],
+                        shadow_params: [0.0, 0.0, effective_alpha, 0.0],
+                        effects: [0.0; 4],
+                        clip_rect,
                     };
-                    render_pass.set_pipeline(&pipelines.solid);
-                    render_pass.set_bind_group(0, solid_bind_group, &[]);
-                    render_pass.set_immediates(0, bytemuck::bytes_of(&ring_data));
-                    render_pass.draw(0..6, 0..1);
+                    push_solid_quad(quad_instances, draw_batches, ring_quad);
                 }
             }
         } else if cmd.kind() == RenderCommandKind::Text {
-            let node = cmd.node();
-            let constraints = node.get_constraints(context).unwrap_or_default();
-            let mut overflow_clipped = false;
-            if constraints.overflow == crate::Overflow::Hidden {
-                let computed = cmd.computed();
-                let text_clip = crate::style::Rect {
-                    x: computed.x + constraints.border.left,
-                    y: computed.y + constraints.border.top,
-                    w: (computed.w - constraints.border.left - constraints.border.right).max(0.0),
-                    h: (computed.h - constraints.border.top - constraints.border.bottom).max(0.0),
-                };
-
-                let effective_clip = if cmd.has_clip() {
-                    let parent_clip = cmd.clip();
-                    let x1 = text_clip.x.max(parent_clip.x);
-                    let y1 = text_clip.y.max(parent_clip.y);
-                    let x2 = (text_clip.x + text_clip.w).min(parent_clip.x + parent_clip.w);
-                    let y2 = (text_clip.y + text_clip.h).min(parent_clip.y + parent_clip.h);
-                    crate::style::Rect {
-                        x: x1,
-                        y: y1,
-                        w: (x2 - x1).max(0.0),
-                        h: (y2 - y1).max(0.0),
-                    }
-                } else {
-                    text_clip
-                };
-
-                if let Some((nx, ny, nw, nh)) =
-                    compute_scissor_rect(effective_clip, screen_width, screen_height)
-                {
-                    render_pass.set_scissor_rect(nx, ny, nw, nh);
-                    overflow_clipped = true;
-                } else {
-                    continue;
-                }
-            }
+            let text_clip = if cmd.has_clip() {
+                let c = cmd.clip();
+                Some(crate::style::Rect {
+                    x: c.x * scale_factor,
+                    y: c.y * scale_factor,
+                    w: c.w * scale_factor,
+                    h: c.h * scale_factor,
+                })
+            } else {
+                None
+            };
 
             if let Some(range) = text_ranges.get(&cmd_index) {
-                // A) Draw selections
-                if !range.selections.is_empty() {
-                    render_pass.set_pipeline(&pipelines.solid);
-                    render_pass.set_bind_group(0, solid_bind_group, &[]);
-                    for s_rect in &range.selections {
-                        let immediate_data = ImmediateData {
-                            color: range.style.selection_bg.into(),
-                            pos: [s_rect[0], s_rect[1]],
-                            screen_size: [screen_width as f32, screen_height as f32],
-                            quad_size: [s_rect[2], s_rect[3]],
-                            alpha: range.alpha,
-                            _pad0: 0.0,
-                            border_radii: [0.0; 4],
-                            border_color: [0.0; 4],
-                            shadow_color: [0.0; 4],
-                            border_widths: [0.0; 4],
-                            shadow_spread: 0.0,
-                            shadow_power: 0.0,
-                            vibrancy: 0.0,
-                            vibrancy_darkness: 0.0,
-                            passes: 0.0,
-                            _pad1: 0.0,
-                            _pad2: 0.0,
-                            _pad3: 0.0,
-                        };
-                        render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
-                        render_pass.draw(0..6, 0..1);
-                    }
+                for s_rect in &range.selections {
+                    let s_quad = QuadInstance {
+                        pos: [s_rect[0] * scale_factor, s_rect[1] * scale_factor],
+                        quad_size: [s_rect[2] * scale_factor, s_rect[3] * scale_factor],
+                        color: range.style.selection_bg.into(),
+                        border_radii: [0.0; 4],
+                        border_color: [0.0; 4],
+                        border_widths: [0.0; 4],
+                        shadow_color: [0.0; 4],
+                        shadow_params: [0.0, 0.0, range.alpha, 0.0],
+                        effects: [0.0; 4],
+                        clip_rect,
+                    };
+                    push_solid_quad(quad_instances, draw_batches, s_quad);
                 }
 
-                // B) Draw Glyphs
-                render_pass.set_pipeline(&pipelines.text);
-                render_pass.set_bind_group(0, text_bind_group, &[]);
-                let screen_size = [screen_width as f32, screen_height as f32];
-                render_pass.set_immediates(0, bytemuck::bytes_of(&screen_size));
                 let glyph_start = range.glyphs.start as u32;
                 let glyph_end = range.glyphs.end as u32;
                 let count = glyph_end.saturating_sub(glyph_start);
                 if count > 0 {
-                    render_pass.draw(0..6, glyph_start..glyph_end);
+                    if let Some(DrawBatch::TextGlyphs {
+                        start: prev_start,
+                        count: prev_count,
+                        clip: prev_clip,
+                    }) = draw_batches.last_mut()
+                    {
+                        if *prev_clip == text_clip && *prev_start + *prev_count == glyph_start {
+                            *prev_count += count;
+                        } else {
+                            draw_batches.push(DrawBatch::TextGlyphs {
+                                start: glyph_start,
+                                count,
+                                clip: text_clip,
+                            });
+                        }
+                    } else {
+                        draw_batches.push(DrawBatch::TextGlyphs {
+                            start: glyph_start,
+                            count,
+                            clip: text_clip,
+                        });
+                    }
                 }
 
-                // C) Draw Caret
                 if let Some(c_rect) = range.caret {
-                    let immediate_data = ImmediateData {
+                    let c_quad = QuadInstance {
+                        pos: [c_rect[0] * scale_factor, c_rect[1] * scale_factor],
+                        quad_size: [c_rect[2] * scale_factor, c_rect[3] * scale_factor],
                         color: range.style.caret_color.into(),
-                        pos: [c_rect[0], c_rect[1]],
-                        screen_size: [screen_width as f32, screen_height as f32],
-                        quad_size: [c_rect[2], c_rect[3]],
-                        alpha: range.alpha,
-                        _pad0: 0.0,
                         border_radii: [0.0; 4],
                         border_color: [0.0; 4],
-                        shadow_color: [0.0; 4],
                         border_widths: [0.0; 4],
-                        shadow_spread: 0.0,
-                        shadow_power: 0.0,
-                        vibrancy: 0.0,
-                        vibrancy_darkness: 0.0,
-                        passes: 0.0,
-                        _pad1: 0.0,
-                        _pad2: 0.0,
-                        _pad3: 0.0,
+                        shadow_color: [0.0; 4],
+                        shadow_params: [0.0, 0.0, range.alpha, 0.0],
+                        effects: [0.0; 4],
+                        clip_rect,
                     };
-                    render_pass.set_pipeline(&pipelines.solid);
-                    render_pass.set_bind_group(0, solid_bind_group, &[]);
-                    render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
-                    render_pass.draw(0..6, 0..1);
+                    push_solid_quad(quad_instances, draw_batches, c_quad);
                 }
 
-                // D) Draw Strikethroughs
-                if !range.strikethroughs.is_empty() {
-                    render_pass.set_pipeline(&pipelines.solid);
-                    render_pass.set_bind_group(0, solid_bind_group, &[]);
-                    for st_rect in &range.strikethroughs {
-                        let immediate_data = ImmediateData {
-                            color: range.style.color.into(),
-                            pos: [st_rect[0], st_rect[1]],
-                            screen_size: [screen_width as f32, screen_height as f32],
-                            quad_size: [st_rect[2], st_rect[3]],
-                            alpha: range.alpha,
-                            _pad0: 0.0,
-                            border_radii: [0.0; 4],
-                            border_color: [0.0; 4],
-                            shadow_color: [0.0; 4],
-                            border_widths: [0.0; 4],
-                            shadow_spread: 0.0,
-                            shadow_power: 0.0,
-                            vibrancy: 0.0,
-                            vibrancy_darkness: 0.0,
-                            passes: 0.0,
-                            _pad1: 0.0,
-                            _pad2: 0.0,
-                            _pad3: 0.0,
-                        };
-                        render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
-                        render_pass.draw(0..6, 0..1);
-                    }
+                for st_rect in &range.strikethroughs {
+                    let st_quad = QuadInstance {
+                        pos: [st_rect[0] * scale_factor, st_rect[1] * scale_factor],
+                        quad_size: [st_rect[2] * scale_factor, st_rect[3] * scale_factor],
+                        color: range.style.color.into(),
+                        border_radii: [0.0; 4],
+                        border_color: [0.0; 4],
+                        border_widths: [0.0; 4],
+                        shadow_color: [0.0; 4],
+                        shadow_params: [0.0, 0.0, range.alpha, 0.0],
+                        effects: [0.0; 4],
+                        clip_rect,
+                    };
+                    push_solid_quad(quad_instances, draw_batches, st_quad);
                 }
 
-                // E) Draw Underlines
-                if !range.underlines.is_empty() {
-                    render_pass.set_pipeline(&pipelines.solid);
-                    render_pass.set_bind_group(0, solid_bind_group, &[]);
-                    for un_rect in &range.underlines {
-                        let immediate_data = ImmediateData {
-                            color: range.style.color.into(),
-                            pos: [un_rect[0], un_rect[1]],
-                            screen_size: [screen_width as f32, screen_height as f32],
-                            quad_size: [un_rect[2], un_rect[3]],
-                            alpha: range.alpha,
-                            _pad0: 0.0,
-                            border_radii: [0.0; 4],
-                            border_color: [0.0; 4],
-                            shadow_color: [0.0; 4],
-                            border_widths: [0.0; 4],
-                            shadow_spread: 0.0,
-                            shadow_power: 0.0,
-                            vibrancy: 0.0,
-                            vibrancy_darkness: 0.0,
-                            passes: 0.0,
-                            _pad1: 0.0,
-                            _pad2: 0.0,
-                            _pad3: 0.0,
-                        };
-                        render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
-                        render_pass.draw(0..6, 0..1);
-                    }
+                for un_rect in &range.underlines {
+                    let un_quad = QuadInstance {
+                        pos: [un_rect[0] * scale_factor, un_rect[1] * scale_factor],
+                        quad_size: [un_rect[2] * scale_factor, un_rect[3] * scale_factor],
+                        color: range.style.color.into(),
+                        border_radii: [0.0; 4],
+                        border_color: [0.0; 4],
+                        border_widths: [0.0; 4],
+                        shadow_color: [0.0; 4],
+                        shadow_params: [0.0, 0.0, range.alpha, 0.0],
+                        effects: [0.0; 4],
+                        clip_rect,
+                    };
+                    push_solid_quad(quad_instances, draw_batches, un_quad);
                 }
-            }
-
-            if overflow_clipped
-                && let Some(rect) = compute_scissor_rect(cmd.clip(), screen_width, screen_height)
-            {
-                render_pass.set_scissor_rect(rect.0, rect.1, rect.2, rect.3);
             }
         } else if cmd.kind() == RenderCommandKind::ScrollbarV {
             let node = cmd.node();
             let computed = cmd.computed();
             let constraints = node.get_constraints(context).unwrap_or_default();
-            let content_h = node.compute_content_height(context).max(computed.h);
+            let content_h = node.compute_content_height(context).max(computed.h) * scale_factor;
+            let computed_h_scaled = computed.h * scale_factor;
 
-            if content_h > computed.h + 0.5 {
-                let padding_top = constraints.padding.top + constraints.border.top;
-                let padding_bottom = constraints.padding.bottom + constraints.border.bottom;
-                let track_h = (computed.h - padding_top - padding_bottom).max(0.0);
+            if content_h > computed_h_scaled + 0.5 {
+                let padding_top = (constraints.padding.top + constraints.border.top) * scale_factor;
+                let padding_bottom =
+                    (constraints.padding.bottom + constraints.border.bottom) * scale_factor;
+                let track_h = (computed_h_scaled - padding_top - padding_bottom).max(0.0);
                 if track_h > 0.0 {
-                    let ratio = (computed.h / content_h).clamp(0.0, 1.0);
-                    let thumb_h = (track_h * ratio).clamp(20.0, track_h);
-                    let max_scroll_y = (content_h - computed.h).max(0.0);
+                    let ratio = (computed_h_scaled / content_h).clamp(0.0, 1.0);
+                    let thumb_h = (track_h * ratio).clamp(20.0 * scale_factor, track_h);
+                    let max_scroll_y = (content_h - computed_h_scaled).max(0.0);
                     let scroll_pct = if max_scroll_y > 0.0 {
-                        (constraints.scroll.y / max_scroll_y).clamp(0.0, 1.0)
+                        ((constraints.scroll.y * scale_factor) / max_scroll_y).clamp(0.0, 1.0)
                     } else {
                         0.0
                     };
-                    let thumb_w = 4.0;
-                    let margin = 2.0;
-                    let thumb_x =
-                        computed.x + computed.w - constraints.border.right - thumb_w - margin;
-                    let thumb_y = computed.y + padding_top + scroll_pct * (track_h - thumb_h);
+                    let thumb_w = 4.0 * scale_factor;
+                    let margin = 2.0 * scale_factor;
+                    let thumb_x = (computed.x + computed.w - constraints.border.right)
+                        * scale_factor
+                        - thumb_w
+                        - margin;
+                    let thumb_y =
+                        computed.y * scale_factor + padding_top + scroll_pct * (track_h - thumb_h);
 
-                    let immediate_data = ImmediateData {
-                        color: [0.4, 0.4, 0.4, 0.5],
+                    let thumb_quad = QuadInstance {
                         pos: [thumb_x, thumb_y],
-                        screen_size: [screen_width as f32, screen_height as f32],
                         quad_size: [thumb_w, thumb_h],
-                        alpha: 1.0,
-                        _pad0: 0.0,
+                        color: [0.4, 0.4, 0.4, 0.5],
                         border_radii: [thumb_w / 2.0; 4],
                         border_color: [0.0; 4],
-                        shadow_color: [0.0; 4],
                         border_widths: [0.0; 4],
-                        shadow_spread: 0.0,
-                        shadow_power: 0.0,
-                        vibrancy: 0.0,
-                        vibrancy_darkness: 0.0,
-                        passes: 0.0,
-                        _pad1: 0.0,
-                        _pad2: 0.0,
-                        _pad3: 0.0,
+                        shadow_color: [0.0; 4],
+                        shadow_params: [0.0, 0.0, 1.0, 0.0],
+                        effects: [0.0; 4],
+                        clip_rect,
                     };
-
-                    render_pass.set_pipeline(&pipelines.solid);
-                    render_pass.set_bind_group(0, solid_bind_group, &[]);
-                    render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
-                    render_pass.draw(0..6, 0..1);
+                    push_solid_quad(quad_instances, draw_batches, thumb_quad);
                 }
             }
         } else if cmd.kind() == RenderCommandKind::ScrollbarH {
             let node = cmd.node();
             let computed = cmd.computed();
             let constraints = node.get_constraints(context).unwrap_or_default();
-            let content_w = computed.content_w.max(computed.w);
+            let content_w = computed.content_w.max(computed.w) * scale_factor;
+            let computed_w_scaled = computed.w * scale_factor;
 
-            if content_w > computed.w + 0.5 {
-                let padding_left = constraints.padding.left + constraints.border.left;
-                let padding_right = constraints.padding.right + constraints.border.right;
-                let track_w = (computed.w - padding_left - padding_right).max(0.0);
+            if content_w > computed_w_scaled + 0.5 {
+                let padding_left =
+                    (constraints.padding.left + constraints.border.left) * scale_factor;
+                let padding_right =
+                    (constraints.padding.right + constraints.border.right) * scale_factor;
+                let track_w = (computed_w_scaled - padding_left - padding_right).max(0.0);
                 if track_w > 0.0 {
-                    let ratio = (computed.w / content_w).clamp(0.0, 1.0);
-                    let thumb_w = (track_w * ratio).clamp(20.0, track_w);
-                    let max_scroll_x = (content_w - computed.w).max(0.0);
+                    let ratio = (computed_w_scaled / content_w).clamp(0.0, 1.0);
+                    let thumb_w = (track_w * ratio).clamp(20.0 * scale_factor, track_w);
+                    let max_scroll_x = (content_w - computed_w_scaled).max(0.0);
                     let scroll_pct = if max_scroll_x > 0.0 {
-                        (constraints.scroll.x / max_scroll_x).clamp(0.0, 1.0)
+                        ((constraints.scroll.x * scale_factor) / max_scroll_x).clamp(0.0, 1.0)
                     } else {
                         0.0
                     };
-                    let thumb_h = 4.0;
-                    let margin = 2.0;
-                    let thumb_x = computed.x + padding_left + scroll_pct * (track_w - thumb_w);
-                    let thumb_y =
-                        computed.y + computed.h - constraints.border.bottom - thumb_h - margin;
+                    let thumb_h = 4.0 * scale_factor;
+                    let margin = 2.0 * scale_factor;
+                    let thumb_x =
+                        computed.x * scale_factor + padding_left + scroll_pct * (track_w - thumb_w);
+                    let thumb_y = (computed.y + computed.h - constraints.border.bottom)
+                        * scale_factor
+                        - thumb_h
+                        - margin;
 
-                    let immediate_data = ImmediateData {
-                        color: [0.4, 0.4, 0.4, 0.5],
+                    let thumb_quad = QuadInstance {
                         pos: [thumb_x, thumb_y],
-                        screen_size: [screen_width as f32, screen_height as f32],
                         quad_size: [thumb_w, thumb_h],
-                        alpha: 1.0,
-                        _pad0: 0.0,
+                        color: [0.4, 0.4, 0.4, 0.5],
                         border_radii: [thumb_h / 2.0; 4],
                         border_color: [0.0; 4],
-                        shadow_color: [0.0; 4],
                         border_widths: [0.0; 4],
-                        shadow_spread: 0.0,
-                        shadow_power: 0.0,
-                        vibrancy: 0.0,
-                        vibrancy_darkness: 0.0,
-                        passes: 0.0,
-                        _pad1: 0.0,
-                        _pad2: 0.0,
-                        _pad3: 0.0,
+                        shadow_color: [0.0; 4],
+                        shadow_params: [0.0, 0.0, 1.0, 0.0],
+                        effects: [0.0; 4],
+                        clip_rect,
                     };
-
-                    render_pass.set_pipeline(&pipelines.solid);
-                    render_pass.set_bind_group(0, solid_bind_group, &[]);
-                    render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
-                    render_pass.draw(0..6, 0..1);
+                    push_solid_quad(quad_instances, draw_batches, thumb_quad);
                 }
             }
         }
     }
 }
 
-fn render_debug_highlight<'a>(
-    render_pass: &mut wgpu::RenderPass<'a>,
-    screen_width: u32,
-    screen_height: u32,
-    pipelines: &'a Pipelines,
-    solid_bind_group: &'a wgpu::BindGroup,
+fn prepare_debug_highlight(
     context: &crate::Context,
+    quad_instances: &mut Vec<QuadInstance>,
+    draw_batches: &mut Vec<DrawBatch>,
 ) {
     let Some(highlighted) = context.highlight_node else {
         return;
     };
 
+    let scale_factor = context.scale_factor.max(0.1);
     if let Some(computed) = highlighted.get_computed(context) {
         let effects = highlighted.get_effects(context).unwrap_or_default();
-
-        render_pass.set_scissor_rect(0, 0, screen_width.max(1), screen_height.max(1));
-
-        let outline_thickness = 2.0;
-        let immediate_data = ImmediateData {
-            color: [0.06, 0.72, 0.95, 0.15], // Translucent cyan tint
-            pos: [computed.x, computed.y],
-            screen_size: [screen_width as f32, screen_height as f32],
-            quad_size: [computed.w, computed.h],
-            alpha: 1.0,
-            _pad0: 0.0,
+        let outline_thickness = 2.0 * scale_factor;
+        let highlight_quad = QuadInstance {
+            pos: [computed.x * scale_factor, computed.y * scale_factor],
+            quad_size: [computed.w * scale_factor, computed.h * scale_factor],
+            color: [0.06, 0.72, 0.95, 0.15],
             border_radii: [
-                effects.border.radius.tl,
-                effects.border.radius.tr,
-                effects.border.radius.br,
-                effects.border.radius.bl,
+                effects.border.radius.tl * scale_factor,
+                effects.border.radius.tr * scale_factor,
+                effects.border.radius.br * scale_factor,
+                effects.border.radius.bl * scale_factor,
             ],
-            border_color: [0.06, 0.72, 0.95, 0.9], // Vibrant Cyan debug border
-            shadow_color: [0.0; 4],
+            border_color: [0.06, 0.72, 0.95, 0.9],
             border_widths: [outline_thickness; 4],
-            shadow_spread: 0.0,
-            shadow_power: 0.0,
-            vibrancy: 0.0,
-            vibrancy_darkness: 0.0,
-            passes: 0.0,
-            _pad1: 0.0,
-            _pad2: 0.0,
-            _pad3: 0.0,
+            shadow_color: [0.0; 4],
+            shadow_params: [0.0, 0.0, 1.0, 0.0],
+            effects: [0.0; 4],
+            clip_rect: [-1.0, -1.0, -1.0, -1.0],
         };
+        push_solid_quad(quad_instances, draw_batches, highlight_quad);
+    }
+}
 
-        render_pass.set_pipeline(&pipelines.solid);
-        render_pass.set_bind_group(0, solid_bind_group, &[]);
-        render_pass.set_immediates(0, bytemuck::bytes_of(&immediate_data));
-        render_pass.draw(0..6, 0..1);
+fn execute_draw_batches<'a>(
+    render_pass: &mut wgpu::RenderPass<'a>,
+    batches: &[DrawBatch],
+    screen_width: u32,
+    screen_height: u32,
+    pipelines: &'a Pipelines,
+    solid_bind_group: &'a wgpu::BindGroup,
+    text_bind_group: &'a wgpu::BindGroup,
+    quad_buffer: &'a wgpu::Buffer,
+    canvas_textures: &'a HashMap<crate::Node, CanvasGpuResource>,
+    image_textures: &'a HashMap<crate::Node, ImageGpuResource>,
+    svg_textures: &'a HashMap<crate::Node, SvgGpuResource>,
+) {
+    let default_rect = (0, 0, screen_width.max(1), screen_height.max(1));
+    render_pass.set_scissor_rect(
+        default_rect.0,
+        default_rect.1,
+        default_rect.2,
+        default_rect.3,
+    );
+    let mut current_scissor_is_default = true;
+
+    for batch in batches {
+        match batch {
+            DrawBatch::SolidQuads { start, count } => {
+                if !current_scissor_is_default {
+                    render_pass.set_scissor_rect(
+                        default_rect.0,
+                        default_rect.1,
+                        default_rect.2,
+                        default_rect.3,
+                    );
+                    current_scissor_is_default = true;
+                }
+                render_pass.set_pipeline(&pipelines.solid);
+                render_pass.set_bind_group(0, solid_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, quad_buffer.slice(..));
+                let push_constants = SolidPushConstants {
+                    screen_size: [screen_width as f32, screen_height as f32],
+                };
+                render_pass.set_immediates(0, bytemuck::bytes_of(&push_constants));
+                render_pass.draw(0..6, *start..(*start + *count));
+            }
+            DrawBatch::TextGlyphs { start, count, clip } => {
+                if let Some(c) = clip {
+                    if let Some((nx, ny, nw, nh)) =
+                        compute_scissor_rect(*c, screen_width, screen_height)
+                    {
+                        render_pass.set_scissor_rect(nx, ny, nw, nh);
+                        current_scissor_is_default = false;
+                    } else {
+                        continue;
+                    }
+                } else if !current_scissor_is_default {
+                    render_pass.set_scissor_rect(
+                        default_rect.0,
+                        default_rect.1,
+                        default_rect.2,
+                        default_rect.3,
+                    );
+                    current_scissor_is_default = true;
+                }
+                render_pass.set_pipeline(&pipelines.text);
+                render_pass.set_bind_group(0, text_bind_group, &[]);
+                let screen_size = [screen_width as f32, screen_height as f32];
+                render_pass.set_immediates(0, bytemuck::bytes_of(&screen_size));
+                render_pass.draw(0..6, *start..(*start + *count));
+            }
+            DrawBatch::CanvasTexture {
+                node,
+                immediate,
+                clip,
+            } => {
+                if let Some(c) = clip {
+                    if let Some((nx, ny, nw, nh)) =
+                        compute_scissor_rect(*c, screen_width, screen_height)
+                    {
+                        render_pass.set_scissor_rect(nx, ny, nw, nh);
+                        current_scissor_is_default = false;
+                    }
+                } else if !current_scissor_is_default {
+                    render_pass.set_scissor_rect(
+                        default_rect.0,
+                        default_rect.1,
+                        default_rect.2,
+                        default_rect.3,
+                    );
+                    current_scissor_is_default = true;
+                }
+                if let Some(canvas_res) = canvas_textures.get(node) {
+                    render_pass.set_pipeline(&pipelines.texture);
+                    render_pass.set_bind_group(0, &canvas_res.bind_group, &[]);
+                    render_pass.set_immediates(0, bytemuck::bytes_of(immediate));
+                    render_pass.draw(0..6, 0..1);
+                }
+            }
+            DrawBatch::ImageTexture {
+                node,
+                immediate,
+                clip,
+            } => {
+                if let Some(c) = clip {
+                    if let Some((nx, ny, nw, nh)) =
+                        compute_scissor_rect(*c, screen_width, screen_height)
+                    {
+                        render_pass.set_scissor_rect(nx, ny, nw, nh);
+                        current_scissor_is_default = false;
+                    }
+                } else if !current_scissor_is_default {
+                    render_pass.set_scissor_rect(
+                        default_rect.0,
+                        default_rect.1,
+                        default_rect.2,
+                        default_rect.3,
+                    );
+                    current_scissor_is_default = true;
+                }
+                if let Some(image_res) = image_textures.get(node) {
+                    render_pass.set_pipeline(&pipelines.texture);
+                    render_pass.set_bind_group(0, &image_res.bind_group, &[]);
+                    render_pass.set_immediates(0, bytemuck::bytes_of(immediate));
+                    render_pass.draw(0..6, 0..1);
+                }
+            }
+            DrawBatch::SvgTexture {
+                node,
+                immediate,
+                clip,
+            } => {
+                if let Some(c) = clip {
+                    if let Some((nx, ny, nw, nh)) =
+                        compute_scissor_rect(*c, screen_width, screen_height)
+                    {
+                        render_pass.set_scissor_rect(nx, ny, nw, nh);
+                        current_scissor_is_default = false;
+                    }
+                } else if !current_scissor_is_default {
+                    render_pass.set_scissor_rect(
+                        default_rect.0,
+                        default_rect.1,
+                        default_rect.2,
+                        default_rect.3,
+                    );
+                    current_scissor_is_default = true;
+                }
+                if let Some(svg_res) = svg_textures.get(node) {
+                    render_pass.set_pipeline(&pipelines.texture);
+                    render_pass.set_bind_group(0, &svg_res.bind_group, &[]);
+                    render_pass.set_immediates(0, bytemuck::bytes_of(immediate));
+                    render_pass.draw(0..6, 0..1);
+                }
+            }
+        }
     }
 }
 
@@ -1628,5 +1856,331 @@ mod tests {
         let transformed = transform_point_ancestors(&ctx, child, child_center);
         assert!((transformed.0 - 30.0).abs() < 1e-4);
         assert!((transformed.1 - 30.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_batched_quad_collection_and_analytical_scissoring() {
+        let mut ctx = Context::new();
+
+        let root = ctx.create_node();
+        root.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(800);
+            c.height = Size::Fixed(600);
+            c.flex_direction = crate::FlexDirection::Column;
+        });
+
+        for i in 0..10 {
+            let child = ctx.create_node();
+            child.update_constraints(&mut ctx, |c| {
+                c.width = Size::Fixed(100);
+                c.height = Size::Fixed(40);
+            });
+            child.update_effects(&mut ctx, |e| {
+                e.background_color = if i % 2 == 0 {
+                    crate::colors::Color::red
+                } else {
+                    crate::colors::Color::blue
+                };
+            });
+            root.append(&mut ctx, child);
+        }
+
+        ctx.root_attach(root);
+        ctx.compute_layout(800.0, 600.0);
+        ctx.build_render_list(crate::style::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 800.0,
+            h: 600.0,
+        });
+
+        let mut quad_instances = Vec::new();
+        let mut draw_batches = Vec::new();
+        let dummy_text_ranges = HashMap::new();
+        let dummy_canvas = HashMap::new();
+        let dummy_images = HashMap::new();
+        let dummy_svgs = HashMap::new();
+
+        prepare_command_slice(
+            ctx.render_list().enumerate(),
+            800,
+            600,
+            &dummy_text_ranges,
+            &dummy_canvas,
+            &dummy_images,
+            &dummy_svgs,
+            &ctx,
+            &mut quad_instances,
+            &mut draw_batches,
+        );
+
+        // 1 root + 10 children = 11 quads
+        assert_eq!(quad_instances.len(), 11);
+        // All 11 consecutive solid quads MUST be coalesced into a single draw batch!
+        assert_eq!(draw_batches.len(), 1);
+        match &draw_batches[0] {
+            DrawBatch::SolidQuads { start, count } => {
+                assert_eq!(*start, 0);
+                assert_eq!(*count, 11);
+            }
+            _ => panic!("Expected DrawBatch::SolidQuads"),
+        }
+    }
+
+    #[test]
+    fn test_analytical_scissoring_preserves_single_batch() {
+        let mut ctx = Context::new();
+
+        let scroll_container = ctx.create_node();
+        scroll_container.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(300);
+            c.height = Size::Fixed(200);
+            c.overflow = crate::Overflow::Scroll;
+        });
+
+        for _ in 0..5 {
+            let item = ctx.create_node();
+            item.update_constraints(&mut ctx, |c| {
+                c.width = Size::Fixed(100);
+                c.height = Size::Fixed(50);
+            });
+            scroll_container.append(&mut ctx, item);
+        }
+
+        ctx.root_attach(scroll_container);
+        ctx.compute_layout(800.0, 600.0);
+        ctx.build_render_list(crate::style::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 800.0,
+            h: 600.0,
+        });
+
+        let mut quad_instances = Vec::new();
+        let mut draw_batches = Vec::new();
+        let dummy_text_ranges = HashMap::new();
+        let dummy_canvas = HashMap::new();
+        let dummy_images = HashMap::new();
+        let dummy_svgs = HashMap::new();
+
+        prepare_command_slice(
+            ctx.render_list().enumerate(),
+            800,
+            600,
+            &dummy_text_ranges,
+            &dummy_canvas,
+            &dummy_images,
+            &dummy_svgs,
+            &ctx,
+            &mut quad_instances,
+            &mut draw_batches,
+        );
+
+        // All quads (scroll container + 5 clipped items) must be in ONE single draw batch!
+        assert_eq!(draw_batches.len(), 1);
+        match &draw_batches[0] {
+            DrawBatch::SolidQuads { count, .. } => {
+                assert_eq!(*count, 6);
+            }
+            _ => panic!("Expected DrawBatch::SolidQuads"),
+        }
+
+        // Children must have non-negative clip_rect matching the scroll container clip
+        for instance in &quad_instances[1..] {
+            assert!(instance.clip_rect[2] > 0.0);
+            assert!(instance.clip_rect[3] > 0.0);
+            assert_eq!(instance.clip_rect[2], 300.0);
+            assert_eq!(instance.clip_rect[3], 200.0);
+        }
+    }
+
+    #[test]
+    fn test_text_batch_receives_scroll_container_clip() {
+        let mut ctx = Context::new();
+
+        let scroll_container = ctx.create_node();
+        scroll_container.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(300);
+            c.height = Size::Fixed(200);
+            c.overflow = crate::Overflow::Scroll;
+        });
+
+        let text_node = ctx.create_node();
+        text_node.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(150);
+            c.height = Size::Fixed(30);
+        });
+        text_node.set_text(&mut ctx, "Hello Scroll");
+        scroll_container.append(&mut ctx, text_node);
+
+        ctx.root_attach(scroll_container);
+        ctx.compute_layout(800.0, 600.0);
+        ctx.build_render_list(crate::style::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 800.0,
+            h: 600.0,
+        });
+
+        // Verify that the text RenderCommand has clip assigned from its parent scrollview
+        let text_cmd = ctx
+            .render_list()
+            .enumerate()
+            .find(|(_, cmd)| cmd.kind() == RenderCommandKind::Text);
+        assert!(text_cmd.is_some());
+        let (cmd_idx, cmd) = text_cmd.unwrap();
+        assert!(cmd.has_clip());
+        assert_eq!(cmd.clip().w, 300.0);
+        assert_eq!(cmd.clip().h, 200.0);
+
+        let mut quad_instances = Vec::new();
+        let mut draw_batches = Vec::new();
+        let mut text_ranges = HashMap::new();
+        text_ranges.insert(
+            cmd_idx,
+            RenderTextData {
+                glyphs: 0..12,
+                selections: Vec::new(),
+                strikethroughs: Vec::new(),
+                underlines: Vec::new(),
+                caret: None,
+                style: Default::default(),
+                alpha: 1.0,
+            },
+        );
+        let dummy_canvas = HashMap::new();
+        let dummy_images = HashMap::new();
+        let dummy_svgs = HashMap::new();
+
+        prepare_command_slice(
+            ctx.render_list().enumerate(),
+            800,
+            600,
+            &text_ranges,
+            &dummy_canvas,
+            &dummy_images,
+            &dummy_svgs,
+            &ctx,
+            &mut quad_instances,
+            &mut draw_batches,
+        );
+
+        // Find the TextGlyphs batch and ensure clip matches the scroll container
+        let text_batch = draw_batches
+            .iter()
+            .find(|b| matches!(b, DrawBatch::TextGlyphs { .. }));
+        assert!(text_batch.is_some());
+        match text_batch.unwrap() {
+            DrawBatch::TextGlyphs { clip, count, .. } => {
+                assert_eq!(*count, 12);
+                assert!(clip.is_some());
+                let clip_rect = clip.unwrap();
+                assert_eq!(clip_rect.w, 300.0);
+                assert_eq!(clip_rect.h, 200.0);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn test_scale_factor_scaling_quads_and_clips() {
+        let mut ctx = Context::new();
+        ctx.scale_factor = 1.25;
+
+        let container = ctx.create_node();
+        container.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(200);
+            c.height = Size::Fixed(100);
+            c.border = crate::style::Edges {
+                top: 2.0,
+                right: 2.0,
+                bottom: 2.0,
+                left: 2.0,
+            };
+            c.overflow = crate::Overflow::Scroll;
+        });
+
+        let text_node = ctx.create_node();
+        text_node.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(100);
+            c.height = Size::Fixed(20);
+        });
+        text_node.set_text(&mut ctx, "Scaled Text");
+        container.append(&mut ctx, text_node);
+
+        ctx.root_attach(container);
+        ctx.compute_layout(800.0, 600.0);
+        ctx.build_render_list(crate::style::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 800.0,
+            h: 600.0,
+        });
+
+        let text_cmd = ctx
+            .render_list()
+            .enumerate()
+            .find(|(_, cmd)| cmd.kind() == RenderCommandKind::Text);
+        assert!(text_cmd.is_some());
+        let (cmd_idx, _) = text_cmd.unwrap();
+
+        let mut quad_instances = Vec::new();
+        let mut draw_batches = Vec::new();
+        let mut text_ranges = HashMap::new();
+        text_ranges.insert(
+            cmd_idx,
+            RenderTextData {
+                glyphs: 0..11,
+                selections: vec![[10.0, 5.0, 50.0, 15.0]],
+                strikethroughs: Vec::new(),
+                underlines: Vec::new(),
+                caret: Some([20.0, 5.0, 2.0, 15.0]),
+                style: Default::default(),
+                alpha: 1.0,
+            },
+        );
+        let dummy_canvas = HashMap::new();
+        let dummy_images = HashMap::new();
+        let dummy_svgs = HashMap::new();
+
+        prepare_command_slice(
+            ctx.render_list().enumerate(),
+            1000,
+            750,
+            &text_ranges,
+            &dummy_canvas,
+            &dummy_images,
+            &dummy_svgs,
+            &ctx,
+            &mut quad_instances,
+            &mut draw_batches,
+        );
+
+        assert!(!quad_instances.is_empty());
+        let container_quad = quad_instances[0];
+        assert_eq!(container_quad.quad_size, [250.0, 125.0]);
+        assert_eq!(container_quad.border_widths, [2.5, 2.5, 2.5, 2.5]);
+
+        let text_batch = draw_batches
+            .iter()
+            .find(|b| matches!(b, DrawBatch::TextGlyphs { .. }));
+        assert!(text_batch.is_some());
+        if let DrawBatch::TextGlyphs { clip, .. } = text_batch.unwrap() {
+            let clip_rect = clip.unwrap();
+            assert_eq!(clip_rect.w, 245.0); // (200 - 2*2) * 1.25
+            assert_eq!(clip_rect.h, 120.0); // (100 - 2*2) * 1.25
+        }
+
+        let selection_quad = quad_instances
+            .iter()
+            .find(|q| q.quad_size == [50.0 * 1.25, 15.0 * 1.25]);
+        assert!(selection_quad.is_some());
+        assert_eq!(selection_quad.unwrap().pos, [12.5, 6.25]);
+
+        let caret_quad = quad_instances
+            .iter()
+            .find(|q| q.quad_size == [2.0 * 1.25, 15.0 * 1.25]);
+        assert!(caret_quad.is_some());
+        assert_eq!(caret_quad.unwrap().pos, [25.0, 6.25]);
     }
 }

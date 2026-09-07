@@ -92,6 +92,7 @@ impl TextBatch {
         let mut text_instances = Vec::new();
         let mut text_ranges = HashMap::new();
         let mut focused_caret = None;
+        let scale_factor = context.scale_factor.max(0.1);
 
         {
             let mut text_ctx = context.text_context.lock().unwrap();
@@ -179,7 +180,7 @@ impl TextBatch {
                         };
 
                         let font_data = glyph_run.run().font();
-                        let font_size = glyph_run.run().font_size();
+                        let font_size = glyph_run.run().font_size() * scale_factor;
                         let font_ptr = font_data.data.as_ref().as_ptr() as usize;
                         let brush = glyph_run.style().brush;
 
@@ -191,8 +192,8 @@ impl TextBatch {
                         let mut scaler_opt = None;
 
                         for glyph in glyph_run.positioned_glyphs() {
-                            let raw_x = text_x + glyph.x;
-                            let raw_y = text_y + glyph.y;
+                            let raw_x = (text_x + glyph.x) * scale_factor;
+                            let raw_y = (text_y + glyph.y) * scale_factor;
                             let subpx = ((raw_x.fract().rem_euclid(1.0) * 4.0).round() as u8) % 4;
 
                             let cache_key = CacheKey {

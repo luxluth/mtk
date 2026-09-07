@@ -74,10 +74,10 @@ fn main() {
     let view_tree = app_view(&state);
     println!("View tree generated in {:?}", tree_start.elapsed());
 
-    println!("Building underlying C nodes...");
+    println!("Building underlying layout nodes...");
     let build_start = Instant::now();
     let element = view_tree.build(&mut ctx);
-    println!("Built 10,000 C nodes in {:?}", build_start.elapsed());
+    println!("Built 10,000 layout nodes in {:?}", build_start.elapsed());
 
     let root_node = view_tree.get_node(&element);
     ctx.root_attach(root_node);
