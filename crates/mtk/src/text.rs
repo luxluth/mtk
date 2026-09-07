@@ -1,11 +1,9 @@
+use crate::TextStyle;
 use crate::colors::Color;
-use crate::sys;
-use crate::{Node, TextStyle};
 use parley::style::{FontStyle, LineHeight, StyleProperty};
 use parley::{
     AlignmentOptions, BreakReason, Cluster, ClusterSide, Cursor, FontContext, LayoutContext,
 };
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
@@ -627,82 +625,24 @@ impl Default for TextComputedOutput {
         }
     }
 }
-
-impl Into<sys::muTextComputedOutput> for TextComputedOutput {
-    fn into(self) -> sys::muTextComputedOutput {
-        sys::muTextComputedOutput {
-            computed_width: self.computed_width,
-            computed_height: self.computed_height,
-            baseline_offset: self.baseline_offset,
+impl From<crate::layout::TextMetrics> for TextComputedOutput {
+    fn from(m: crate::layout::TextMetrics) -> Self {
+        Self {
+            computed_width: m.width,
+            computed_height: m.height,
+            baseline_offset: m.baseline_offset,
         }
     }
 }
 
-type SizingFunc = Box<
-    dyn Fn(
-        &mut crate::Context,
-        Node,
-        &str,
-        Option<&dyn std::any::Any>,
-        f32,
-        f32,
-    ) -> TextComputedOutput,
->;
-
-thread_local! {
-    pub(crate) static SIZING_FUNCS: RefCell<HashMap<usize, SizingFunc>> = RefCell::new(HashMap::new());
-    pub(crate) static CURRENT_CONTEXT: std::cell::Cell<*mut crate::Context> = std::cell::Cell::new(std::ptr::null_mut());
-}
-
-pub(crate) extern "C" fn text_sizing_trampoline(
-    ctx: *mut sys::muContext,
-    node: sys::muId,
-    avail_w: f32,
-    avail_h: f32,
-) -> sys::muTextComputedOutput {
-    let text_ptr = unsafe { sys::muse_text_get(ctx, node) };
-    let (text_str, userdata_ref) = if !text_ptr.is_null() {
-        let t_str = if !unsafe { (*text_ptr).data }.is_null() {
-            unsafe { std::ffi::CStr::from_ptr((*text_ptr).data) }
-                .to_str()
-                .unwrap_or("")
-        } else {
-            ""
-        };
-
-        let u_ref = if !unsafe { (*text_ptr).userdata }.is_null() {
-            let b = unsafe { &*((*text_ptr).userdata as *mut Box<dyn std::any::Any>) };
-            Some(b.as_ref())
-        } else {
-            None
-        };
-
-        (t_str, u_ref)
-    } else {
-        ("", None)
-    };
-
-    SIZING_FUNCS.with(|funcs| {
-        if let Some(func) = funcs.borrow().get(&(ctx as usize)) {
-            let ctx_ptr = CURRENT_CONTEXT.with(|c| c.get());
-            if !ctx_ptr.is_null() {
-                let rust_ctx = unsafe { &mut *ctx_ptr };
-                func(
-                    rust_ctx,
-                    Node(node),
-                    text_str,
-                    userdata_ref,
-                    avail_w,
-                    avail_h,
-                )
-                .into()
-            } else {
-                TextComputedOutput::default().into()
-            }
-        } else {
-            TextComputedOutput::default().into()
+impl From<TextComputedOutput> for crate::layout::TextMetrics {
+    fn from(o: TextComputedOutput) -> Self {
+        Self {
+            width: o.computed_width,
+            height: o.computed_height,
+            baseline_offset: o.baseline_offset,
         }
-    })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

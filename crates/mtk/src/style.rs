@@ -4,9 +4,9 @@ use parley::layout::Alignment;
 use parley::style::{FontStyle, FontWeight, OverflowWrap};
 
 use crate::animation::Curve;
+use crate::clr;
 use crate::colors::Color;
 use crate::effects::{Effects, Filter, Radius, Shadow};
-use crate::{clr, sys};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Size {
@@ -19,41 +19,6 @@ pub enum Size {
     Fill,
     /// The element shrinks to tightly wrap its internal contents or children
     Fit,
-}
-
-impl Into<sys::muSize> for Size {
-    fn into(self) -> sys::muSize {
-        match self {
-            Size::Percent(percent) => sys::muSize {
-                kind: sys::muSizeKind_MU_PERCENT,
-                __bindgen_anon_1: sys::muSize__bindgen_ty_1 { percent },
-            },
-            Size::Fixed(px) => sys::muSize {
-                kind: sys::muSizeKind_MU_FIXED,
-                __bindgen_anon_1: sys::muSize__bindgen_ty_1 { px },
-            },
-            Size::Fill => sys::muSize {
-                kind: sys::muSizeKind_MU_FILL,
-                __bindgen_anon_1: sys::muSize__bindgen_ty_1 { fill: true },
-            },
-            Size::Fit => sys::muSize {
-                kind: sys::muSizeKind_MU_FIT,
-                __bindgen_anon_1: sys::muSize__bindgen_ty_1 { fit: true },
-            },
-        }
-    }
-}
-
-impl From<sys::muSize> for Size {
-    fn from(s: sys::muSize) -> Self {
-        match s.kind {
-            sys::muSizeKind_MU_PERCENT => Size::Percent(unsafe { s.__bindgen_anon_1.percent }),
-            sys::muSizeKind_MU_FIXED => Size::Fixed(unsafe { s.__bindgen_anon_1.px }),
-            sys::muSizeKind_MU_FILL => Size::Fill,
-            sys::muSizeKind_MU_FIT => Size::Fit,
-            _ => Size::Fit,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -114,47 +79,10 @@ impl Edges {
     }
 }
 
-impl Into<sys::muEdges> for Edges {
-    fn into(self) -> sys::muEdges {
-        sys::muEdges {
-            top: self.top,
-            bottom: self.bottom,
-            left: self.left,
-            right: self.right,
-        }
-    }
-}
-
-impl From<sys::muEdges> for Edges {
-    fn from(e: sys::muEdges) -> Self {
-        Self {
-            top: e.top,
-            bottom: e.bottom,
-            left: e.left,
-            right: e.right,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Vector2 {
     pub x: f32,
     pub y: f32,
-}
-
-impl Into<sys::muVector2> for Vector2 {
-    fn into(self) -> sys::muVector2 {
-        sys::muVector2 {
-            x: self.x,
-            y: self.y,
-        }
-    }
-}
-
-impl From<sys::muVector2> for Vector2 {
-    fn from(v: sys::muVector2) -> Self {
-        Self { x: v.x, y: v.y }
-    }
 }
 
 impl From<f32> for Vector2 {
@@ -256,29 +184,6 @@ pub enum FlexDirection {
     ColumnReverse,
 }
 
-impl Into<sys::muFlexDirection> for FlexDirection {
-    fn into(self) -> sys::muFlexDirection {
-        match self {
-            FlexDirection::Row => sys::muFlexDirection_MUSE_FLEX_ROW,
-            FlexDirection::Column => sys::muFlexDirection_MUSE_FLEX_COLUMN,
-            FlexDirection::RowReverse => sys::muFlexDirection_MUSE_FLEX_ROW_REVERSE,
-            FlexDirection::ColumnReverse => sys::muFlexDirection_MUSE_FLEX_COLUMN_REVERSE,
-        }
-    }
-}
-
-impl From<sys::muFlexDirection> for FlexDirection {
-    fn from(f: sys::muFlexDirection) -> Self {
-        match f {
-            sys::muFlexDirection_MUSE_FLEX_ROW => FlexDirection::Row,
-            sys::muFlexDirection_MUSE_FLEX_COLUMN => FlexDirection::Column,
-            sys::muFlexDirection_MUSE_FLEX_ROW_REVERSE => FlexDirection::RowReverse,
-            sys::muFlexDirection_MUSE_FLEX_COLUMN_REVERSE => FlexDirection::ColumnReverse,
-            _ => FlexDirection::Column,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum JustifyContent {
     Start,
@@ -289,62 +194,12 @@ pub enum JustifyContent {
     SpaceEvenly,
 }
 
-impl Into<sys::muJustifyContent> for JustifyContent {
-    fn into(self) -> sys::muJustifyContent {
-        match self {
-            JustifyContent::Start => sys::muJustifyContent_MUSE_JUSTIFY_START,
-            JustifyContent::Center => sys::muJustifyContent_MUSE_JUSTIFY_CENTER,
-            JustifyContent::End => sys::muJustifyContent_MUSE_JUSTIFY_END,
-            JustifyContent::SpaceBetween => sys::muJustifyContent_MUSE_JUSTIFY_SPACE_BETWEEN,
-            JustifyContent::SpaceAround => sys::muJustifyContent_MUSE_JUSTIFY_SPACE_AROUND,
-            JustifyContent::SpaceEvenly => sys::muJustifyContent_MUSE_JUSTIFY_SPACE_EVENLY,
-        }
-    }
-}
-
-impl From<sys::muJustifyContent> for JustifyContent {
-    fn from(j: sys::muJustifyContent) -> Self {
-        match j {
-            sys::muJustifyContent_MUSE_JUSTIFY_START => JustifyContent::Start,
-            sys::muJustifyContent_MUSE_JUSTIFY_CENTER => JustifyContent::Center,
-            sys::muJustifyContent_MUSE_JUSTIFY_END => JustifyContent::End,
-            sys::muJustifyContent_MUSE_JUSTIFY_SPACE_BETWEEN => JustifyContent::SpaceBetween,
-            sys::muJustifyContent_MUSE_JUSTIFY_SPACE_AROUND => JustifyContent::SpaceAround,
-            sys::muJustifyContent_MUSE_JUSTIFY_SPACE_EVENLY => JustifyContent::SpaceEvenly,
-            _ => JustifyContent::Start,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AlignItems {
     Start,
     Center,
     End,
     Stretch,
-}
-
-impl Into<sys::muAlignItems> for AlignItems {
-    fn into(self) -> sys::muAlignItems {
-        match self {
-            AlignItems::Start => sys::muAlignItems_MUSE_ALIGN_START,
-            AlignItems::Center => sys::muAlignItems_MUSE_ALIGN_CENTER,
-            AlignItems::End => sys::muAlignItems_MUSE_ALIGN_END,
-            AlignItems::Stretch => sys::muAlignItems_MUSE_ALIGN_STRETCH,
-        }
-    }
-}
-
-impl From<sys::muAlignItems> for AlignItems {
-    fn from(a: sys::muAlignItems) -> Self {
-        match a {
-            sys::muAlignItems_MUSE_ALIGN_START => AlignItems::Start,
-            sys::muAlignItems_MUSE_ALIGN_CENTER => AlignItems::Center,
-            sys::muAlignItems_MUSE_ALIGN_END => AlignItems::End,
-            sys::muAlignItems_MUSE_ALIGN_STRETCH => AlignItems::Stretch,
-            _ => AlignItems::Start,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -356,31 +211,6 @@ pub enum AlignSelf {
     Stretch,
 }
 
-impl Into<sys::muAlignSelf> for AlignSelf {
-    fn into(self) -> sys::muAlignSelf {
-        match self {
-            AlignSelf::Auto => sys::muAlignSelf_MUSE_ALIGN_SELF_AUTO,
-            AlignSelf::Start => sys::muAlignSelf_MUSE_ALIGN_SELF_START,
-            AlignSelf::Center => sys::muAlignSelf_MUSE_ALIGN_SELF_CENTER,
-            AlignSelf::End => sys::muAlignSelf_MUSE_ALIGN_SELF_END,
-            AlignSelf::Stretch => sys::muAlignSelf_MUSE_ALIGN_SELF_STRETCH,
-        }
-    }
-}
-
-impl From<sys::muAlignSelf> for AlignSelf {
-    fn from(a: sys::muAlignSelf) -> Self {
-        match a {
-            sys::muAlignSelf_MUSE_ALIGN_SELF_AUTO => AlignSelf::Auto,
-            sys::muAlignSelf_MUSE_ALIGN_SELF_START => AlignSelf::Start,
-            sys::muAlignSelf_MUSE_ALIGN_SELF_CENTER => AlignSelf::Center,
-            sys::muAlignSelf_MUSE_ALIGN_SELF_END => AlignSelf::End,
-            sys::muAlignSelf_MUSE_ALIGN_SELF_STRETCH => AlignSelf::Stretch,
-            _ => AlignSelf::Auto,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum FlexWrap {
     #[default]
@@ -389,54 +219,12 @@ pub enum FlexWrap {
     WrapReverse,
 }
 
-impl Into<sys::muFlexWrap> for FlexWrap {
-    fn into(self) -> sys::muFlexWrap {
-        match self {
-            FlexWrap::NoWrap => sys::muFlexWrap_MUSE_FLEX_NO_WRAP,
-            FlexWrap::Wrap => sys::muFlexWrap_MUSE_FLEX_WRAP,
-            FlexWrap::WrapReverse => sys::muFlexWrap_MUSE_FLEX_WRAP_REVERSE,
-        }
-    }
-}
-
-impl From<sys::muFlexWrap> for FlexWrap {
-    fn from(w: sys::muFlexWrap) -> Self {
-        match w {
-            sys::muFlexWrap_MUSE_FLEX_NO_WRAP => FlexWrap::NoWrap,
-            sys::muFlexWrap_MUSE_FLEX_WRAP => FlexWrap::Wrap,
-            sys::muFlexWrap_MUSE_FLEX_WRAP_REVERSE => FlexWrap::WrapReverse,
-            _ => FlexWrap::NoWrap,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Overflow {
     Visible,
     Hidden,
     Scroll,
     Auto,
-}
-
-impl Into<sys::muOverflow> for Overflow {
-    fn into(self) -> sys::muOverflow {
-        match self {
-            Overflow::Visible => sys::muOverflow_MU_OVERFLOW_VISIBLE,
-            Overflow::Hidden => sys::muOverflow_MU_OVERFLOW_HIDDEN,
-            Overflow::Scroll | Overflow::Auto => sys::muOverflow_MU_OVERFLOW_SCROLL,
-        }
-    }
-}
-
-impl From<sys::muOverflow> for Overflow {
-    fn from(o: sys::muOverflow) -> Self {
-        match o {
-            sys::muOverflow_MU_OVERFLOW_VISIBLE => Overflow::Visible,
-            sys::muOverflow_MU_OVERFLOW_HIDDEN => Overflow::Hidden,
-            sys::muOverflow_MU_OVERFLOW_SCROLL => Overflow::Scroll,
-            _ => Overflow::Visible,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -487,58 +275,6 @@ impl AbsoluteBuilder {
 impl PositionStrategy {
     pub fn absolute() -> AbsoluteBuilder {
         AbsoluteBuilder::default()
-    }
-}
-
-impl Into<sys::muPositionStrategy> for PositionStrategy {
-    fn into(self) -> sys::muPositionStrategy {
-        match self {
-            PositionStrategy::Inflow => sys::muPositionStrategy {
-                strategy: sys::muPositionStrategyKind_MUSE_POSITION_STRATEGY_INFLOW,
-                __bindgen_anon_1: sys::muPositionStrategy__bindgen_ty_1 {
-                    absolute: sys::muPositionStrategy__bindgen_ty_1__bindgen_ty_1 {
-                        top: f32::NAN,
-                        left: f32::NAN,
-                        bottom: f32::NAN,
-                        right: f32::NAN,
-                    },
-                },
-            },
-            PositionStrategy::Absolute {
-                top,
-                left,
-                bottom,
-                right,
-            } => sys::muPositionStrategy {
-                strategy: sys::muPositionStrategyKind_MUSE_POSITION_STRATEGY_ABSOLUTE,
-                __bindgen_anon_1: sys::muPositionStrategy__bindgen_ty_1 {
-                    absolute: sys::muPositionStrategy__bindgen_ty_1__bindgen_ty_1 {
-                        top,
-                        left,
-                        bottom,
-                        right,
-                    },
-                },
-            },
-        }
-    }
-}
-
-impl From<sys::muPositionStrategy> for PositionStrategy {
-    fn from(p: sys::muPositionStrategy) -> Self {
-        match p.strategy {
-            sys::muPositionStrategyKind_MUSE_POSITION_STRATEGY_INFLOW => PositionStrategy::Inflow,
-            sys::muPositionStrategyKind_MUSE_POSITION_STRATEGY_ABSOLUTE => {
-                let abs = unsafe { p.__bindgen_anon_1.absolute };
-                PositionStrategy::Absolute {
-                    top: abs.top,
-                    left: abs.left,
-                    bottom: abs.bottom,
-                    right: abs.right,
-                }
-            }
-            _ => PositionStrategy::Inflow,
-        }
     }
 }
 
@@ -605,69 +341,6 @@ impl Default for Constraints {
     }
 }
 
-impl Into<sys::muConstraints> for Constraints {
-    fn into(self) -> sys::muConstraints {
-        sys::muConstraints {
-            dimension: sys::muConstraints__bindgen_ty_1 {
-                width: self.width.into(),
-                height: self.height.into(),
-                min_width: self.min_width,
-                max_width: self.max_width,
-                min_height: self.min_height,
-                max_height: self.max_height,
-                aspect_ratio: self.aspect_ratio,
-            },
-            positioning: self.positioning.into(),
-            flex_direction: self.flex_direction.into(),
-            flex_wrap: self.flex_wrap.into(),
-            justify_content: self.justify_content.into(),
-            align_items: self.align_items.into(),
-            align_self: self.align_self.into(),
-            gap: self.gap,
-            flex_grow: self.flex_grow,
-            flex_shrink: self.flex_shrink,
-            flex_basis: self.flex_basis.into(),
-            padding: self.padding.into(),
-            border: self.border.into(),
-            overflow: self.overflow.into(),
-            scroll: self.scroll.into(),
-            z_index: self.z_index,
-        }
-    }
-}
-
-impl From<sys::muConstraints> for Constraints {
-    fn from(c: sys::muConstraints) -> Self {
-        Self {
-            width: c.dimension.width.into(),
-            height: c.dimension.height.into(),
-            min_width: c.dimension.min_width,
-            max_width: c.dimension.max_width,
-            min_height: c.dimension.min_height,
-            max_height: c.dimension.max_height,
-            aspect_ratio: c.dimension.aspect_ratio,
-
-            positioning: c.positioning.into(),
-            flex_direction: c.flex_direction.into(),
-            flex_wrap: c.flex_wrap.into(),
-            justify_content: c.justify_content.into(),
-            align_items: c.align_items.into(),
-            align_self: c.align_self.into(),
-            gap: c.gap,
-            flex_grow: c.flex_grow,
-            flex_shrink: c.flex_shrink,
-            flex_basis: c.flex_basis.into(),
-
-            padding: c.padding.into(),
-            border: c.border.into(),
-
-            overflow: c.overflow.into(),
-            scroll: c.scroll.into(),
-            z_index: c.z_index,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Computed {
     pub x: f32,
@@ -676,19 +349,6 @@ pub struct Computed {
     pub h: f32,
     pub content_w: f32,
     pub content_h: f32,
-}
-
-impl From<sys::muComputed> for Computed {
-    fn from(c: sys::muComputed) -> Self {
-        Self {
-            x: c.x,
-            y: c.y,
-            w: c.w,
-            h: c.h,
-            content_w: c.content_w,
-            content_h: c.content_h,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -722,28 +382,6 @@ impl Default for Rect {
             y: 0.0,
             w: 0.0,
             h: 0.0,
-        }
-    }
-}
-
-impl Into<sys::muRect> for Rect {
-    fn into(self) -> sys::muRect {
-        sys::muRect {
-            x: self.x,
-            y: self.y,
-            w: self.w,
-            h: self.h,
-        }
-    }
-}
-
-impl From<sys::muRect> for Rect {
-    fn from(r: sys::muRect) -> Self {
-        Self {
-            x: r.x,
-            y: r.y,
-            w: r.w,
-            h: r.h,
         }
     }
 }
@@ -1920,5 +1558,176 @@ pub(crate) mod tests {
         let child_comp = child.get_computed(&ctx).unwrap();
         let container_comp = container.get_computed(&ctx).unwrap();
         assert_eq!(child_comp.y, container_comp.y);
+    }
+
+    #[test]
+    fn test_flex_fill_hover_incremental_layout() {
+        let mut ctx = crate::Context::new();
+
+        let root = ctx.create_node();
+        root.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(400);
+            c.height = Size::Fixed(400);
+            c.flex_direction = FlexDirection::Column;
+        });
+
+        let row = ctx.create_node();
+        row.update_constraints(&mut ctx, |c| {
+            c.width = Size::Percent(1.0);
+            c.height = Size::Fill;
+            c.gap = 10.0;
+            c.flex_direction = FlexDirection::Row;
+        });
+        root.append(&mut ctx, row);
+
+        let mut buttons = Vec::new();
+        for _ in 0..4 {
+            let btn = ctx.create_node();
+            btn.update_constraints(&mut ctx, |c| {
+                c.width = Size::Fill;
+                c.height = Size::Fill;
+            });
+            row.append(&mut ctx, btn);
+            buttons.push(btn);
+        }
+
+        ctx.root_attach(root);
+        ctx.compute_layout(400.0, 400.0);
+
+        // Expected button width: (400 - 3 * 10) / 4 = 370 / 4 = 92.5
+        for &btn in &buttons {
+            let comp = btn.get_computed(&ctx).unwrap();
+            assert!((comp.w - 92.5).abs() < 1e-3, "Initial width was {}", comp.w);
+        }
+
+        // Simulate hover on button 0 by setting it dirty
+        buttons[0].set_dirty(&mut ctx);
+        ctx.compute_layout(400.0, 400.0);
+
+        // Verify that incremental layout maintains exact geometries for all buttons
+        for &btn in &buttons {
+            let comp = btn.get_computed(&ctx).unwrap();
+            assert!(
+                (comp.w - 92.5).abs() < 1e-3,
+                "Button {:?} width corrupted after hover on button 0: {}",
+                btn,
+                comp.w
+            );
+        }
+
+        // Simulate hover on button 2
+        buttons[2].set_dirty(&mut ctx);
+        ctx.compute_layout(400.0, 400.0);
+
+        for &btn in &buttons {
+            let comp = btn.get_computed(&ctx).unwrap();
+            assert!(
+                (comp.w - 92.5).abs() < 1e-3,
+                "Button {:?} width corrupted after hover on button 2: {}",
+                btn,
+                comp.w
+            );
+        }
+    }
+
+    #[test]
+    fn test_scroll_offset_percentage_initial_position() {
+        let mut ctx = crate::Context::new();
+
+        let root = ctx.create_node();
+        root.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(200);
+            c.height = Size::Fixed(200);
+            c.overflow = Overflow::Scroll;
+            c.scroll.y = -1.0001;
+        });
+
+        let child = ctx.create_node();
+        child.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(200);
+            c.height = Size::Fixed(1000);
+        });
+
+        let grandchild = ctx.create_node();
+        grandchild.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(200);
+            c.height = Size::Fixed(50);
+        });
+
+        child.append(&mut ctx, grandchild);
+        root.append(&mut ctx, child);
+        ctx.root_attach(root);
+
+        ctx.compute_layout(200.0, 200.0);
+
+        let root_cons = root.get_constraints(&ctx).unwrap();
+        let child_comp = child.get_computed(&ctx).unwrap();
+        let grandchild_comp = grandchild.get_computed(&ctx).unwrap();
+
+        assert!(
+            (root_cons.scroll.y - 800.0).abs() < 1e-3,
+            "scroll.y was {}",
+            root_cons.scroll.y
+        );
+        assert!(
+            (child_comp.y - (-800.0)).abs() < 1e-3,
+            "child.y was {}",
+            child_comp.y
+        );
+        assert!(
+            (grandchild_comp.y - (-800.0)).abs() < 1e-3,
+            "grandchild.y was {}",
+            grandchild_comp.y
+        );
+    }
+
+    #[test]
+    fn test_scroll_offset_percentage_horizontal_and_partial() {
+        let mut ctx = crate::Context::new();
+
+        let root = ctx.create_node();
+        root.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(200);
+            c.height = Size::Fixed(200);
+            c.overflow = Overflow::Scroll;
+            c.scroll.y = -0.5001;
+            c.scroll.x = -1.0001;
+        });
+
+        let child = ctx.create_node();
+        child.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(600);
+            c.height = Size::Fixed(1000);
+        });
+
+        root.append(&mut ctx, child);
+        ctx.root_attach(root);
+
+        ctx.compute_layout(200.0, 200.0);
+
+        let root_cons = root.get_constraints(&ctx).unwrap();
+        let child_comp = child.get_computed(&ctx).unwrap();
+
+        assert!(
+            (root_cons.scroll.y - 400.0).abs() < 1e-3,
+            "scroll.y was {}",
+            root_cons.scroll.y
+        );
+        assert!(
+            (child_comp.y - (-400.0)).abs() < 1e-3,
+            "child.y was {}",
+            child_comp.y
+        );
+
+        assert!(
+            (root_cons.scroll.x - 400.0).abs() < 1e-3,
+            "scroll.x was {}",
+            root_cons.scroll.x
+        );
+        assert!(
+            (child_comp.x - (-400.0)).abs() < 1e-3,
+            "child.x was {}",
+            child_comp.x
+        );
     }
 }

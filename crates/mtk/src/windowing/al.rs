@@ -900,8 +900,8 @@ where
                         match cmd {
                             crate::debugger::DebugCommand::HighlightNode(maybe_id) => {
                                 self.context.highlight_node = maybe_id.map(|id| {
-                                    Node(crate::sys::muNode {
-                                        numeral: id as usize,
+                                    Node(crate::layout::NodeId {
+                                        index: id as u32,
                                         generation: 0,
                                     })
                                 });

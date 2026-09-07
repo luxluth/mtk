@@ -32,7 +32,7 @@ mtk-rs = { git = "https://github.com/luxluth/mtk.git", branch = "master" }
 
 MTK brings together proven technologies from across the systems and graphics ecosystem:
 
-- **Layout**: [`muse.h`](crates/mtk/src/c/muse.h) — C-based Flexbox engine with incremental layout passes, aspect-ratio resolution, and scroll clamping.
+- **Layout**: Rust Flexbox engine
 - **Graphics**: [WGPU](https://wgpu.rs/) — Cross-platform GPU rendering targeting Vulkan, Metal, and DirectX 12.
 - **Typography**: [Parley](https://github.com/linebender/parley), [Swash](https://github.com/dfrg/swash) — Multi-font styling, dynamic font fallback, OpenType ligatures, and inline span geometry.
 - **Windowing**: [winit](https://github.com/rust-windowing/winit) — Native window creation, DPI scaling, and event handling.

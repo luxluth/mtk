@@ -1,30 +1,12 @@
 use crate::Node;
+use crate::layout::RenderCommand as LayoutRenderCommand;
 use crate::style::{Computed, Rect};
-use crate::sys;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum RenderCommandKind {
-    DrawQuad,
-    Text,
-    ScrollbarV,
-    ScrollbarH,
-}
-
-impl From<sys::muRenderCommandKind> for RenderCommandKind {
-    fn from(kind: sys::muRenderCommandKind) -> Self {
-        match kind {
-            sys::muRenderCommandKind_MU_CMD_DRAWQUAD => RenderCommandKind::DrawQuad,
-            sys::muRenderCommandKind_MU_CMD_TEXT => RenderCommandKind::Text,
-            sys::muRenderCommandKind_MU_CMD_SCROLLBAR_V => RenderCommandKind::ScrollbarV,
-            sys::muRenderCommandKind_MU_CMD_SCROLLBAR_H => RenderCommandKind::ScrollbarH,
-            _ => RenderCommandKind::DrawQuad,
-        }
-    }
-}
+pub use crate::layout::RenderCommandKind;
 
 #[derive(Clone)]
 pub struct RenderCommand<'a> {
-    pub(crate) cmd: &'a sys::muRenderCommand,
+    pub(crate) cmd: &'a LayoutRenderCommand,
 }
 
 impl std::fmt::Debug for RenderCommand<'_> {
@@ -44,15 +26,15 @@ impl<'a> RenderCommand<'a> {
     }
 
     pub fn kind(&self) -> RenderCommandKind {
-        self.cmd.kind.into()
+        self.cmd.kind
     }
 
     pub fn computed(&self) -> Computed {
-        self.cmd.computed.into()
+        self.cmd.computed
     }
 
     pub fn clip(&self) -> Rect {
-        self.cmd.clip.into()
+        self.cmd.clip
     }
 
     pub fn z_index(&self) -> i32 {

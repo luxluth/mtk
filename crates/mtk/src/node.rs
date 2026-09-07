@@ -1,66 +1,51 @@
+use crate::Context;
 use crate::effects::Effects;
+use crate::layout::NodeId;
 use crate::style::{Computed, Constraints};
-use crate::{Context, sys};
-use std::hash::Hash;
 
 /// An opaque, generational handle representing a UI layout element.
 ///
-/// `Node` wraps a C-level layout node (`sys::muNode`). Nodes form the tree hierarchy
+/// `Node` wraps a generational layout `NodeId`. Nodes form the tree hierarchy
 /// and carry styling constraints ([`Constraints`](crate::style::Constraints)),
 /// computed layout geometry ([`Computed`](crate::style::Computed)), text content, and visual effects.
-#[derive(Clone, Copy, Debug)]
-pub struct Node(pub sys::muNode);
-
-impl PartialEq for Node {
-    fn eq(&self, other: &Self) -> bool {
-        unsafe { sys::muse_muid_eq(self.0, other.0) }
-    }
-}
-
-impl Eq for Node {}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub struct Node(pub NodeId);
 
 impl std::ops::Deref for Node {
-    type Target = sys::muNode;
+    type Target = NodeId;
     fn deref(&self) -> &Self::Target {
         &self.0
-    }
-}
-
-impl Hash for Node {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.numeral.hash(state);
-        self.generation.hash(state);
     }
 }
 
 impl Node {
     /// Returns the unique numeric identifier for this layout node.
     pub fn id(&self) -> u64 {
-        self.0.numeral as u64
+        self.0.index as u64
     }
 
-    /// Returns the raw underlying C layout node handle.
-    pub fn raw(&self) -> sys::muNode {
+    /// Returns the raw underlying layout node identifier.
+    pub fn raw(&self) -> NodeId {
         self.0
     }
 
-    /// Constructs a `Node` from a raw C layout node handle.
-    pub fn from_raw(raw: sys::muNode) -> Self {
+    /// Constructs a `Node` from a layout node handle.
+    pub fn from_raw(raw: NodeId) -> Self {
         Node(raw)
     }
 
     pub fn get_invalid() -> Node {
-        Node(unsafe { crate::sys::muse_muid_invalid() })
+        Node(NodeId::INVALID)
     }
 
     /// Prepend a child node to the start of the parent node tree.
     pub fn prepend(&self, ctxt: &mut Context, child: Node) -> bool {
-        unsafe { sys::muse_node_prepend(ctxt.ctx, self.0, child.0) }
+        ctxt.layout.prepend(self.0, child.0)
     }
 
     /// Mark this node as dirty, forcing a layout recomputation for it and its ancestors.
     pub fn set_dirty(&self, ctxt: &mut Context) {
-        unsafe { sys::muse_node_set_dirty(ctxt.ctx, self.0) }
+        ctxt.layout.set_dirty(self.0);
     }
 
     /// Remove a child node from its parent.
@@ -68,72 +53,47 @@ impl Node {
     /// If you want to completely remove the node and its subsequent children,
     /// consider calling [Context::destroy_node] after removing it from the parent layout hierarchy.
     pub fn remove(&self, ctxt: &mut Context) -> bool {
-        unsafe { sys::muse_node_remove(ctxt.ctx, self.0) }
+        ctxt.layout.remove(self.0)
     }
 
     /// Put a node after a designated sibling.
     pub fn put_after(&self, ctxt: &mut Context, sibling: Node) -> bool {
-        unsafe { sys::muse_node_put_after(ctxt.ctx, sibling.0, self.0) }
+        ctxt.layout.put_after(sibling.0, self.0)
     }
 
     /// Put a node before a designated sibling.
     pub fn put_before(&self, ctxt: &mut Context, sibling: Node) -> bool {
-        unsafe { sys::muse_node_put_before(ctxt.ctx, sibling.0, self.0) }
+        ctxt.layout.put_before(sibling.0, self.0)
     }
 
     /// Check if a node is valid.
     pub fn is_valid(&self) -> bool {
-        unsafe { sys::muse_muid_is_valid(self.0) }
+        self.0.is_valid()
     }
 
     /// Returns the parent of this node in the layout hierarchy, if any.
     pub fn parent(&self, ctxt: &Context) -> Option<Node> {
-        let p = unsafe { sys::muse_node_parent(ctxt.ctx, self.0) };
-        if unsafe { sys::muse_muid_is_valid(p) } {
-            Some(Node(p))
-        } else {
-            None
-        }
+        ctxt.layout.parent(self.0).map(Node)
     }
 
     /// Returns true if this node is equal to or a descendant of `ancestor`.
     pub fn is_descendant_of(&self, ctxt: &Context, ancestor: Node) -> bool {
-        if *self == ancestor {
-            return true;
-        }
-        let mut curr = *self;
-        while let Some(p) = curr.parent(ctxt) {
-            if p == ancestor {
-                return true;
-            }
-            curr = p;
-        }
-        false
+        ctxt.layout.is_descendant_of(self.0, ancestor.0)
     }
 
     /// Append a child node to the end of the parent node tree.
     pub fn append(&self, ctxt: &mut Context, child: Node) -> bool {
-        if !self.is_valid() || !child.is_valid() {
-            return false;
-        }
-        unsafe { sys::muse_node_append(ctxt.ctx, self.0, child.0) }
+        ctxt.layout.append(self.0, child.0)
     }
 
     /// Set constraints on a node.
     pub fn set_constraints(&self, ctxt: &mut Context, constraints: Constraints) {
-        unsafe {
-            sys::muse_constraints_set(ctxt.ctx, self.0, constraints.into());
-        }
+        ctxt.layout.set_constraints(self.0, constraints);
     }
 
     /// Get constraints currently set on a node.
     pub fn get_constraints(&self, ctxt: &Context) -> Option<Constraints> {
-        let cons = unsafe { sys::muse_constraints_get(ctxt.ctx, self.0) };
-        if cons.is_null() {
-            None
-        } else {
-            Some(unsafe { *cons }.into())
-        }
+        ctxt.layout.get_constraints(self.0).copied()
     }
 
     /// Fetch, modify, and apply constraints in one go. Useful for making small adjustments.
@@ -173,7 +133,7 @@ impl Node {
     where
         F: FnOnce(&mut Effects),
     {
-        if let Some(effects) = ctxt.effects.get_mut(&self) {
+        if let Some(effects) = ctxt.effects.get_mut(self) {
             update_fn(effects);
             ctxt.dirty_effects.insert(*self);
         } else {
@@ -192,24 +152,12 @@ impl Node {
 
     /// Get the computed bounding box and offset of the node.
     pub fn get_computed(&self, ctxt: &Context) -> Option<Computed> {
-        let comp = unsafe { sys::muse_computed_get(ctxt.ctx, self.0) };
-        if comp.is_null() {
-            None
-        } else {
-            Some(unsafe { *comp }.into())
-        }
+        ctxt.layout.get_computed(self.0).copied()
     }
 
     /// Returns a vector of direct child nodes attached to this parent.
     pub fn children(&self, ctxt: &Context) -> Vec<Node> {
-        let mut list = Vec::new();
-        let mut curr = unsafe { sys::muse_first_child_get(ctxt.ctx, self.0) };
-        let null_val = sys::MUSE_SPARSE_NULL as usize;
-        while curr.numeral != null_val && curr.generation != null_val {
-            list.push(Node(curr));
-            curr = unsafe { sys::muse_next_sibling_get(ctxt.ctx, curr) };
-        }
-        list
+        ctxt.layout.children(self.0).into_iter().map(Node).collect()
     }
 
     /// Computes the total content height of this node.
@@ -223,91 +171,34 @@ impl Node {
 
     /// Transform a node into a text element, making it partake in text sizing.
     pub fn set_text(&self, ctxt: &mut Context, text: &str) {
-        let c_string = std::ffi::CString::new(text).unwrap();
-        let ptr = c_string.as_ptr();
-        ctxt.texts.insert(*self, c_string);
-
-        // Preserve existing userdata if any
         let existing_userdata = ctxt
-            .text_userdatas
-            .get(self)
-            .copied()
-            .unwrap_or(std::ptr::null_mut());
-
-        unsafe {
-            sys::muse_text_set(
-                ctxt.ctx,
-                self.0,
-                sys::muText {
-                    data: ptr as *mut _,
-                    userdata: existing_userdata as *mut std::ffi::c_void,
-                    cached_avail_w: -1.0,
-                    cached_avail_h: -1.0,
-                    cached_output: sys::muTextComputedOutput {
-                        computed_width: 0.0,
-                        computed_height: 0.0,
-                        baseline_offset: 0.0,
-                    },
-                    is_cached: false,
-                },
-            );
-        }
+            .layout
+            .texts
+            .get_mut(self.0)
+            .and_then(|t| t.userdata.take());
+        ctxt.layout
+            .set_text(self.0, text.to_string(), existing_userdata);
     }
 
     /// Set text along with arbitrary userdata.
     pub fn set_text_with_userdata<T: 'static>(&self, ctxt: &mut Context, text: &str, userdata: T) {
-        let c_string = std::ffi::CString::new(text).unwrap();
-        let ptr = c_string.as_ptr();
-        ctxt.texts.insert(*self, c_string);
-
-        let boxed: Box<Box<dyn std::any::Any>> = Box::new(Box::new(userdata));
-        let raw_ptr = Box::into_raw(boxed);
-        ctxt.text_userdatas.insert(*self, raw_ptr);
-
-        unsafe {
-            sys::muse_text_set(
-                ctxt.ctx,
-                self.0,
-                sys::muText {
-                    data: ptr as *mut _,
-                    userdata: raw_ptr as *mut std::ffi::c_void,
-                    cached_avail_w: -1.0,
-                    cached_avail_h: -1.0,
-                    cached_output: sys::muTextComputedOutput {
-                        computed_width: 0.0,
-                        computed_height: 0.0,
-                        baseline_offset: 0.0,
-                    },
-                    is_cached: false,
-                },
-            );
-        }
+        ctxt.layout
+            .set_text(self.0, text.to_string(), Some(Box::new(userdata)));
     }
 
     /// Remove text from a node.
     pub fn unset_text(&self, ctxt: &mut Context) {
-        ctxt.texts.remove(self);
-        if let Some(ptr) = ctxt.text_userdatas.remove(self) {
-            unsafe {
-                let _ = Box::from_raw(ptr);
-            }
-        }
-        unsafe {
-            sys::muse_text_unset(ctxt.ctx, self.0);
-        }
+        ctxt.layout.unset_text(self.0);
     }
 
     /// Get the text associated with this node, if any.
     pub fn get_text<'a>(&self, ctxt: &'a Context) -> Option<&'a str> {
-        ctxt.texts.get(self).and_then(|c_str| c_str.to_str().ok())
+        ctxt.layout.get_text(self.0)
     }
 
     /// Get the userdata associated with this node, if any.
     pub fn get_text_userdata<'a, T: 'static>(&self, ctxt: &'a Context) -> Option<&'a T> {
-        ctxt.text_userdatas.get(self).and_then(|ptr| {
-            let b = unsafe { &**ptr };
-            b.downcast_ref::<T>()
-        })
+        ctxt.layout.get_text_userdata::<T>(self.0)
     }
 
     /// Get a mutable reference to the userdata associated with this node, if any.
@@ -315,10 +206,7 @@ impl Node {
         &self,
         ctxt: &'a mut Context,
     ) -> Option<&'a mut T> {
-        ctxt.text_userdatas.get_mut(self).and_then(|ptr| {
-            let b = unsafe { &mut **ptr };
-            b.downcast_mut::<T>()
-        })
+        ctxt.layout.get_text_userdata_mut::<T>(self.0)
     }
 
     /// Returns the bounding rectangles (in local coordinates `[x, y, w, h]`) of a byte range in the node's text.

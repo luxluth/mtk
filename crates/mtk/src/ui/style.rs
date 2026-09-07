@@ -601,16 +601,16 @@ mod tests {
 
         println!(
             "Node 3 text: {:?}",
-            crate::Node(crate::sys::muId {
-                numeral: 3,
+            crate::Node(crate::layout::NodeId {
+                index: 3,
                 generation: 0
             })
             .get_text(&ctx)
         );
         println!(
             "Node 3 computed: {:?}",
-            crate::Node(crate::sys::muId {
-                numeral: 3,
+            crate::Node(crate::layout::NodeId {
+                index: 3,
                 generation: 0
             })
             .get_computed(&ctx)
@@ -708,5 +708,139 @@ mod tests {
         assert!(el.1.is_active);
         let parent_eff = ctx.effects.get(&parent_node).cloned().unwrap_or_default();
         assert_eq!(parent_eff.scale, 0.8);
+    }
+
+    #[test]
+    fn test_calculator_button_hover_and_layout_stability() {
+        use crate::Color;
+        use crate::style::{AlignItems, JustifyContent, Size};
+        use crate::ui::widgets::text;
+
+        let mut ctx = Context::new();
+
+        let btn0 = text::<_, ()>("7").style(
+            Style::new()
+                .padding(20.0)
+                .width(Size::Fill)
+                .height(Size::Fill)
+                .justify_content(JustifyContent::Center)
+                .align_items(AlignItems::Center)
+                .on_hover(|s| s.bg_color(Color::white)),
+        );
+        let btn1 = text::<_, ()>("8").style(
+            Style::new()
+                .padding(20.0)
+                .width(Size::Fill)
+                .height(Size::Fill)
+                .justify_content(JustifyContent::Center)
+                .align_items(AlignItems::Center)
+                .on_hover(|s| s.bg_color(Color::white)),
+        );
+        let btn2 = text::<_, ()>("9").style(
+            Style::new()
+                .padding(20.0)
+                .width(Size::Fill)
+                .height(Size::Fill)
+                .justify_content(JustifyContent::Center)
+                .align_items(AlignItems::Center)
+                .on_hover(|s| s.bg_color(Color::white)),
+        );
+        let btn3 = text::<_, ()>("/").style(
+            Style::new()
+                .padding(20.0)
+                .width(Size::Fill)
+                .height(Size::Fill)
+                .justify_content(JustifyContent::Center)
+                .align_items(AlignItems::Center)
+                .on_hover(|s| s.bg_color(Color::white)),
+        );
+
+        let row_view = row((btn0, btn1, btn2, btn3)).style(
+            Style::new()
+                .width(Size::Percent(1.0))
+                .height(Size::Fill)
+                .gap(10.0)
+                .flex_direction(FlexDirection::Row),
+        );
+
+        let root_view = column((row_view,)).style(
+            Style::new()
+                .width(Size::Fixed(400))
+                .height(Size::Fixed(400))
+                .flex_direction(FlexDirection::Column),
+        );
+
+        let mut el = View::<()>::build(&root_view, &mut ctx);
+        let root_node = View::<()>::get_node(&root_view, &el);
+        ctx.root_attach(root_node);
+
+        ctx.compute_layout(400.0, 400.0);
+
+        let row_el = &el.0.1.0;
+        let b0_node =
+            View::<()>::get_node(&root_view.inner.children.0.inner.children.0, &row_el.0.1.0);
+        let b1_node =
+            View::<()>::get_node(&root_view.inner.children.0.inner.children.1, &row_el.0.1.1);
+
+        let comp0 = b0_node.get_computed(&ctx).unwrap();
+        let comp1 = b1_node.get_computed(&ctx).unwrap();
+        assert!((comp0.w - 92.5).abs() < 1e-3, "comp0.w = {}", comp0.w);
+        assert!((comp1.w - 92.5).abs() < 1e-3, "comp1.w = {}", comp1.w);
+
+        // Hover over b0
+        let _ = View::<()>::handle_event(
+            &root_view,
+            &mut el,
+            &(),
+            Event::CursorMoved {
+                x: 10.0,
+                y: 10.0,
+                hit_nodes: vec![b0_node],
+            },
+            &mut ctx,
+        );
+
+        ctx.compute_layout(400.0, 400.0);
+
+        let comp0_after = b0_node.get_computed(&ctx).unwrap();
+        let comp1_after = b1_node.get_computed(&ctx).unwrap();
+        assert!(
+            (comp0_after.w - 92.5).abs() < 1e-3,
+            "comp0_after.w = {}",
+            comp0_after.w
+        );
+        assert!(
+            (comp1_after.w - 92.5).abs() < 1e-3,
+            "comp1_after.w = {}",
+            comp1_after.w
+        );
+
+        // Hover over b1
+        let _ = View::<()>::handle_event(
+            &root_view,
+            &mut el,
+            &(),
+            Event::CursorMoved {
+                x: 110.0,
+                y: 10.0,
+                hit_nodes: vec![b1_node],
+            },
+            &mut ctx,
+        );
+
+        ctx.compute_layout(400.0, 400.0);
+
+        let comp0_after2 = b0_node.get_computed(&ctx).unwrap();
+        let comp1_after2 = b1_node.get_computed(&ctx).unwrap();
+        assert!(
+            (comp0_after2.w - 92.5).abs() < 1e-3,
+            "comp0_after2.w = {}",
+            comp0_after2.w
+        );
+        assert!(
+            (comp1_after2.w - 92.5).abs() < 1e-3,
+            "comp1_after2.w = {}",
+            comp1_after2.w
+        );
     }
 }

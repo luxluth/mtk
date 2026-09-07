@@ -6,10 +6,10 @@ pub mod debugger;
 pub mod effects;
 pub mod image;
 pub mod layer;
+pub mod layout;
 pub(crate) mod node;
 pub mod render;
 pub mod style;
-pub mod sys;
 pub mod text;
 pub mod ui;
 pub mod windowing;
@@ -23,6 +23,7 @@ pub use crate::debugger::{LayoutSnapshot, NodeDebugInfo, SourceLocation};
 pub use crate::effects::{Border, Effects, Radius};
 pub use crate::image::{ImageCache, ImageData, ObjectFit, SvgData, SvgStyle};
 pub use crate::layer::*;
+pub use crate::layout::{LayoutEngine, NodeId};
 pub use crate::node::Node;
 pub use crate::render::RenderCommand;
 pub use crate::style::*;
@@ -33,7 +34,6 @@ pub use crate::ui::widgets::canvas::{
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::ffi::CString;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -47,7 +47,7 @@ pub enum ClipboardData {
 /// The central coordinator and state container for the MTK user interface runtime.
 ///
 /// `Context` acts as the primary bridge between high-level Rust [`View`](crate::ui::View) declarations
-/// and MTK's underlying C layout engine (`sys::muContext`). It maintains the live element tree,
+/// and MTK's underlying pure Rust layout engine. It maintains the live element tree,
 /// calculates responsive layouts, handles spatial focus navigation, generates clipped render command streams,
 /// and provides persistent access to system capabilities such as the OS clipboard.
 ///
@@ -77,13 +77,23 @@ pub enum ClipboardData {
 /// ```
 ///
 /// `Context` acts as the primary bridge between high-level Rust [`View`](crate::ui::View) declarations
-/// and the low-level C layout engine ([`muse.h`](crate::sys)), GPU text rasterizers, and event systems.
+/// and the pure Rust layout engine, GPU text rasterizers, and event systems.
 pub struct Context {
-    pub ctx: *mut sys::muContext,
-    pub texts: HashMap<Node, CString>,
+    pub layout: LayoutEngine,
+    pub text_sizing_func: Option<
+        Box<
+            dyn Fn(
+                &mut Context,
+                Node,
+                &str,
+                Option<&dyn std::any::Any>,
+                f32,
+                f32,
+            ) -> TextComputedOutput,
+        >,
+    >,
     pub effects: HashMap<Node, Effects>,
     pub dirty_effects: HashSet<Node>,
-    pub text_userdatas: HashMap<Node, *mut Box<dyn std::any::Any>>,
     pub text_context: SharedTextContext,
     pub focused_node: Option<Node>,
     pub focusable_nodes: Vec<Node>,
@@ -114,14 +124,14 @@ impl Default for Context {
 }
 
 impl Context {
-    /// Creates a new `Context` initialized with a zeroed C layout context, text context,
+    /// Creates a new `Context` initialized with a fresh layout engine, text context,
+    /// and event routing tables.
     pub fn new() -> Self {
         Self {
-            ctx: Box::into_raw(Box::new(unsafe { std::mem::zeroed::<sys::muContext>() })),
-            texts: HashMap::new(),
+            layout: LayoutEngine::new(),
+            text_sizing_func: None,
             effects: HashMap::new(),
             dirty_effects: HashSet::new(),
-            text_userdatas: HashMap::new(),
             text_context: Arc::new(Mutex::new(TextContext::new())),
             focused_node: None,
             focusable_nodes: Vec::new(),
@@ -145,9 +155,14 @@ impl Context {
         }
     }
 
-    /// Returns the raw pointer to the underlying C layout engine context (`sys::muContext`).
-    pub fn raw_ctx(&self) -> *mut sys::muContext {
-        self.ctx
+    /// Returns a reference to the underlying layout engine.
+    pub fn layout(&self) -> &LayoutEngine {
+        &self.layout
+    }
+
+    /// Returns a mutable reference to the underlying layout engine.
+    pub fn layout_mut(&mut self) -> &mut LayoutEngine {
+        &mut self.layout
     }
 
     /// Returns a clone of the shared typography context for font measuring and layout caching.
@@ -424,14 +439,9 @@ impl Context {
         None
     }
 
-    /// Allocates a new layout node in the C engine. The node is independent until appended to a parent.
+    /// Allocates a new layout node in the layout engine. The node is independent until appended to a parent.
     pub fn create_node(&mut self) -> Node {
-        let node = Node(unsafe { sys::muse_node_create(self.ctx) });
-        unsafe {
-            let default_cons: sys::muConstraints = Constraints::default().into();
-            sys::muse_constraints_set(self.ctx, node.0, default_cons);
-        }
-        node
+        Node(self.layout.create_node())
     }
 
     /// Returns a reference-counted handle to the underlying window, if attached.
@@ -446,62 +456,84 @@ impl Context {
         }
     }
 
-    /// Destroys a node and all of its recursive children from the C engine and cleans up associated text/effect state.
+    /// Destroys a node and all of its recursive children from the layout engine and cleans up associated text/effect state.
     pub fn destroy_node(&mut self, node: Node) {
-        self.texts.remove(&node);
         self.effects.remove(&node);
         self.dirty_effects.remove(&node);
         self.canvases.borrow_mut().remove(&node);
-
-        if let Some(ptr) = self.text_userdatas.remove(&node) {
-            unsafe {
-                let _ = Box::from_raw(ptr);
-            }
-        }
-
-        unsafe {
-            sys::muse_node_destroy(self.ctx, node.0);
-        }
+        self.layout.destroy_node(node.0);
     }
 
     /// Attaches `node` as the root node of the layout tree.
     pub fn root_attach(&mut self, node: Node) {
         self.base_layer.state.root_node = Some(node);
-        unsafe {
-            sys::muse_root_attach(self.ctx, node.0);
-        }
+        self.layout.root_attach(node.0);
     }
 
     /// Detaches the current root node from the layout tree without destroying it.
     pub fn root_drop(&mut self) {
         self.base_layer.state.root_node = None;
-        unsafe {
-            sys::muse_root_drop(self.ctx);
-        }
+        self.layout.root_drop();
     }
 
     /// Computes the complete bottom-up and top-down layout pass across the node tree given `viewport_width` and `viewport_height`.
     pub fn compute_layout(&mut self, viewport_width: f32, viewport_height: f32) {
-        crate::text::CURRENT_CONTEXT.with(|c| c.set(self as *mut Context));
-        unsafe {
-            sys::muse_compute_layout(self.ctx, viewport_width, viewport_height);
-        }
+        let mut layout = std::mem::take(&mut self.layout);
+        let mut sizing_func = self.text_sizing_func.take();
+        let text_context = self.text_context.clone();
+
+        layout.compute_layout(
+            viewport_width,
+            viewport_height,
+            |node_id, text, userdata, avail_w, avail_h| {
+                if let Some(func) = sizing_func.as_mut() {
+                    let out = func(self, Node(node_id), text, userdata, avail_w, avail_h);
+                    crate::layout::TextMetrics {
+                        width: out.computed_width,
+                        height: out.computed_height,
+                        baseline_offset: out.baseline_offset,
+                    }
+                } else {
+                    let default_style = TextStyle::default();
+                    let (style, spans) = if let Some(info) =
+                        userdata.and_then(|u| u.downcast_ref::<crate::TextRenderInfo>())
+                    {
+                        (&info.style, &info.spans[..])
+                    } else if let Some(style) = userdata.and_then(|u| u.downcast_ref::<TextStyle>())
+                    {
+                        (style, &[][..])
+                    } else {
+                        (&default_style, &[][..])
+                    };
+                    let out = crate::text::measure_text(
+                        text,
+                        style,
+                        avail_w,
+                        avail_h,
+                        &text_context,
+                        spans,
+                    );
+                    crate::layout::TextMetrics {
+                        width: out.computed_width,
+                        height: out.computed_height,
+                        baseline_offset: out.baseline_offset,
+                    }
+                }
+            },
+        );
+
+        self.layout = layout;
+        self.text_sizing_func = sizing_func;
+
         self.clamp_scroll_offsets(viewport_width, viewport_height);
-        crate::text::CURRENT_CONTEXT.with(|c| c.set(std::ptr::null_mut()));
     }
 
     fn clamp_scroll_offsets(&mut self, viewport_width: f32, viewport_height: f32) {
-        let order = unsafe { &(*self.ctx).layout_order };
-        if order.items.is_null() || order.count == 0 {
+        if self.layout.layout_order.is_empty() {
             return;
         }
 
-        let nodes: Vec<Node> = unsafe {
-            std::slice::from_raw_parts(order.items, order.count)
-                .iter()
-                .map(|&n| Node(n))
-                .collect()
-        };
+        let nodes: Vec<Node> = self.layout.layout_order.iter().map(|&n| Node(n)).collect();
 
         let mut any_clamped = false;
         for node in nodes {
@@ -549,43 +581,76 @@ impl Context {
         }
 
         if any_clamped {
-            unsafe {
-                sys::muse_compute_layout(self.ctx, viewport_width, viewport_height);
-            }
+            let mut layout = std::mem::take(&mut self.layout);
+            let mut sizing_func = self.text_sizing_func.take();
+            let text_context = self.text_context.clone();
+
+            layout.compute_layout(
+                viewport_width,
+                viewport_height,
+                |node_id, text, userdata, avail_w, avail_h| {
+                    if let Some(func) = sizing_func.as_mut() {
+                        let out = func(self, Node(node_id), text, userdata, avail_w, avail_h);
+                        crate::layout::TextMetrics {
+                            width: out.computed_width,
+                            height: out.computed_height,
+                            baseline_offset: out.baseline_offset,
+                        }
+                    } else {
+                        let default_style = TextStyle::default();
+                        let (style, spans) = if let Some(info) =
+                            userdata.and_then(|u| u.downcast_ref::<crate::TextRenderInfo>())
+                        {
+                            (&info.style, &info.spans[..])
+                        } else if let Some(style) =
+                            userdata.and_then(|u| u.downcast_ref::<TextStyle>())
+                        {
+                            (style, &[][..])
+                        } else {
+                            (&default_style, &[][..])
+                        };
+                        let out = crate::text::measure_text(
+                            text,
+                            style,
+                            avail_w,
+                            avail_h,
+                            &text_context,
+                            spans,
+                        );
+                        crate::layout::TextMetrics {
+                            width: out.computed_width,
+                            height: out.computed_height,
+                            baseline_offset: out.baseline_offset,
+                        }
+                    }
+                },
+            );
+
+            self.layout = layout;
+            self.text_sizing_func = sizing_func;
         }
     }
 
     /// Flattens the layout hierarchy into a Z-sorted render command queue clipped to `viewport`.
     pub fn build_render_list(&mut self, viewport: Rect) {
-        unsafe {
-            sys::muse_build_render_list(self.ctx, viewport.into());
-        }
+        self.layout.build_render_list(viewport);
     }
 
     /// Returns an iterator yielding low-level `RenderCommand` items generated by `build_render_list`.
     pub fn render_list(&self) -> impl Iterator<Item = RenderCommand<'_>> {
-        let list = unsafe { &(*self.ctx).render_list };
-        let slice = if list.items.is_null() || list.count == 0 {
-            &[]
-        } else {
-            unsafe { std::slice::from_raw_parts(list.items, list.count) }
-        };
-
-        slice.iter().map(|cmd| RenderCommand { cmd })
+        self.layout
+            .render_list
+            .iter()
+            .map(|cmd| RenderCommand { cmd })
     }
 
-    /// Sets the custom text sizing trampoline callback invoked by the C engine during layout computation.
+    /// Sets the custom text sizing trampoline callback invoked by the layout engine during layout computation.
     pub fn set_text_sizing_func<F>(&mut self, func: F)
     where
         F: Fn(&mut Context, Node, &str, Option<&dyn std::any::Any>, f32, f32) -> TextComputedOutput
             + 'static,
     {
-        crate::text::SIZING_FUNCS.with(|funcs| {
-            funcs.borrow_mut().insert(self.ctx as usize, Box::new(func));
-        });
-        unsafe {
-            (*self.ctx).text_sizing_func = Some(crate::text::text_sizing_trampoline);
-        }
+        self.text_sizing_func = Some(Box::new(func));
     }
 
     /// Registers raw font bytes (.ttf or .otf) into the shared text context.
@@ -600,13 +665,7 @@ impl Context {
 
     /// Performs a fast $O(1)$ scalar hit test at `(x, y)` and returns a list of hit nodes ordered from top-most child to parent.
     pub fn pick(&mut self, x: f32, y: f32) -> Vec<Node> {
-        let list = unsafe { sys::muse_node_pick(self.ctx, x, y) };
-        if list.items.is_null() || list.count == 0 {
-            return Vec::new();
-        }
-
-        let slice = unsafe { std::slice::from_raw_parts(list.items, list.count) };
-        slice.iter().map(|sys_node| Node(*sys_node)).collect()
+        self.layout.pick(x, y).iter().map(|&n| Node(n)).collect()
     }
 
     /// Records the Rust source code location for a layout node.
@@ -621,12 +680,10 @@ impl Context {
 
     /// Returns the currently attached root node of the layout tree, if any.
     pub fn root_node(&self) -> Option<Node> {
-        let r = unsafe { (*self.ctx).root };
-        if unsafe { sys::muse_muid_is_valid(r) } {
-            Some(Node(r))
-        } else {
-            self.base_layer.state.root_node
-        }
+        self.layout
+            .root
+            .map(Node)
+            .or(self.base_layer.state.root_node)
     }
 
     /// Counts total active layout nodes in the layout engine.
@@ -725,25 +782,6 @@ impl Context {
             text,
             children,
         })
-    }
-}
-
-impl Drop for Context {
-    fn drop(&mut self) {
-        crate::text::SIZING_FUNCS.with(|funcs| {
-            funcs.borrow_mut().remove(&(self.ctx as usize));
-        });
-
-        for (_, ptr) in self.text_userdatas.drain() {
-            unsafe {
-                let _ = Box::from_raw(ptr);
-            }
-        }
-
-        unsafe {
-            sys::muse_context_free(self.ctx);
-            let _ = Box::from_raw(self.ctx);
-        }
     }
 }
 
