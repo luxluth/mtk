@@ -408,4 +408,65 @@ mod tests {
 
         View::<()>::teardown(&widget, &mut ctx, &mut element);
     }
+
+    #[test]
+    fn test_virtual_list_1m_layout_and_render_list() {
+        let mut ctx = Context::new();
+        let header = crate::ui::widgets::text::<&str, ()>("Header")
+            .style(Style::new().height(Size::Fixed(50)));
+        let vlist = virtual_list_count(1_000_000, 36.0, |idx| {
+            crate::ui::widgets::text::<String, ()>(format!("Row {idx}"))
+                .style(Style::new().height(Size::Fixed(36)))
+        })
+        .style(
+            Style::new()
+                .width(Size::Percent(1.0))
+                .flex_grow(1.0)
+                .flex_shrink(1.0)
+                .min_height(0.0),
+        );
+
+        let root_view = crate::ui::widgets::column((header, vlist)).style(
+            Style::new()
+                .width(Size::Percent(1.0))
+                .height(Size::Percent(1.0)),
+        );
+
+        let mut element = View::<()>::build(&root_view, &mut ctx);
+        let root_node = View::<()>::get_node(&root_view, &element);
+        ctx.root_attach(root_node);
+
+        let t0 = std::time::Instant::now();
+        ctx.compute_layout(800.0, 600.0);
+        println!("compute_layout took: {:?}", t0.elapsed());
+
+        let t1 = std::time::Instant::now();
+        ctx.build_render_list(crate::style::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 800.0,
+            h: 600.0,
+        });
+        println!("build_render_list took: {:?}", t1.elapsed());
+
+        // Check computed dimensions
+        let comp = root_node.get_computed(&ctx).unwrap();
+        assert_eq!(comp.w, 800.0);
+        assert_eq!(comp.h, 600.0);
+
+        let container_comp = element.0.1.1.container_node.get_computed(&ctx).unwrap();
+        assert_eq!(container_comp.h, 550.0);
+        assert_eq!(container_comp.content_h, 36_000_000.0);
+
+        for _ in 0..5 {
+            root_view.handle_event(&mut element, &(), Event::Tick { dt: 0.016 }, &mut ctx);
+        }
+
+        let (start, end) = element.0.1.1.rendered_range;
+        assert_eq!(start, 0);
+        assert!(end <= 30);
+        assert!(element.0.1.1.visible_elements.len() <= 30);
+
+        View::<()>::teardown(&root_view, &mut ctx, &mut element);
+    }
 }

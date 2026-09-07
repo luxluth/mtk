@@ -1140,7 +1140,9 @@ impl LayoutEngine {
             }
 
             // Update Size::Fit dimensions if any child expanded during remeasurement
-            if cons.height == Size::Fit {
+            if cons.height == Size::Fit
+                && !matches!(cons.overflow, Overflow::Scroll | Overflow::Hidden)
+            {
                 let mut fit_h = 0.0;
                 let mut in_flow_items = 0;
                 let mut max_cross_h = 0.0f32;
@@ -1182,7 +1184,9 @@ impl LayoutEngine {
                 }
             }
 
-            if cons.width == Size::Fit {
+            if cons.width == Size::Fit
+                && !matches!(cons.overflow, Overflow::Scroll | Overflow::Hidden)
+            {
                 let mut fit_w = 0.0;
                 let mut in_flow_items = 0;
                 let mut max_cross_w = 0.0f32;
