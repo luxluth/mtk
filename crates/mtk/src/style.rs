@@ -3,7 +3,7 @@ use parley::style::{FontStyle, FontWeight, OverflowWrap};
 
 pub use mtk_layout::{
     AbsoluteBuilder, AlignItems, AlignSelf, Computed, Constraints, Edges, FlexDirection, FlexWrap,
-    JustifyContent, Overflow, PositionStrategy, Rect, Size, Vector2,
+    IntoPositionStrategy, JustifyContent, Overflow, PositionStrategy, Rect, Size, Vector2,
 };
 
 use crate::animation::Curve;
@@ -523,8 +523,8 @@ impl Style {
         self
     }
 
-    pub fn position(mut self, positioning: PositionStrategy) -> Self {
-        self.base_constraints.positioning = positioning;
+    pub fn position(mut self, positioning: impl IntoPositionStrategy) -> Self {
+        self.base_constraints.positioning = positioning.into_strategy();
         self
     }
 

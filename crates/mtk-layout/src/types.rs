@@ -232,6 +232,22 @@ pub enum PositionStrategy {
     },
 }
 
+impl IntoPositionStrategy for PositionStrategy {
+    fn into_strategy(self) -> PositionStrategy {
+        self
+    }
+}
+
+impl IntoPositionStrategy for AbsoluteBuilder {
+    fn into_strategy(self) -> PositionStrategy {
+        self.build()
+    }
+}
+
+pub trait IntoPositionStrategy {
+    fn into_strategy(self) -> PositionStrategy;
+}
+
 #[derive(Default)]
 pub struct AbsoluteBuilder {
     top: Option<f32>,
