@@ -263,7 +263,9 @@ impl<State, Msg: 'static, Id: Clone + PartialEq + 'static> View<State> for RichT
         ctx: &mut Context,
     ) -> (EventResult, Option<Self::Message>) {
         match event {
-            Event::CursorMoved { x, y, hit_nodes } => {
+            Event::CursorMoved {
+                x, y, hit_nodes, ..
+            } => {
                 let is_hit = hit_nodes.contains(&element.node);
                 if is_hit {
                     if let Some(computed) = element.node.get_computed(ctx) {

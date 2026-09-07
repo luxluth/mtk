@@ -296,6 +296,7 @@ mod tests {
             &mut element,
             &(),
             Event::MouseInput {
+                button: winit::event::MouseButton::Left,
                 pressed: true,
                 hit_nodes: vec![node],
                 x: 0.0,
@@ -312,6 +313,7 @@ mod tests {
             &mut element,
             &(),
             Event::MouseInput {
+                button: winit::event::MouseButton::Left,
                 pressed: false,
                 hit_nodes: vec![node],
                 x: 0.0,
@@ -344,6 +346,7 @@ mod tests {
             &mut element,
             &(),
             Event::MouseInput {
+                button: winit::event::MouseButton::Left,
                 pressed: true,
                 hit_nodes: vec![node],
                 x: 0.0,
@@ -356,6 +359,7 @@ mod tests {
             &mut element,
             &(),
             Event::MouseInput {
+                button: winit::event::MouseButton::Left,
                 pressed: false,
                 hit_nodes: vec![node],
                 x: 0.0,
@@ -388,6 +392,7 @@ mod tests {
             &mut element,
             &(),
             Event::MouseInput {
+                button: winit::event::MouseButton::Left,
                 pressed: true,
                 hit_nodes: vec![node],
                 x: 0.0,
@@ -400,6 +405,7 @@ mod tests {
             &mut element,
             &(),
             Event::MouseInput {
+                button: winit::event::MouseButton::Left,
                 pressed: false,
                 hit_nodes: vec![node],
                 x: 0.0,
@@ -431,6 +437,7 @@ mod tests {
             &mut element,
             &(),
             Event::MouseInput {
+                button: winit::event::MouseButton::Left,
                 pressed: true,
                 hit_nodes: vec![node],
                 x: 100.0,
@@ -467,6 +474,7 @@ mod tests {
             &mut element,
             &(),
             Event::MouseInput {
+                button: winit::event::MouseButton::Left,
                 pressed: true,
                 hit_nodes: vec![scrim],
                 x: 10.0,
@@ -499,6 +507,7 @@ mod tests {
             &mut element,
             &(),
             Event::MouseInput {
+                button: winit::event::MouseButton::Left,
                 pressed: true,
                 hit_nodes: vec![trig],
                 x: 10.0,
@@ -516,6 +525,7 @@ mod tests {
             &mut element,
             &(),
             Event::MouseInput {
+                button: winit::event::MouseButton::Left,
                 pressed: true,
                 hit_nodes: vec![opt1],
                 x: 10.0,
@@ -542,6 +552,7 @@ mod tests {
             &mut r_el,
             &(),
             Event::MouseInput {
+                button: winit::event::MouseButton::Left,
                 pressed: true,
                 hit_nodes: vec![r_node],
                 x: 0.0,
@@ -555,6 +566,7 @@ mod tests {
             &mut r_el,
             &(),
             Event::MouseInput {
+                button: winit::event::MouseButton::Left,
                 pressed: false,
                 hit_nodes: vec![r_node],
                 x: 0.0,
@@ -598,6 +610,7 @@ mod tests {
             &mut ch_el,
             &(),
             Event::MouseInput {
+                button: winit::event::MouseButton::Left,
                 pressed: true,
                 hit_nodes: vec![del_node],
                 x: 0.0,

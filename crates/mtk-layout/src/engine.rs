@@ -693,11 +693,21 @@ impl LayoutEngine {
             let is_root = node == root;
             if let Some(cons) = self.constraints.get(node).cloned() {
                 if let Some(comp) = self.computed.get_mut(node) {
+                    let parent_cons = parent_node.and_then(|p| self.constraints.get(p));
+                    let parent_is_column =
+                        parent_cons.map_or(true, |c| !Self::is_row(c.flex_direction));
+                    let parent_is_row =
+                        parent_cons.map_or(false, |c| Self::is_row(c.flex_direction));
+                    let is_abs = matches!(cons.positioning, PositionStrategy::Absolute { .. });
+
                     // WIDTH
                     comp.w = match cons.width {
                         Size::Fixed(px) => px as f32,
                         Size::Percent(p) => parent_bounds.w * p,
                         Size::Fill if is_root => parent_bounds.w,
+                        Size::Fill if (parent_is_column || is_abs) && parent_bounds.w > 0.0 => {
+                            parent_bounds.w
+                        }
                         _ => 0.0,
                     };
 
@@ -706,6 +716,9 @@ impl LayoutEngine {
                         Size::Fixed(px) => px as f32,
                         Size::Percent(p) => parent_bounds.h * p,
                         Size::Fill if is_root => parent_bounds.h,
+                        Size::Fill if (parent_is_row || is_abs) && parent_bounds.h > 0.0 => {
+                            parent_bounds.h
+                        }
                         _ => 0.0,
                     };
 
@@ -1001,11 +1014,11 @@ impl LayoutEngine {
                 cons.padding.left + cons.border.left + cons.padding.right + cons.border.right;
             let off_h =
                 cons.padding.top + cons.border.top + cons.padding.bottom + cons.border.bottom;
-            let inner_w = (comp.w - off_w).max(0.0);
-            let inner_h = (comp.h - off_h).max(0.0);
+            let mut inner_w = (comp.w - off_w).max(0.0);
+            let mut inner_h = (comp.h - off_h).max(0.0);
 
             let is_row_dir = Self::is_row(cons.flex_direction);
-            let available_main = if is_row_dir { inner_w } else { inner_h };
+            let mut available_main = if is_row_dir { inner_w } else { inner_h };
 
             // A) Pre-resolve cross-axis dimensions & main percentages
             let mut curr = self.first_child(node);
@@ -1124,6 +1137,91 @@ impl LayoutEngine {
                     }
                 }
                 curr = self.next_sibling(child);
+            }
+
+            // Update Size::Fit dimensions if any child expanded during remeasurement
+            if cons.height == Size::Fit {
+                let mut fit_h = 0.0;
+                let mut in_flow_items = 0;
+                let mut max_cross_h = 0.0f32;
+
+                let mut curr_ch = self.first_child(node);
+                while let Some(ch) = curr_ch {
+                    let is_ch_abs = self.constraints.get(ch).is_some_and(|c| {
+                        matches!(c.positioning, PositionStrategy::Absolute { .. })
+                    });
+                    if !is_ch_abs {
+                        if let Some(ch_comp) = self.computed.get(ch) {
+                            in_flow_items += 1;
+                            if is_row_dir {
+                                if ch_comp.h > max_cross_h {
+                                    max_cross_h = ch_comp.h;
+                                }
+                            } else {
+                                fit_h += ch_comp.h;
+                            }
+                        }
+                    }
+                    curr_ch = self.next_sibling(ch);
+                }
+
+                if !is_row_dir && in_flow_items > 1 {
+                    fit_h += cons.gap * (in_flow_items - 1) as f32;
+                }
+                let needed_parent_h = if is_row_dir { max_cross_h } else { fit_h } + off_h;
+
+                if needed_parent_h > comp.h {
+                    if let Some(comp_mut) = self.computed.get_mut(node) {
+                        comp_mut.h = needed_parent_h;
+                        Self::clamp_min_max(comp_mut, &cons);
+                        inner_h = (comp_mut.h - off_h).max(0.0);
+                        if !is_row_dir {
+                            available_main = inner_h;
+                        }
+                    }
+                }
+            }
+
+            if cons.width == Size::Fit {
+                let mut fit_w = 0.0;
+                let mut in_flow_items = 0;
+                let mut max_cross_w = 0.0f32;
+
+                let mut curr_ch = self.first_child(node);
+                while let Some(ch) = curr_ch {
+                    let is_ch_abs = self.constraints.get(ch).is_some_and(|c| {
+                        matches!(c.positioning, PositionStrategy::Absolute { .. })
+                    });
+                    if !is_ch_abs {
+                        if let Some(ch_comp) = self.computed.get(ch) {
+                            in_flow_items += 1;
+                            if is_row_dir {
+                                fit_w += ch_comp.w;
+                            } else {
+                                if ch_comp.w > max_cross_w {
+                                    max_cross_w = ch_comp.w;
+                                }
+                            }
+                        }
+                    }
+                    curr_ch = self.next_sibling(ch);
+                }
+
+                if is_row_dir && in_flow_items > 1 {
+                    fit_w += cons.gap * (in_flow_items - 1) as f32;
+                }
+                let needed_parent_w = if is_row_dir { fit_w } else { max_cross_w } + off_w;
+
+                if needed_parent_w > comp.w {
+                    if let Some(comp_mut) = self.computed.get_mut(node) {
+                        comp_mut.w = needed_parent_w;
+                        Self::clamp_min_max(comp_mut, &cons);
+                        inner_w = (comp_mut.w - off_w).max(0.0);
+                        if is_row_dir {
+                            available_main = inner_w;
+                        }
+                    }
+                }
             }
 
             // B) Collect in-flow flex items into scratch_flex_items
@@ -2268,5 +2366,82 @@ mod tests {
         // Total = 180 + 120 = 300.
         assert!((comp_a.w - 180.0).abs() < 1e-3, "comp_a.w was {}", comp_a.w);
         assert!((comp_b.w - 120.0).abs() < 1e-3, "comp_b.w was {}", comp_b.w);
+    }
+
+    #[test]
+    fn test_wrapped_text_expands_fit_parent_container() {
+        let mut engine = LayoutEngine::new();
+
+        let root = engine.create_node();
+        let mut root_cons = Constraints::default();
+        root_cons.width = Size::Fixed(400);
+        root_cons.height = Size::Fixed(600);
+        root_cons.flex_direction = FlexDirection::Column;
+        engine.set_constraints(root, root_cons);
+
+        let card = engine.create_node();
+        let mut card_cons = Constraints::default();
+        card_cons.width = Size::Fixed(200);
+        card_cons.height = Size::Fit;
+        card_cons.padding = crate::Edges {
+            top: 10.0,
+            bottom: 10.0,
+            left: 10.0,
+            right: 10.0,
+        };
+        engine.set_constraints(card, card_cons);
+
+        let text_child = engine.create_node();
+        let mut text_cons = Constraints::default();
+        text_cons.width = Size::Fill;
+        text_cons.height = Size::Fit;
+        engine.set_constraints(text_child, text_cons);
+        engine.set_text(
+            text_child,
+            "Some long wrapping description text".to_string(),
+            None,
+        );
+
+        let other_child = engine.create_node();
+        let mut other_cons = Constraints::default();
+        other_cons.width = Size::Fill;
+        other_cons.height = Size::Fixed(50);
+        engine.set_constraints(other_child, other_cons);
+
+        engine.append(card, text_child);
+        engine.append(card, other_child);
+        engine.append(root, card);
+        engine.root_attach(root);
+
+        let wrapping_measure = |_node: NodeId,
+                                _text: &str,
+                                _userdata: Option<&dyn std::any::Any>,
+                                avail_w: f32,
+                                _avail_h: f32| {
+            if avail_w < 190.0 && avail_w > 0.0 {
+                TextMetrics {
+                    width: 180.0,
+                    height: 60.0,
+                    baseline_offset: 15.0,
+                }
+            } else {
+                TextMetrics {
+                    width: 250.0,
+                    height: 20.0,
+                    baseline_offset: 15.0,
+                }
+            }
+        };
+
+        engine.compute_layout(400.0, 600.0, wrapping_measure);
+
+        let card_comp = engine.get_computed(card).unwrap();
+        let text_comp = engine.get_computed(text_child).unwrap();
+        let other_comp = engine.get_computed(other_child).unwrap();
+
+        assert_eq!(text_comp.h, 60.0);
+        assert_eq!(card_comp.h, 130.0);
+        assert_eq!(other_comp.y, 70.0);
+        assert!(other_comp.y + other_comp.h <= card_comp.h);
     }
 }

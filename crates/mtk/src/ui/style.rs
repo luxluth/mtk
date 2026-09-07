@@ -663,6 +663,7 @@ mod tests {
             &mut el,
             &(),
             Event::MouseInput {
+                button: winit::event::MouseButton::Left,
                 pressed: true,
                 hit_nodes: vec![child_node, parent_node],
                 x: 0.0,
@@ -682,6 +683,7 @@ mod tests {
             &mut el,
             &(),
             Event::MouseInput {
+                button: winit::event::MouseButton::Left,
                 pressed: false,
                 hit_nodes: vec![child_node, parent_node],
                 x: 0.0,
@@ -696,6 +698,7 @@ mod tests {
             &mut el,
             &(),
             Event::MouseInput {
+                button: winit::event::MouseButton::Left,
                 pressed: true,
                 hit_nodes: vec![parent_node],
                 x: 0.0,
@@ -795,6 +798,8 @@ mod tests {
             Event::CursorMoved {
                 x: 10.0,
                 y: 10.0,
+                delta_x: 0.0,
+                delta_y: 0.0,
                 hit_nodes: vec![b0_node],
             },
             &mut ctx,
@@ -823,6 +828,8 @@ mod tests {
             Event::CursorMoved {
                 x: 110.0,
                 y: 10.0,
+                delta_x: 0.0,
+                delta_y: 0.0,
                 hit_nodes: vec![b1_node],
             },
             &mut ctx,

@@ -2,6 +2,7 @@
 
 pub mod animation;
 pub mod colors;
+pub mod command;
 pub mod debugger;
 pub mod effects;
 pub mod image;
@@ -19,6 +20,7 @@ use ::winit::window::Window;
 pub use mtk_macro::Lens;
 
 pub use crate::colors::Color;
+pub use crate::command::{Command, IntoCommand};
 pub use crate::debugger::{LayoutSnapshot, NodeDebugInfo, SourceLocation};
 pub use crate::effects::{Border, Effects, Radius};
 pub use crate::image::{ImageCache, ImageData, ObjectFit, SvgData, SvgStyle};
@@ -28,9 +30,11 @@ pub use crate::node::Node;
 pub use crate::render::RenderCommand;
 pub use crate::style::*;
 pub use crate::text::*;
+pub use crate::ui::KineticTracker;
 pub use crate::ui::widgets::canvas::{
     CanvasData, CanvasEventDetails, CanvasPainterKind, PaintContext, PixelPainter, WgpuPainter,
 };
+pub use crate::ui::{DragContext, DragPhase, Focusable, FocusableExt, KeyEvent, KeyEventContext};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -108,6 +112,7 @@ pub struct Context {
     pub node_sources: HashMap<Node, SourceLocation>,
     pub highlight_node: Option<Node>,
     pub scale_factor: f32,
+    pub captured_pointer: Option<PointerCapture>,
 
     // Core-level Super Layers and User Intermediate Layers
     pub base_layer: InternalLayer,
@@ -115,6 +120,24 @@ pub struct Context {
     pub overlay_layer: InternalLayer,
     pub modal_layer: InternalLayer,
     pub active_layer: ActiveLayerId,
+}
+
+/// Policy specifying whether the OS cursor should remain free or be locked and hidden during pointer capture.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CursorGrabPolicy {
+    /// Normal cursor remains visible and moves freely across the screen.
+    #[default]
+    Normal,
+    /// Cursor is hidden and locked to its position for infinite relative delta dragging.
+    Locked,
+}
+
+/// Active pointer capture metadata tracking which node owns the pointer stream.
+#[derive(Clone, Debug)]
+pub struct PointerCapture {
+    pub node: Node,
+    pub policy: CursorGrabPolicy,
+    pub initial_pos: (f32, f32),
 }
 
 impl Default for Context {
@@ -146,6 +169,7 @@ impl Context {
             node_sources: HashMap::new(),
             highlight_node: None,
             scale_factor: 1.0,
+            captured_pointer: None,
 
             base_layer: InternalLayer::new(true),
             intermediate_layers: Vec::new(),
@@ -153,6 +177,53 @@ impl Context {
             modal_layer: InternalLayer::new(false),
             active_layer: ActiveLayerId::Base,
         }
+    }
+
+    /// Captures all pointer events to `node`. Subsequent mouse move and release events
+    /// are dispatched to `node` regardless of cursor position.
+    pub fn capture_pointer(&mut self, node: Node, policy: CursorGrabPolicy) {
+        if policy == CursorGrabPolicy::Locked {
+            if let Some(window) = &self.window {
+                let _ = window
+                    .set_cursor_grab(winit::window::CursorGrabMode::Locked)
+                    .or_else(|_| window.set_cursor_grab(winit::window::CursorGrabMode::Confined));
+                window.set_cursor_visible(false);
+            }
+        }
+        self.captured_pointer = Some(PointerCapture {
+            node,
+            policy,
+            initial_pos: (0.0, 0.0),
+        });
+    }
+
+    /// Releases any active pointer capture and restores the normal OS cursor state.
+    pub fn release_pointer(&mut self) {
+        if let Some(capture) = self.captured_pointer.take() {
+            if capture.policy == CursorGrabPolicy::Locked {
+                if let Some(window) = &self.window {
+                    let _ = window.set_cursor_grab(winit::window::CursorGrabMode::None);
+                    window.set_cursor_visible(true);
+                }
+            }
+        }
+    }
+
+    /// Returns whether `node` currently holds pointer capture.
+    pub fn is_pointer_captured(&self, node: Node) -> bool {
+        self.captured_pointer
+            .as_ref()
+            .is_some_and(|c| c.node == node)
+    }
+
+    /// Returns whether any node currently holds pointer capture.
+    pub fn has_pointer_capture(&self) -> bool {
+        self.captured_pointer.is_some()
+    }
+
+    /// Returns the currently captured node, if any.
+    pub fn captured_node(&self) -> Option<Node> {
+        self.captured_pointer.as_ref().map(|c| c.node)
     }
 
     /// Returns a reference to the underlying layout engine.

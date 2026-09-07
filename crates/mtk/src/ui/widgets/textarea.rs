@@ -201,6 +201,7 @@ impl View<String> for TextArea {
                 x,
                 y,
                 hit_nodes,
+                ..
             } => {
                 let is_hit = hit_nodes.iter().any(|n| *n == element.node);
                 let is_focused = Some(element.node.clone()) == ctx.focused_node();

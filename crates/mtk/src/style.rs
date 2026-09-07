@@ -419,6 +419,11 @@ impl Style {
         self
     }
 
+    pub fn border_color(mut self, color: Color) -> Self {
+        self.base_effects.border.color = color;
+        self
+    }
+
     pub fn flex_wrap(mut self, wrap: FlexWrap) -> Self {
         self.base_constraints.flex_wrap = wrap;
         self

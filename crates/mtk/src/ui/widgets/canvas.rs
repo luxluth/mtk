@@ -480,7 +480,9 @@ impl<State: 'static, Msg: 'static> View<State> for Canvas<State, Msg> {
     ) -> (EventResult, Option<Self::Message>) {
         if let Some(on_event) = &self.on_event_fn {
             let (cursor_x, cursor_y, is_hit) = match &event {
-                Event::CursorMoved { x, y, hit_nodes } => (*x, *y, hit_nodes.contains(element)),
+                Event::CursorMoved {
+                    x, y, hit_nodes, ..
+                } => (*x, *y, hit_nodes.contains(element)),
                 Event::MouseInput {
                     x, y, hit_nodes, ..
                 } => (*x, *y, hit_nodes.contains(element)),

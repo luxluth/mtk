@@ -10,6 +10,7 @@ use winit::{
 
 use crate::{
     Context, Node, TextStyle,
+    command::{Command, IntoCommand},
     ui::{Event, View, event::EventResult},
     windowing::renderer::Renderer,
 };
@@ -19,10 +20,18 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use winit::event_loop::EventLoopProxy;
 
 /// A thread-safe, cloneable handle to dispatch messages to the UI event loop from background threads.
-#[derive(Clone)]
 pub struct WindowHandle<Msg: 'static + Send> {
     tx: Sender<Msg>,
     proxy: Arc<Mutex<Option<EventLoopProxy<()>>>>,
+}
+
+impl<Msg: 'static + Send> Clone for WindowHandle<Msg> {
+    fn clone(&self) -> Self {
+        Self {
+            tx: self.tx.clone(),
+            proxy: self.proxy.clone(),
+        }
+    }
 }
 
 impl<Msg: 'static + Send> WindowHandle<Msg> {
@@ -53,14 +62,14 @@ where
     state: S,
 
     app_view_fn: Option<Box<dyn FnMut(&S) -> V>>,
-    update_fn: Option<Box<dyn FnMut(&mut S, V::Message)>>,
+    update_fn: Option<Box<dyn FnMut(&mut S, V::Message) -> Command<V::Message>>>,
 
     view: Option<V>,
     element: Option<V::Element>,
     attr: WindowAttributes,
     cursor_pos: (f32, f32),
     last_frame_time: Instant,
-    scroll_velocities: HashMap<Node, (f32, f32)>,
+    scroll_trackers: HashMap<Node, crate::ui::KineticTracker>,
     last_touch_velocity: HashMap<Node, (f32, f32)>,
     drag_scroll_node: Option<(Node, f32, f32)>,
     drag_scroll_x_node: Option<(Node, f32, f32)>,
@@ -95,11 +104,11 @@ impl From<(u32, u32)> for WindowDimension {
     }
 }
 
-impl Into<winit::dpi::Size> for WindowDimension {
-    fn into(self) -> winit::dpi::Size {
+impl From<WindowDimension> for winit::dpi::Size {
+    fn from(value: WindowDimension) -> Self {
         winit::dpi::Size::Physical(PhysicalSize {
-            width: self.width,
-            height: self.height,
+            width: value.width,
+            height: value.height,
         })
     }
 }
@@ -190,9 +199,10 @@ where
     V: View<S>,
     V::Message: 'static + Send,
 {
-    pub fn with<U, F>(state: S, update_fn: U, mut view_fn: F) -> Self
+    pub fn with<U, F, C>(state: S, mut update_fn: U, mut view_fn: F) -> Self
     where
-        U: FnMut(&mut S, V::Message) + 'static,
+        U: FnMut(&mut S, V::Message) -> C + 'static,
+        C: IntoCommand<V::Message>,
         F: FnMut(&S) -> V + 'static,
     {
         let (msg_tx, msg_rx) = channel();
@@ -231,13 +241,13 @@ where
             context: ctx,
             state,
             app_view_fn: Some(Box::new(view_fn)),
-            update_fn: Some(Box::new(update_fn)),
+            update_fn: Some(Box::new(move |s, msg| update_fn(s, msg).into_command())),
             view: Some(view),
             attr: WindowAttributes::default(),
             element: Some(element),
             cursor_pos: (0.0, 0.0),
             last_frame_time: Instant::now(),
-            scroll_velocities: HashMap::new(),
+            scroll_trackers: HashMap::new(),
             last_touch_velocity: HashMap::new(),
             drag_scroll_node: None,
             drag_scroll_x_node: None,
@@ -252,6 +262,37 @@ where
         WindowHandle {
             tx: self.msg_tx.clone(),
             proxy: self.event_proxy.clone(),
+        }
+    }
+
+    /// Executes a [`Command`] synchronously and/or asynchronously against this window.
+    pub fn execute_command(&mut self, cmd: Command<V::Message>) {
+        Self::execute_command_inner(&mut self.context, &self.msg_tx, &self.event_proxy, cmd);
+    }
+
+    fn execute_command_inner(
+        context: &mut Context,
+        msg_tx: &Sender<V::Message>,
+        event_proxy: &Arc<Mutex<Option<EventLoopProxy<()>>>>,
+        cmd: Command<V::Message>,
+    ) {
+        if cmd.is_empty() {
+            return;
+        }
+        let (sync_actions, async_actions) = cmd.into_actions();
+        for action in sync_actions {
+            if let Some(msg) = action(context) {
+                let _ = msg_tx.send(msg);
+            }
+        }
+        if !async_actions.is_empty() {
+            let handle = WindowHandle {
+                tx: msg_tx.clone(),
+                proxy: event_proxy.clone(),
+            };
+            for action in async_actions {
+                action(handle.clone());
+            }
         }
     }
 
@@ -307,18 +348,14 @@ where
             // A) Tick kinetic velocity simulation for physical momentum scrolling
             if let Event::Tick { dt } = mtk_event {
                 let mut is_animating = false;
-                let dt_clamped = dt.clamp(0.001, 0.05);
-                let friction = 4.8;
-                let decay = (-friction * dt_clamped).exp();
-
-                let nodes: Vec<Node> = self.scroll_velocities.keys().copied().collect();
+                let nodes: Vec<Node> = self.scroll_trackers.keys().copied().collect();
                 for node in nodes {
                     if self.drag_scroll_node.map(|(n, ..)| n) == Some(node)
                         || self.drag_scroll_x_node.map(|(n, ..)| n) == Some(node)
                     {
                         continue;
                     }
-                    if let Some((mut vx, mut vy)) = self.scroll_velocities.get(&node).copied() {
+                    if let Some(tracker) = self.scroll_trackers.get_mut(&node) {
                         let constraints = node.get_constraints(&self.context).unwrap_or_default();
                         let (computed_w, computed_h, content_w, content_h) =
                             if let Some(computed) = node.get_computed(&self.context) {
@@ -334,51 +371,35 @@ where
                         let max_scroll_y = (content_h - computed_h).max(0.0);
                         let max_scroll_x = (content_w - computed_w).max(0.0);
 
-                        let mut next_scroll_y = constraints.scroll.y;
-                        let mut next_scroll_x = constraints.scroll.x;
+                        if let Some((dx, dy)) = tracker.update(dt) {
+                            let next_scroll_y =
+                                (constraints.scroll.y + dy).clamp(0.0, max_scroll_y);
+                            let next_scroll_x =
+                                (constraints.scroll.x + dx).clamp(0.0, max_scroll_x);
 
-                        if vy.abs() > 1.0
-                            && (max_scroll_y > 0.0 || constraints.scroll.y > max_scroll_y)
-                        {
-                            next_scroll_y =
-                                (constraints.scroll.y + vy * dt_clamped).clamp(0.0, max_scroll_y);
                             if next_scroll_y == 0.0 || next_scroll_y == max_scroll_y {
-                                vy = 0.0;
-                            } else {
-                                vy *= decay;
+                                tracker.set_velocity(tracker.velocity().0, 0.0);
                             }
-                        } else {
-                            vy = 0.0;
-                        }
-
-                        if vx.abs() > 1.0
-                            && (max_scroll_x > 0.0 || constraints.scroll.x > max_scroll_x)
-                        {
-                            next_scroll_x =
-                                (constraints.scroll.x + vx * dt_clamped).clamp(0.0, max_scroll_x);
                             if next_scroll_x == 0.0 || next_scroll_x == max_scroll_x {
-                                vx = 0.0;
+                                tracker.set_velocity(0.0, tracker.velocity().1);
+                            }
+
+                            if (next_scroll_y - constraints.scroll.y).abs() > 0.001
+                                || (next_scroll_x - constraints.scroll.x).abs() > 0.001
+                            {
+                                node.update_constraints(&mut self.context, |c| {
+                                    c.scroll.y = next_scroll_y;
+                                    c.scroll.x = next_scroll_x;
+                                });
+                            }
+
+                            if tracker.is_active() {
+                                is_animating = true;
                             } else {
-                                vx *= decay;
+                                self.scroll_trackers.remove(&node);
                             }
                         } else {
-                            vx = 0.0;
-                        }
-
-                        if (next_scroll_y - constraints.scroll.y).abs() > 0.001
-                            || (next_scroll_x - constraints.scroll.x).abs() > 0.001
-                        {
-                            node.update_constraints(&mut self.context, |c| {
-                                c.scroll.y = next_scroll_y;
-                                c.scroll.x = next_scroll_x;
-                            });
-                        }
-
-                        if vy.abs() > 1.0 || vx.abs() > 1.0 {
-                            is_animating = true;
-                            self.scroll_velocities.insert(node, (vx, vy));
-                        } else {
-                            self.scroll_velocities.remove(&node);
+                            self.scroll_trackers.remove(&node);
                         }
                     }
                 }
@@ -396,6 +417,7 @@ where
                 x,
                 y,
                 ref hit_nodes,
+                ..
             } = mtk_event
             {
                 if pressed {
@@ -454,7 +476,7 @@ where
                             node.update_constraints(&mut self.context, |c| {
                                 c.scroll.y = new_scroll_y;
                             });
-                            self.scroll_velocities.remove(&node);
+                            self.scroll_trackers.remove(&node);
                             if let Some(window) = &self.window {
                                 window.request_redraw();
                             }
@@ -476,7 +498,7 @@ where
                             node.update_constraints(&mut self.context, |c| {
                                 c.scroll.x = new_scroll_x;
                             });
-                            self.scroll_velocities.remove(&node);
+                            self.scroll_trackers.remove(&node);
                             if let Some(window) = &self.window {
                                 window.request_redraw();
                             }
@@ -539,11 +561,11 @@ where
                                     use winit::event::TouchPhase;
                                     match phase {
                                         TouchPhase::Started => {
-                                            self.scroll_velocities.remove(node);
+                                            self.scroll_trackers.remove(node);
                                             self.last_touch_velocity.remove(node);
                                         }
                                         TouchPhase::Moved => {
-                                            self.scroll_velocities.remove(node);
+                                            self.scroll_trackers.remove(node);
                                             let mut new_scroll_y = constraints.scroll.y;
                                             let mut new_scroll_x = constraints.scroll.x;
 
@@ -581,21 +603,24 @@ where
                                                 self.last_touch_velocity.remove(node)
                                             {
                                                 if vx.abs() > 10.0 || vy.abs() > 10.0 {
-                                                    self.scroll_velocities.insert(*node, (vx, vy));
+                                                    let mut tracker =
+                                                        crate::ui::KineticTracker::new(4.8);
+                                                    tracker.set_velocity(vx, vy);
+                                                    self.scroll_trackers.insert(*node, tracker);
                                                     scrolled = true;
                                                 }
                                             }
                                         }
                                         TouchPhase::Cancelled => {
-                                            self.scroll_velocities.remove(node);
+                                            self.scroll_trackers.remove(node);
                                             self.last_touch_velocity.remove(node);
                                         }
                                     }
                                 } else {
                                     let (cur_vx, cur_vy) = self
-                                        .scroll_velocities
+                                        .scroll_trackers
                                         .get(node)
-                                        .copied()
+                                        .map(|t| t.velocity())
                                         .unwrap_or((0.0, 0.0));
 
                                     let mut new_vy = cur_vy;
@@ -642,7 +667,12 @@ where
                                     }
 
                                     if scrolled {
-                                        self.scroll_velocities.insert(*node, (new_vx, new_vy));
+                                        let mut tracker = self
+                                            .scroll_trackers
+                                            .remove(node)
+                                            .unwrap_or_else(|| crate::ui::KineticTracker::new(4.8));
+                                        tracker.set_velocity(new_vx, new_vy);
+                                        self.scroll_trackers.insert(*node, tracker);
                                     }
                                 }
 
@@ -662,7 +692,25 @@ where
 
             // Pass 2 - we check if a logical message bubbled up to the root
             if let Some(msg) = optional_msg {
-                update_fn(&mut self.state, msg);
+                let cmd = update_fn(&mut self.state, msg);
+                Self::execute_command_inner(
+                    &mut self.context,
+                    &self.msg_tx,
+                    &self.event_proxy,
+                    cmd,
+                );
+                state_changed = true;
+            }
+
+            // Drain any pending or follow-up messages
+            while let Ok(msg) = self.msg_rx.try_recv() {
+                let cmd = update_fn(&mut self.state, msg);
+                Self::execute_command_inner(
+                    &mut self.context,
+                    &self.msg_tx,
+                    &self.event_proxy,
+                    cmd,
+                );
                 state_changed = true;
             }
 
@@ -690,7 +738,13 @@ where
         ) {
             let mut state_changed = false;
             while let Ok(msg) = self.msg_rx.try_recv() {
-                update_fn(&mut self.state, msg);
+                let cmd = update_fn(&mut self.state, msg);
+                Self::execute_command_inner(
+                    &mut self.context,
+                    &self.msg_tx,
+                    &self.event_proxy,
+                    cmd,
+                );
                 state_changed = true;
             }
 
@@ -778,6 +832,31 @@ where
         }
     }
 
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: winit::event::DeviceId,
+        event: winit::event::DeviceEvent,
+    ) {
+        if let winit::event::DeviceEvent::MouseMotion { delta } = event {
+            if let Some(cap) = &self.context.captured_pointer {
+                if cap.policy == crate::CursorGrabPolicy::Locked {
+                    let dx = delta.0 as f32;
+                    let dy = delta.1 as f32;
+                    let hit_nodes = vec![cap.node];
+                    let mtk_event = Event::CursorMoved {
+                        x: self.cursor_pos.0,
+                        y: self.cursor_pos.1,
+                        delta_x: dx,
+                        delta_y: dy,
+                        hit_nodes,
+                    };
+                    self.dispatch_and_rebuild(mtk_event);
+                }
+            }
+        }
+    }
+
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         let window = self.window.as_ref().unwrap().clone();
         if id != window.id() {
@@ -802,7 +881,7 @@ where
                 is_synthetic,
             } => {
                 let mtk_event = Event::KeyboardInput {
-                    event,
+                    event: event.into(),
                     is_synthetic,
                 };
                 self.dispatch_and_rebuild(mtk_event);
@@ -846,8 +925,25 @@ where
                 let scale_factor = window.scale_factor();
                 let x = (position.x / scale_factor) as f32;
                 let y = (position.y / scale_factor) as f32;
+                let delta_x = x - self.cursor_pos.0;
+                let delta_y = y - self.cursor_pos.1;
                 self.cursor_pos = (x, y);
-                let hit_nodes = self.context.pick(x, y);
+
+                if self
+                    .context
+                    .captured_pointer
+                    .as_ref()
+                    .map_or(false, |c| c.policy == crate::CursorGrabPolicy::Locked)
+                {
+                    return;
+                }
+
+                let mut hit_nodes = self.context.pick(x, y).to_vec();
+                if let Some(cap) = &self.context.captured_pointer {
+                    if !hit_nodes.contains(&cap.node) {
+                        hit_nodes.insert(0, cap.node);
+                    }
+                }
 
                 let hit_top = hit_nodes.first().copied();
                 if self.hovered_node != hit_top {
@@ -859,13 +955,28 @@ where
                     }
                 }
 
-                let mtk_event = Event::CursorMoved { x, y, hit_nodes };
+                let mtk_event = Event::CursorMoved {
+                    x,
+                    y,
+                    delta_x,
+                    delta_y,
+                    hit_nodes,
+                };
                 self.dispatch_and_rebuild(mtk_event);
             }
-            WindowEvent::MouseInput { state, .. } => {
+            WindowEvent::MouseInput { state, button, .. } => {
                 let pressed = state == winit::event::ElementState::Pressed;
-                let hit_nodes = self.context.pick(self.cursor_pos.0, self.cursor_pos.1);
+                let mut hit_nodes = self
+                    .context
+                    .pick(self.cursor_pos.0, self.cursor_pos.1)
+                    .to_vec();
+                if let Some(cap) = &self.context.captured_pointer {
+                    if !hit_nodes.contains(&cap.node) {
+                        hit_nodes.insert(0, cap.node);
+                    }
+                }
                 let mtk_event = Event::MouseInput {
+                    button,
                     pressed,
                     x: self.cursor_pos.0,
                     y: self.cursor_pos.1,
@@ -1007,5 +1118,71 @@ mod tests {
         assert_eq!(window.state, 0);
         window.process_pending_messages();
         assert_eq!(window.state, 42);
+    }
+
+    #[test]
+    fn test_window_command_sync_perform() {
+        #[derive(Debug, PartialEq, Eq)]
+        enum TestMsg {
+            TriggerSync,
+            FollowUp(i32),
+        }
+
+        let mut window = Window::with(
+            0,
+            |state: &mut i32, msg: TestMsg| match msg {
+                TestMsg::TriggerSync => Command::perform(|ctx| {
+                    ctx.clipboard_copy(crate::ClipboardData::Text("test_val".into()));
+                    Some(TestMsg::FollowUp(100))
+                }),
+                TestMsg::FollowUp(val) => {
+                    *state += val;
+                    Command::none()
+                }
+            },
+            |state: &i32| text(format!("{state}")),
+        );
+
+        let handle = window.handle();
+        handle.send(TestMsg::TriggerSync).unwrap();
+
+        window.process_pending_messages();
+        assert_eq!(window.state, 100);
+        assert_eq!(
+            window.context.clipboard_get(),
+            Some(crate::ClipboardData::Text("test_val".into()))
+        );
+    }
+
+    #[test]
+    fn test_window_command_async_perform() {
+        let mut window = Window::with(
+            0,
+            |state: &mut i32, msg: i32| {
+                if msg == 1 {
+                    Some(Command::perform_async(
+                        async {
+                            std::thread::sleep(std::time::Duration::from_millis(10));
+                            777
+                        },
+                        |val| val,
+                    ))
+                } else {
+                    *state = msg;
+                    None
+                }
+            },
+            |state: &i32| text(format!("{state}")),
+        );
+
+        let handle = window.handle();
+        handle.send(1).unwrap();
+        window.process_pending_messages();
+        assert_eq!(window.state, 0);
+
+        // Wait for background worker thread to finish
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        window.process_pending_messages();
+        assert_eq!(window.state, 777);
     }
 }

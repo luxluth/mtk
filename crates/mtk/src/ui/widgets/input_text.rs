@@ -253,6 +253,7 @@ impl View<String> for InputText {
                 x,
                 y,
                 hit_nodes,
+                ..
             } => {
                 let is_hit = hit_nodes.iter().any(|n| *n == element.node);
                 let is_focused = Some(element.node.clone()) == ctx.focused_node();
@@ -345,7 +346,7 @@ impl View<String> for InputText {
                     element.is_dragging = false;
                 }
             }
-            Event::CursorMoved { x, y, hit_nodes: _ } => {
+            Event::CursorMoved { x, y, .. } => {
                 if element.is_dragging {
                     if let Some(computed) = element.node.get_computed(ctx) {
                         let constraints = element.node.get_constraints(ctx).unwrap_or_default();
@@ -675,7 +676,7 @@ mod tests {
         let state = String::new();
 
         // Focus node
-        ctx.request_focus(element.node.clone());
+        ctx.request_focus(element.node);
 
         // Simulate committing multiline text
         let paste_event = Event::Ime(winit::event::Ime::Commit("Hello\nWorld\r\nFoo".to_string()));
@@ -695,7 +696,7 @@ mod tests {
         let mut element = widget.build(&mut ctx);
 
         // Focus node and simulate having typed text
-        ctx.request_focus(element.node.clone());
+        ctx.request_focus(element.node);
         element.editor.set_text("buy milk");
         assert_eq!(element.editor.text(), "buy milk");
 

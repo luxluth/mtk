@@ -239,6 +239,41 @@ pub trait ViewEventExt<State>: View<State> + Sized {
     fn on_event<F>(self, event: EventKind, handler: F) -> EventHandler<State, Self, F>
     where
         F: Fn(&State) -> Option<Self::Message> + 'static;
+
+    /// Attaches an automatic pointer-captured drag gesture to this view.
+    fn on_drag<F>(self, handler: F) -> DragHandler<State, Self, F>
+    where
+        F: Fn(&State, DragContext) -> Option<Self::Message> + 'static;
+
+    /// Attaches a relative-motion drag gesture (cursor locked & hidden) for continuous scrubbing.
+    fn on_drag_relative<F>(self, handler: F) -> DragHandler<State, Self, F>
+    where
+        F: Fn(&State, DragContext) -> Option<Self::Message> + 'static;
+
+    /// Attaches a key-down listener fired when this view has keyboard focus.
+    fn on_key_down<F>(self, handler: F) -> KeyHandler<State, Self, F>
+    where
+        F: Fn(&State, KeyEventContext) -> Option<Self::Message> + 'static;
+
+    /// Attaches a key-up listener fired when this view has keyboard focus.
+    fn on_key_up<F>(self, handler: F) -> KeyHandler<State, Self, F>
+    where
+        F: Fn(&State, KeyEventContext) -> Option<Self::Message> + 'static;
+
+    /// Attaches a continuous key-press listener (initial press and auto-repeats) when focused.
+    fn on_key_press<F>(self, handler: F) -> KeyHandler<State, Self, F>
+    where
+        F: Fn(&State, KeyEventContext) -> Option<Self::Message> + 'static;
+
+    /// Attaches a global window-level shortcut listener regardless of focus.
+    fn on_global_key_down<F>(self, handler: F) -> KeyHandler<State, Self, F>
+    where
+        F: Fn(&State, KeyEventContext) -> Option<Self::Message> + 'static;
+
+    /// Attaches a frame tick listener that runs on every render frame tick with elapsed delta time `dt` (seconds).
+    fn on_tick<F>(self, handler: F) -> TickHandler<State, Self, F>
+    where
+        F: Fn(&State, f32) -> Option<Self::Message> + 'static;
 }
 
 impl<State, V: View<State>> ViewEventExt<State> for V {
@@ -253,11 +288,543 @@ impl<State, V: View<State>> ViewEventExt<State> for V {
             _marker: std::marker::PhantomData,
         }
     }
+
+    fn on_drag<F>(self, handler: F) -> DragHandler<State, Self, F>
+    where
+        F: Fn(&State, DragContext) -> Option<Self::Message> + 'static,
+    {
+        DragHandler {
+            inner: self,
+            policy: crate::CursorGrabPolicy::Normal,
+            handler: Rc::new(handler),
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    fn on_drag_relative<F>(self, handler: F) -> DragHandler<State, Self, F>
+    where
+        F: Fn(&State, DragContext) -> Option<Self::Message> + 'static,
+    {
+        DragHandler {
+            inner: self,
+            policy: crate::CursorGrabPolicy::Locked,
+            handler: Rc::new(handler),
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    fn on_key_down<F>(self, handler: F) -> KeyHandler<State, Self, F>
+    where
+        F: Fn(&State, KeyEventContext) -> Option<Self::Message> + 'static,
+    {
+        KeyHandler {
+            inner: self,
+            action: KeyActionKind::Down,
+            scope: KeyScope::Focused,
+            handler: Rc::new(handler),
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    fn on_key_up<F>(self, handler: F) -> KeyHandler<State, Self, F>
+    where
+        F: Fn(&State, KeyEventContext) -> Option<Self::Message> + 'static,
+    {
+        KeyHandler {
+            inner: self,
+            action: KeyActionKind::Up,
+            scope: KeyScope::Focused,
+            handler: Rc::new(handler),
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    fn on_key_press<F>(self, handler: F) -> KeyHandler<State, Self, F>
+    where
+        F: Fn(&State, KeyEventContext) -> Option<Self::Message> + 'static,
+    {
+        KeyHandler {
+            inner: self,
+            action: KeyActionKind::Press,
+            scope: KeyScope::Focused,
+            handler: Rc::new(handler),
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    fn on_global_key_down<F>(self, handler: F) -> KeyHandler<State, Self, F>
+    where
+        F: Fn(&State, KeyEventContext) -> Option<Self::Message> + 'static,
+    {
+        KeyHandler {
+            inner: self,
+            action: KeyActionKind::Down,
+            scope: KeyScope::Global,
+            handler: Rc::new(handler),
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    fn on_tick<F>(self, handler: F) -> TickHandler<State, Self, F>
+    where
+        F: Fn(&State, f32) -> Option<Self::Message> + 'static,
+    {
+        TickHandler {
+            inner: self,
+            handler: Rc::new(handler),
+            _marker: std::marker::PhantomData,
+        }
+    }
+}
+
+/// A wrapper view that attaches a frame tick listener to an inner view.
+pub struct TickHandler<State, V, F> {
+    pub(crate) inner: V,
+    pub(crate) handler: Rc<F>,
+    pub(crate) _marker: std::marker::PhantomData<State>,
+}
+
+impl<State, V: View<State>, F> View<State> for TickHandler<State, V, F>
+where
+    F: Fn(&State, f32) -> Option<V::Message> + 'static,
+{
+    type Element = V::Element;
+    type Message = V::Message;
+
+    fn build(&self, ctx: &mut Context) -> Self::Element {
+        self.inner.build(ctx)
+    }
+
+    fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
+        self.inner.rebuild(&prev.inner, ctx, element);
+    }
+
+    fn rebuild_with_parent(
+        &self,
+        prev: &Self,
+        ctx: &mut Context,
+        element: &mut Self::Element,
+        parent: Node,
+        next_sibling: Option<Node>,
+    ) {
+        self.inner
+            .rebuild_with_parent(&prev.inner, ctx, element, parent, next_sibling);
+    }
+
+    fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
+        self.inner.teardown(ctx, element);
+    }
+
+    fn get_node(&self, element: &Self::Element) -> Node {
+        self.inner.get_node(element)
+    }
+
+    fn handle_event(
+        &self,
+        element: &mut Self::Element,
+        state: &State,
+        event: Event,
+        ctx: &mut Context,
+    ) -> (EventResult, Option<Self::Message>) {
+        let (inner_res, inner_msg) = self.inner.handle_event(element, state, event.clone(), ctx);
+        if inner_msg.is_some() {
+            return (inner_res, inner_msg);
+        }
+
+        if let Event::Tick { dt } = event {
+            if let Some(msg) = (self.handler)(state, dt) {
+                return (EventResult::Handled, Some(msg));
+            }
+        }
+
+        (inner_res, None)
+    }
+}
+
+/// Lifecycle phase of an active drag gesture.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DragPhase {
+    /// Initial pointer press down starting the drag gesture.
+    Start,
+    /// Continuous pointer motion during drag.
+    Move,
+    /// Pointer button released terminating the drag gesture.
+    End,
+}
+
+/// Contextual payload passed to drag event listeners.
+#[derive(Clone, Debug)]
+pub struct DragContext {
+    /// The current lifecycle phase of the drag gesture.
+    pub phase: DragPhase,
+    /// The initial pointer position where the drag started.
+    pub start_pos: (f32, f32),
+    /// The current pointer position.
+    pub current_pos: (f32, f32),
+    /// Incremental delta (dx, dy) moved since the previous frame.
+    pub delta: (f32, f32),
+    /// Cumulative delta (dx, dy) moved since the drag started.
+    pub total_delta: (f32, f32),
+    /// Keyboard modifier keys active during this drag interaction.
+    pub modifiers: winit::keyboard::ModifiersState,
+}
+
+/// A wrapper view that attaches a pointer-captured drag gesture to an inner view.
+pub struct DragHandler<State, V, F> {
+    pub(crate) inner: V,
+    pub(crate) policy: crate::CursorGrabPolicy,
+    pub(crate) handler: Rc<F>,
+    pub(crate) _marker: std::marker::PhantomData<State>,
+}
+
+/// Persistent element state for [`DragHandler`].
+pub struct DragElement<VEl> {
+    pub(crate) inner_element: VEl,
+    pub(crate) is_dragging: bool,
+    pub(crate) start_pos: (f32, f32),
+    pub(crate) last_pos: (f32, f32),
+    pub(crate) total_delta: (f32, f32),
+}
+
+impl<State, V: View<State>, F> View<State> for DragHandler<State, V, F>
+where
+    F: Fn(&State, DragContext) -> Option<V::Message> + 'static,
+{
+    type Element = DragElement<V::Element>;
+    type Message = V::Message;
+
+    fn build(&self, ctx: &mut Context) -> Self::Element {
+        DragElement {
+            inner_element: self.inner.build(ctx),
+            is_dragging: false,
+            start_pos: (0.0, 0.0),
+            last_pos: (0.0, 0.0),
+            total_delta: (0.0, 0.0),
+        }
+    }
+
+    fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
+        self.inner
+            .rebuild(&prev.inner, ctx, &mut element.inner_element);
+    }
+
+    fn rebuild_with_parent(
+        &self,
+        prev: &Self,
+        ctx: &mut Context,
+        element: &mut Self::Element,
+        parent: Node,
+        next_sibling: Option<Node>,
+    ) {
+        self.inner.rebuild_with_parent(
+            &prev.inner,
+            ctx,
+            &mut element.inner_element,
+            parent,
+            next_sibling,
+        );
+    }
+
+    fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
+        if element.is_dragging {
+            element.is_dragging = false;
+            ctx.release_pointer();
+        }
+        self.inner.teardown(ctx, &mut element.inner_element);
+    }
+
+    fn get_node(&self, element: &Self::Element) -> Node {
+        self.inner.get_node(&element.inner_element)
+    }
+
+    fn handle_event(
+        &self,
+        element: &mut Self::Element,
+        state: &State,
+        event: Event,
+        ctx: &mut Context,
+    ) -> (EventResult, Option<Self::Message>) {
+        let self_node = self.get_node(element);
+
+        let (inner_res, inner_msg) =
+            self.inner
+                .handle_event(&mut element.inner_element, state, event.clone(), ctx);
+        if inner_msg.is_some() {
+            return (inner_res, inner_msg);
+        }
+
+        let mut handled = EventResult::Ignored;
+        let mut emitted_msg = None;
+
+        match &event {
+            Event::MouseInput {
+                button,
+                pressed,
+                x,
+                y,
+                hit_nodes,
+            } => {
+                if *button == winit::event::MouseButton::Left {
+                    if *pressed {
+                        if hit_nodes.contains(&self_node) && !element.is_dragging {
+                            element.is_dragging = true;
+                            element.start_pos = (*x, *y);
+                            element.last_pos = (*x, *y);
+                            element.total_delta = (0.0, 0.0);
+                            ctx.capture_pointer(self_node, self.policy);
+
+                            let drag_ctx = DragContext {
+                                phase: DragPhase::Start,
+                                start_pos: element.start_pos,
+                                current_pos: (*x, *y),
+                                delta: (0.0, 0.0),
+                                total_delta: (0.0, 0.0),
+                                modifiers: ctx.modifiers,
+                            };
+                            emitted_msg = (self.handler)(state, drag_ctx);
+                            handled = EventResult::Handled;
+                        }
+                    } else if element.is_dragging {
+                        element.is_dragging = false;
+                        ctx.release_pointer();
+
+                        let delta = (*x - element.last_pos.0, *y - element.last_pos.1);
+                        element.total_delta.0 += delta.0;
+                        element.total_delta.1 += delta.1;
+
+                        let drag_ctx = DragContext {
+                            phase: DragPhase::End,
+                            start_pos: element.start_pos,
+                            current_pos: (*x, *y),
+                            delta,
+                            total_delta: element.total_delta,
+                            modifiers: ctx.modifiers,
+                        };
+                        emitted_msg = (self.handler)(state, drag_ctx);
+                        handled = EventResult::Handled;
+                    }
+                }
+            }
+            Event::CursorMoved {
+                x,
+                y,
+                delta_x,
+                delta_y,
+                ..
+            } => {
+                if element.is_dragging {
+                    let delta = if self.policy == crate::CursorGrabPolicy::Locked {
+                        (*delta_x, *delta_y)
+                    } else {
+                        (*x - element.last_pos.0, *y - element.last_pos.1)
+                    };
+                    element.last_pos = (*x, *y);
+                    element.total_delta.0 += delta.0;
+                    element.total_delta.1 += delta.1;
+
+                    let drag_ctx = DragContext {
+                        phase: DragPhase::Move,
+                        start_pos: element.start_pos,
+                        current_pos: (*x, *y),
+                        delta,
+                        total_delta: element.total_delta,
+                        modifiers: ctx.modifiers,
+                    };
+                    emitted_msg = (self.handler)(state, drag_ctx);
+                    handled = EventResult::Handled;
+                }
+            }
+            _ => {}
+        }
+
+        (handled.or(inner_res), inner_msg.or(emitted_msg))
+    }
+}
+
+/// Contextual payload passed to keyboard event listeners.
+#[derive(Clone, Debug)]
+pub struct KeyEventContext {
+    /// The resolved logical key representation (character or named key).
+    pub logical_key: winit::keyboard::Key,
+    /// Physical scancode on the hardware keyboard, independent of OS keyboard layout.
+    pub physical_key: winit::keyboard::PhysicalKey,
+    /// UTF-8 text representation generated by this key event, if any.
+    pub text: Option<String>,
+    /// `true` if generated by the OS key-repeat timer while holding down the key.
+    pub repeat: bool,
+    /// Active keyboard modifier state (Shift, Ctrl, Alt, Meta).
+    pub modifiers: winit::keyboard::ModifiersState,
+}
+
+impl KeyEventContext {
+    /// Returns `true` if the logical key matches `key_str` (case-insensitive for characters).
+    pub fn key_matches(&self, key_str: &str) -> bool {
+        match &self.logical_key {
+            winit::keyboard::Key::Character(c) => c.eq_ignore_ascii_case(key_str),
+            winit::keyboard::Key::Named(named) => {
+                let name = format!("{:?}", named);
+                name.eq_ignore_ascii_case(key_str)
+            }
+            _ => false,
+        }
+    }
+
+    /// Returns `true` if the Escape key was pressed.
+    pub fn is_escape(&self) -> bool {
+        self.logical_key == winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape)
+    }
+
+    /// Returns `true` if the Enter or Return key was pressed.
+    pub fn is_enter(&self) -> bool {
+        matches!(
+            self.logical_key,
+            winit::keyboard::Key::Named(winit::keyboard::NamedKey::Enter)
+        ) || matches!(self.text.as_deref(), Some("\r") | Some("\n"))
+    }
+
+    /// Returns `true` if the Tab key was pressed.
+    pub fn is_tab(&self) -> bool {
+        self.logical_key == winit::keyboard::Key::Named(winit::keyboard::NamedKey::Tab)
+    }
+
+    /// Returns `true` if the Control key is currently held.
+    pub fn with_ctrl(&self) -> bool {
+        self.modifiers.control_key()
+    }
+
+    /// Returns `true` if the Shift key is currently held.
+    pub fn with_shift(&self) -> bool {
+        self.modifiers.shift_key()
+    }
+
+    /// Returns `true` if the Alt / Option key is currently held.
+    pub fn with_alt(&self) -> bool {
+        self.modifiers.alt_key()
+    }
+
+    /// Returns `true` if the Super / Meta / Windows / Command key is currently held.
+    pub fn with_super(&self) -> bool {
+        self.modifiers.super_key()
+    }
+}
+
+/// Action trigger kind for keyboard handlers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyActionKind {
+    /// Fired when key is initially pressed down (excluding repeat).
+    Down,
+    /// Fired when key is released.
+    Up,
+    /// Fired on initial press and auto-repeat keystrokes.
+    Press,
+}
+
+/// Scope of keyboard listening.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyScope {
+    /// Fired only when the attached view's node has keyboard focus.
+    Focused,
+    /// Fired globally across the window regardless of focus.
+    Global,
+}
+
+/// A wrapper view that attaches a keyboard listener to an inner view.
+pub struct KeyHandler<State, V, F> {
+    pub(crate) inner: V,
+    pub(crate) action: KeyActionKind,
+    pub(crate) scope: KeyScope,
+    pub(crate) handler: Rc<F>,
+    pub(crate) _marker: std::marker::PhantomData<State>,
+}
+
+impl<State, V: View<State>, F> View<State> for KeyHandler<State, V, F>
+where
+    F: Fn(&State, KeyEventContext) -> Option<V::Message> + 'static,
+{
+    type Element = V::Element;
+    type Message = V::Message;
+
+    fn build(&self, ctx: &mut Context) -> Self::Element {
+        self.inner.build(ctx)
+    }
+
+    fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
+        self.inner.rebuild(&prev.inner, ctx, element);
+    }
+
+    fn rebuild_with_parent(
+        &self,
+        prev: &Self,
+        ctx: &mut Context,
+        element: &mut Self::Element,
+        parent: Node,
+        next_sibling: Option<Node>,
+    ) {
+        self.inner
+            .rebuild_with_parent(&prev.inner, ctx, element, parent, next_sibling);
+    }
+
+    fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
+        self.inner.teardown(ctx, element);
+    }
+
+    fn get_node(&self, element: &Self::Element) -> Node {
+        self.inner.get_node(element)
+    }
+
+    fn handle_event(
+        &self,
+        element: &mut Self::Element,
+        state: &State,
+        event: Event,
+        ctx: &mut Context,
+    ) -> (EventResult, Option<Self::Message>) {
+        let (inner_res, inner_msg) = self.inner.handle_event(element, state, event.clone(), ctx);
+        if inner_msg.is_some() {
+            return (inner_res, inner_msg);
+        }
+
+        let mut handled = EventResult::Ignored;
+        let mut emitted_msg = None;
+
+        if let Event::KeyboardInput { event: k_event, .. } = &event {
+            let is_focused = Some(self.get_node(element)) == ctx.focused_node();
+            let scope_ok = match self.scope {
+                KeyScope::Focused => is_focused,
+                KeyScope::Global => true,
+            };
+
+            if scope_ok {
+                let matches_action = match self.action {
+                    KeyActionKind::Down => k_event.state.is_pressed() && !k_event.repeat,
+                    KeyActionKind::Up => !k_event.state.is_pressed(),
+                    KeyActionKind::Press => k_event.state.is_pressed(),
+                };
+
+                if matches_action {
+                    let key_ctx = KeyEventContext {
+                        logical_key: k_event.logical_key.clone(),
+                        physical_key: k_event.physical_key,
+                        text: k_event.text.as_ref().map(|s| s.to_string()),
+                        repeat: k_event.repeat,
+                        modifiers: ctx.modifiers,
+                    };
+                    emitted_msg = (self.handler)(state, key_ctx);
+                    if emitted_msg.is_some() {
+                        handled = EventResult::Handled;
+                    }
+                }
+            }
+        }
+
+        (handled.or(inner_res), inner_msg.or(emitted_msg))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::KeyEvent;
     use crate::ui::widgets::{row, text};
 
     #[derive(Clone, Debug, PartialEq)]
@@ -288,6 +855,7 @@ mod tests {
             &mut element,
             &(),
             Event::MouseInput {
+                button: winit::event::MouseButton::Left,
                 pressed: true,
                 hit_nodes: vec![child_node, parent_node],
                 x: 0.0,
@@ -304,6 +872,7 @@ mod tests {
             &mut element,
             &(),
             Event::MouseInput {
+                button: winit::event::MouseButton::Left,
                 pressed: false,
                 hit_nodes: vec![child_node, parent_node],
                 x: 0.0,
@@ -320,6 +889,7 @@ mod tests {
             &mut element,
             &(),
             Event::MouseInput {
+                button: winit::event::MouseButton::Left,
                 pressed: true,
                 hit_nodes: vec![parent_node],
                 x: 0.0,
@@ -335,6 +905,7 @@ mod tests {
             &mut element,
             &(),
             Event::MouseInput {
+                button: winit::event::MouseButton::Left,
                 pressed: false,
                 hit_nodes: vec![parent_node],
                 x: 0.0,
@@ -368,6 +939,7 @@ mod tests {
             &mut element,
             &(),
             Event::MouseInput {
+                button: winit::event::MouseButton::Left,
                 pressed: true,
                 hit_nodes: vec![btn_node],
                 x: 0.0,
@@ -384,6 +956,7 @@ mod tests {
             &mut element,
             &(),
             Event::MouseInput {
+                button: winit::event::MouseButton::Left,
                 pressed: false,
                 hit_nodes: vec![btn_node],
                 x: 0.0,
@@ -393,5 +966,285 @@ mod tests {
         );
         assert_eq!(up_res, EventResult::Handled);
         assert_eq!(up_msg, Some(BtnMsg::Release));
+    }
+
+    #[test]
+    fn test_drag_gesture_lifecycle() {
+        #[derive(Clone, Debug, PartialEq)]
+        enum DragMsg {
+            Drag(DragPhase, (f32, f32), (f32, f32)),
+        }
+
+        let mut ctx = Context::new();
+        let target = text::<_, DragMsg>("Draggable")
+            .on_drag(|_state, d| Some(DragMsg::Drag(d.phase, d.delta, d.total_delta)));
+
+        let mut element = View::<()>::build(&target, &mut ctx);
+        let node = View::<()>::get_node(&target, &element);
+
+        assert!(!ctx.has_pointer_capture());
+        assert!(!ctx.is_pointer_captured(node));
+
+        // 1. Mouse down on draggable target -> Starts drag and captures pointer
+        let (start_res, start_msg) = View::<()>::handle_event(
+            &target,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Left,
+                pressed: true,
+                hit_nodes: vec![node],
+                x: 50.0,
+                y: 50.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(start_res, EventResult::Handled);
+        assert_eq!(
+            start_msg,
+            Some(DragMsg::Drag(DragPhase::Start, (0.0, 0.0), (0.0, 0.0)))
+        );
+        assert!(ctx.has_pointer_capture());
+        assert!(ctx.is_pointer_captured(node));
+        assert_eq!(ctx.captured_node(), Some(node));
+
+        // 2. Mouse move (even if hit_nodes doesn't include node, pointer is captured)
+        let (move_res, move_msg) = View::<()>::handle_event(
+            &target,
+            &mut element,
+            &(),
+            Event::CursorMoved {
+                x: 75.0,
+                y: 60.0,
+                delta_x: 25.0,
+                delta_y: 10.0,
+                hit_nodes: vec![],
+            },
+            &mut ctx,
+        );
+        assert_eq!(move_res, EventResult::Handled);
+        assert_eq!(
+            move_msg,
+            Some(DragMsg::Drag(DragPhase::Move, (25.0, 10.0), (25.0, 10.0)))
+        );
+
+        // 3. Second mouse move
+        let (move2_res, move2_msg) = View::<()>::handle_event(
+            &target,
+            &mut element,
+            &(),
+            Event::CursorMoved {
+                x: 80.0,
+                y: 70.0,
+                delta_x: 5.0,
+                delta_y: 10.0,
+                hit_nodes: vec![],
+            },
+            &mut ctx,
+        );
+        assert_eq!(move2_res, EventResult::Handled);
+        assert_eq!(
+            move2_msg,
+            Some(DragMsg::Drag(DragPhase::Move, (5.0, 10.0), (30.0, 20.0)))
+        );
+
+        // 4. Mouse up -> Ends drag and releases pointer
+        let (end_res, end_msg) = View::<()>::handle_event(
+            &target,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Left,
+                pressed: false,
+                hit_nodes: vec![],
+                x: 80.0,
+                y: 70.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(end_res, EventResult::Handled);
+        assert_eq!(
+            end_msg,
+            Some(DragMsg::Drag(DragPhase::End, (0.0, 0.0), (30.0, 20.0)))
+        );
+        assert!(!ctx.has_pointer_capture());
+        assert_eq!(ctx.captured_node(), None);
+    }
+
+    #[test]
+    fn test_drag_relative_gesture() {
+        #[derive(Clone, Debug, PartialEq)]
+        enum RelMsg {
+            Delta(f32, f32),
+        }
+
+        let mut ctx = Context::new();
+        let dial = text::<_, RelMsg>("Dial")
+            .on_drag_relative(|_state, d| Some(RelMsg::Delta(d.delta.0, d.delta.1)));
+
+        let mut element = View::<()>::build(&dial, &mut ctx);
+        let node = View::<()>::get_node(&dial, &element);
+
+        // Mouse down
+        let _ = View::<()>::handle_event(
+            &dial,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Left,
+                pressed: true,
+                hit_nodes: vec![node],
+                x: 100.0,
+                y: 100.0,
+            },
+            &mut ctx,
+        );
+        assert!(ctx.has_pointer_capture());
+        assert_eq!(
+            ctx.captured_pointer.as_ref().map(|c| c.policy),
+            Some(crate::CursorGrabPolicy::Locked)
+        );
+
+        // Mouse motion with raw hardware delta
+        let (res, msg) = View::<()>::handle_event(
+            &dial,
+            &mut element,
+            &(),
+            Event::CursorMoved {
+                x: 100.0,
+                y: 100.0,
+                delta_x: 12.5,
+                delta_y: -4.0,
+                hit_nodes: vec![],
+            },
+            &mut ctx,
+        );
+        assert_eq!(res, EventResult::Handled);
+        assert_eq!(msg, Some(RelMsg::Delta(12.5, -4.0)));
+
+        // Release
+        let _ = View::<()>::handle_event(
+            &dial,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Left,
+                pressed: false,
+                hit_nodes: vec![],
+                x: 100.0,
+                y: 100.0,
+            },
+            &mut ctx,
+        );
+        assert!(!ctx.has_pointer_capture());
+    }
+
+    #[test]
+    fn test_key_events_focused_and_global() {
+        #[derive(Clone, Debug, PartialEq)]
+        enum KeyMsg {
+            EscPressed,
+            EnterUp,
+            GlobalA,
+        }
+
+        let mut ctx = Context::new();
+        let editor_input = text::<_, KeyMsg>("Input")
+            .on_key_down(|_state, key| {
+                if key.is_escape() {
+                    Some(KeyMsg::EscPressed)
+                } else {
+                    None
+                }
+            })
+            .on_key_up(|_state, key| {
+                if key.is_enter() {
+                    Some(KeyMsg::EnterUp)
+                } else {
+                    None
+                }
+            })
+            .on_global_key_down(|_state, key| {
+                if key.key_matches("a") {
+                    Some(KeyMsg::GlobalA)
+                } else {
+                    None
+                }
+            });
+
+        let mut element = View::<()>::build(&editor_input, &mut ctx);
+        let node = View::<()>::get_node(&editor_input, &element);
+
+        // 1. Without focus, on_key_down(Escape) should NOT fire
+        let esc_event = KeyEvent::new(
+            winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape),
+            winit::event::ElementState::Pressed,
+        );
+        let (esc_res, esc_msg) = View::<()>::handle_event(
+            &editor_input,
+            &mut element,
+            &(),
+            Event::KeyboardInput {
+                event: esc_event.clone(),
+                is_synthetic: false,
+            },
+            &mut ctx,
+        );
+        assert_eq!(esc_res, EventResult::Ignored);
+        assert_eq!(esc_msg, None);
+
+        // 2. Global key down SHOULD fire even without focus
+        let mut a_event = KeyEvent::new(
+            winit::keyboard::Key::Character("a".into()),
+            winit::event::ElementState::Pressed,
+        );
+        a_event.text = Some("a".into());
+        let (a_res, a_msg) = View::<()>::handle_event(
+            &editor_input,
+            &mut element,
+            &(),
+            Event::KeyboardInput {
+                event: a_event,
+                is_synthetic: false,
+            },
+            &mut ctx,
+        );
+        assert_eq!(a_res, EventResult::Handled);
+        assert_eq!(a_msg, Some(KeyMsg::GlobalA));
+
+        // 3. Now request focus on element
+        ctx.request_focus(node);
+
+        // Now on_key_down(Escape) MUST fire
+        let (f_res, f_msg) = View::<()>::handle_event(
+            &editor_input,
+            &mut element,
+            &(),
+            Event::KeyboardInput {
+                event: esc_event,
+                is_synthetic: false,
+            },
+            &mut ctx,
+        );
+        assert_eq!(f_res, EventResult::Handled);
+        assert_eq!(f_msg, Some(KeyMsg::EscPressed));
+
+        // on_key_up(Enter) when released
+        let enter_up_event = KeyEvent::new(
+            winit::keyboard::Key::Named(winit::keyboard::NamedKey::Enter),
+            winit::event::ElementState::Released,
+        );
+        let (enter_res, enter_msg) = View::<()>::handle_event(
+            &editor_input,
+            &mut element,
+            &(),
+            Event::KeyboardInput {
+                event: enter_up_event,
+                is_synthetic: false,
+            },
+            &mut ctx,
+        );
+        assert_eq!(enter_res, EventResult::Handled);
+        assert_eq!(enter_msg, Some(KeyMsg::EnterUp));
     }
 }

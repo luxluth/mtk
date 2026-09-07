@@ -161,6 +161,7 @@ fn todo_item_view(todo: &TodoItem) -> impl View<TodoState, Message = TodoMsg> + 
                     font_size: 14.0,
                     color: text_color,
                     vertical_alignment: mtk::style::VerticalAlignment::Center,
+                    wrap: true,
                     strikethrough: completed,
                     ..Default::default()
                 }),
