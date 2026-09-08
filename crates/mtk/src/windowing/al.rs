@@ -345,6 +345,21 @@ where
             &mut self.update_fn,
         ) {
             let is_tick = matches!(mtk_event, Event::Tick { .. });
+            let mut state_changed = false;
+
+            // Focus blur on mouse press:
+            // "We always blur except you click on the same focused element"
+            let mut focus_lost_event: Option<Event> = None;
+            if let Event::MouseInput {
+                pressed: true,
+                ref hit_nodes,
+                ..
+            } = mtk_event
+            {
+                if let Some(prev_focused) = self.context.check_click_focus_blur(hit_nodes) {
+                    focus_lost_event = Some(Event::FocusLost { node: prev_focused });
+                }
+            }
 
             // A) Tick kinetic velocity simulation for physical momentum scrolling
             if let Event::Tick { dt } = mtk_event {
@@ -719,6 +734,21 @@ where
                 }
             }
 
+            if let Some(ref focus_ev) = focus_lost_event {
+                let (_focus_res, focus_msg) =
+                    view.handle_event(element, &self.state, focus_ev.clone(), &mut self.context);
+                if let Some(msg) = focus_msg {
+                    let cmd = update_fn(&mut self.state, msg);
+                    Self::execute_command_inner(
+                        &mut self.context,
+                        &self.msg_tx,
+                        &self.event_proxy,
+                        cmd,
+                    );
+                    state_changed = true;
+                }
+            }
+
             // Pass 1 - READONLY state down
             let (result, mut optional_msg) =
                 view.handle_event(element, &self.state, mtk_event.clone(), &mut self.context);
@@ -740,10 +770,31 @@ where
                         && k_event.logical_key
                             == winit::keyboard::Key::Named(winit::keyboard::NamedKey::Tab)
                     {
+                        let prev_focus = self.context.focused_node();
                         if self.context.modifiers.shift_key() {
                             self.context.focus_prev();
                         } else {
                             self.context.focus_next();
+                        }
+                        if let Some(prev) = prev_focus {
+                            if self.context.focused_node() != Some(prev) {
+                                let (_tab_res, tab_msg) = view.handle_event(
+                                    element,
+                                    &self.state,
+                                    Event::FocusLost { node: prev },
+                                    &mut self.context,
+                                );
+                                if let Some(msg) = tab_msg {
+                                    let cmd = update_fn(&mut self.state, msg);
+                                    Self::execute_command_inner(
+                                        &mut self.context,
+                                        &self.msg_tx,
+                                        &self.event_proxy,
+                                        cmd,
+                                    );
+                                    state_changed = true;
+                                }
+                            }
                         }
                         if let Some(window) = &self.window {
                             window.request_redraw();
@@ -908,8 +959,6 @@ where
                 }
             }
 
-            let mut state_changed = false;
-
             // Pass 2 - we check if a logical message bubbled up to the root
             if let Some(msg) = optional_msg {
                 let cmd = update_fn(&mut self.state, msg);
@@ -942,7 +991,10 @@ where
             }
 
             if let Some(window) = &self.window {
-                if state_changed || (!is_tick && result == EventResult::Handled) {
+                if state_changed
+                    || (!is_tick && result == EventResult::Handled)
+                    || focus_lost_event.is_some()
+                {
                     window.request_redraw();
                 }
             }

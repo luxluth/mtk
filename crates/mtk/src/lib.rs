@@ -307,6 +307,23 @@ impl Context {
         self.clear_focus();
     }
 
+    /// Checks if a mouse click should blur the currently focused node.
+    ///
+    /// If a node is currently focused and neither it nor any of its descendants
+    /// are present in `hit_nodes`, clears focus and returns `Some(previous_node)`.
+    /// If the click occurred inside the focused node or one of its descendants,
+    /// focus is preserved and returns `None`.
+    pub fn check_click_focus_blur(&mut self, hit_nodes: &[Node]) -> Option<Node> {
+        if let Some(focused) = self.focused_node {
+            let clicked_same = hit_nodes.iter().any(|n| n.is_descendant_of(self, focused));
+            if !clicked_same {
+                self.clear_focus();
+                return Some(focused);
+            }
+        }
+        None
+    }
+
     /// Requests that a specific rectangular region of `node` be scrolled into view inside parent scroll views.
     pub fn request_ensure_visible(&mut self, node: Node, rect: crate::style::Rect) {
         self.ensure_visible_requests.insert(node, rect);

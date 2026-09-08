@@ -256,7 +256,6 @@ impl View<String> for InputText {
                 ..
             } => {
                 let is_hit = hit_nodes.iter().any(|n| *n == element.node);
-                let is_focused = Some(element.node.clone()) == ctx.focused_node();
 
                 if pressed {
                     if is_hit {
@@ -336,8 +335,6 @@ impl View<String> for InputText {
                             }
                             ctx.request_frame();
                         }
-                    } else if is_focused {
-                        ctx.clear_focus();
                     }
                     if is_hit {
                         element.is_dragging = true;
@@ -557,6 +554,18 @@ impl View<String> for InputText {
                             ctx.request_frame();
                         }
                     }
+                }
+            }
+            Event::FocusLost { node } => {
+                if node == element.node {
+                    if ctx.focused_node() == Some(element.node) {
+                        ctx.clear_focus();
+                    }
+                    element.editor.set_selection_anchor(None);
+                    element.is_dragging = false;
+                    self.apply_custom_style(ctx, element.node);
+                    ctx.request_frame();
+                    handled = EventResult::Handled;
                 }
             }
             _ => {}

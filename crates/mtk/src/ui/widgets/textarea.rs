@@ -204,7 +204,6 @@ impl View<String> for TextArea {
                 ..
             } => {
                 let is_hit = hit_nodes.iter().any(|n| *n == element.node);
-                let is_focused = Some(element.node.clone()) == ctx.focused_node();
 
                 if pressed {
                     if is_hit {
@@ -285,8 +284,6 @@ impl View<String> for TextArea {
                             ctx.request_frame();
                         }
                         element.is_dragging_text = true;
-                    } else if is_focused {
-                        ctx.clear_focus();
                     }
                 } else {
                     element.is_dragging_text = false;
@@ -537,6 +534,18 @@ impl View<String> for TextArea {
                             }
                         }
                     }
+                }
+            }
+            Event::FocusLost { node } => {
+                if node == element.node {
+                    if ctx.focused_node() == Some(element.node) {
+                        ctx.clear_focus();
+                    }
+                    element.editor.set_selection_anchor(None);
+                    element.is_dragging_text = false;
+                    self.apply_custom_style(ctx, element.node);
+                    ctx.request_frame();
+                    handled = EventResult::Handled;
                 }
             }
             _ => {}

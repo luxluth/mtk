@@ -25,6 +25,8 @@ pub enum EventKind {
     Submit,
     /// Triggered when a scrollbar thumb is dragged or scrolled.
     ThumbScroll,
+    /// Triggered when the view loses focus (e.g., on outside click or blur).
+    FocusLost,
 }
 
 /// Indicates whether a view successfully processed or ignored an incoming event.
@@ -144,6 +146,7 @@ where
         // If inner handled the event, check if this handler should still inspect and process it:
         // 1. Submit on KeyboardInput when this node is focused
         // 2. Release / Click on MouseInput release when this node was previously pressed
+        // 3. FocusLost when this node was previously focused
         if inner_res == EventResult::Handled {
             let allow_outer_processing = match &event {
                 Event::KeyboardInput { .. } => self.kind == EventKind::Submit,
@@ -151,6 +154,7 @@ where
                     element.is_pressed
                         && (self.kind == EventKind::Release || self.kind == EventKind::Click)
                 }
+                Event::FocusLost { .. } => self.kind == EventKind::FocusLost,
                 _ => false,
             };
 
@@ -168,6 +172,12 @@ where
         let mut emitted_msg = None;
 
         match &event {
+            Event::FocusLost { node } => {
+                if self.kind == EventKind::FocusLost && *node == self_node {
+                    emitted_msg = (self.handler)(state);
+                    handled = EventResult::Handled;
+                }
+            }
             Event::CursorMoved { hit_nodes, .. } => {
                 let newly_hovered = hit_nodes.contains(&self_node);
 
@@ -281,6 +291,16 @@ pub trait ViewEventExt<State>: View<State> + Sized {
     fn on_thumb_scroll<F>(self, handler: F) -> ThumbScrollHandler<State, Self, F>
     where
         F: Fn(&State, ThumbScrollContext) -> Option<Self::Message> + 'static;
+
+    /// Attaches a focus blur listener fired when this view loses keyboard focus.
+    fn on_focus_lost<F>(self, handler: F) -> EventHandler<State, Self, F>
+    where
+        F: Fn(&State) -> Option<Self::Message> + 'static;
+
+    /// Attaches a focus blur listener fired when this view loses keyboard focus (alias for [`on_focus_lost`](Self::on_focus_lost)).
+    fn on_blur<F>(self, handler: F) -> EventHandler<State, Self, F>
+    where
+        F: Fn(&State) -> Option<Self::Message> + 'static;
 }
 
 impl<State, V: View<State>> ViewEventExt<State> for V {
@@ -392,6 +412,20 @@ impl<State, V: View<State>> ViewEventExt<State> for V {
             handler: Rc::new(handler),
             _marker: std::marker::PhantomData,
         }
+    }
+
+    fn on_focus_lost<F>(self, handler: F) -> EventHandler<State, Self, F>
+    where
+        F: Fn(&State) -> Option<Self::Message> + 'static,
+    {
+        self.on_event(EventKind::FocusLost, handler)
+    }
+
+    fn on_blur<F>(self, handler: F) -> EventHandler<State, Self, F>
+    where
+        F: Fn(&State) -> Option<Self::Message> + 'static,
+    {
+        self.on_focus_lost(handler)
     }
 }
 

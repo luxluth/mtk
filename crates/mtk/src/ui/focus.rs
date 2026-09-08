@@ -137,4 +137,176 @@ mod tests {
         View::<()>::teardown(&view, &mut ctx, &mut el);
         assert!(!ctx.active_focusable_nodes().contains(&node));
     }
+
+    #[test]
+    fn test_check_click_focus_blur() {
+        let mut ctx = Context::new();
+        let parent = ctx.create_node();
+        let child = ctx.create_node();
+        let outside = ctx.create_node();
+        parent.append(&mut ctx, child);
+
+        // 1. When nothing is focused, clicking returns None
+        assert_eq!(ctx.check_click_focus_blur(&[outside]), None);
+        assert_eq!(ctx.focused_node(), None);
+
+        // 2. Focus parent, clicking parent preserves focus
+        ctx.request_focus(parent);
+        assert_eq!(ctx.check_click_focus_blur(&[parent]), None);
+        assert_eq!(ctx.focused_node(), Some(parent));
+
+        // 3. Clicking descendant child of focused node preserves focus
+        assert_eq!(ctx.check_click_focus_blur(&[child]), None);
+        assert_eq!(ctx.focused_node(), Some(parent));
+
+        // 4. Clicking outside blurs focus and returns the blurred node
+        assert_eq!(ctx.check_click_focus_blur(&[outside]), Some(parent));
+        assert_eq!(ctx.focused_node(), None);
+
+        // 5. Clicking empty space blurs focus
+        ctx.request_focus(parent);
+        assert_eq!(ctx.check_click_focus_blur(&[]), Some(parent));
+        assert_eq!(ctx.focused_node(), None);
+    }
+
+    #[test]
+    fn test_focus_lost_event_and_on_blur_handler() {
+        use crate::ui::event::ViewEventExt;
+
+        let mut ctx = Context::new();
+        let view = text::<_, &'static str>("Blur Me")
+            .focusable()
+            .on_blur(|_| Some("blurred"));
+
+        let mut el = View::<()>::build(&view, &mut ctx);
+        let node = View::<()>::get_node(&view, &el);
+        let other_node = ctx.create_node();
+
+        // 1. Event targeting other node is ignored
+        let (res_other, msg_other) = View::<()>::handle_event(
+            &view,
+            &mut el,
+            &(),
+            Event::FocusLost { node: other_node },
+            &mut ctx,
+        );
+        assert_eq!(res_other, EventResult::Ignored);
+        assert_eq!(msg_other, None);
+
+        // 2. Event targeting this node triggers the on_blur handler
+        let (res_self, msg_self) =
+            View::<()>::handle_event(&view, &mut el, &(), Event::FocusLost { node }, &mut ctx);
+        assert_eq!(res_self, EventResult::Handled);
+        assert_eq!(msg_self, Some("blurred"));
+    }
+
+    #[test]
+    fn test_focus_transition_without_disruption() {
+        use crate::ui::event::ViewEventExt;
+
+        let mut ctx = Context::new();
+
+        // Two focusable views: A and B
+        let view_a = text::<_, &'static str>("View A")
+            .focusable()
+            .on_blur(|_| Some("a_lost_focus"));
+        let view_b = text::<_, &'static str>("View B").focusable();
+
+        let mut el_a = View::<()>::build(&view_a, &mut ctx);
+        let node_a = View::<()>::get_node(&view_a, &el_a);
+
+        let mut el_b = View::<()>::build(&view_b, &mut ctx);
+        let node_b = View::<()>::get_node(&view_b, &el_b);
+
+        // Start with Node A focused
+        ctx.request_focus(node_a);
+        assert_eq!(ctx.focused_node(), Some(node_a));
+
+        // Simulate user clicking on Node B:
+        // 1. Central blur check detects click is outside Node A
+        let blurred = ctx.check_click_focus_blur(&[node_b]);
+        assert_eq!(blurred, Some(node_a));
+        assert_eq!(ctx.focused_node(), None);
+
+        // 2. Dispatch FocusLost to View A
+        let (blur_res, blur_msg) = View::<()>::handle_event(
+            &view_a,
+            &mut el_a,
+            &(),
+            Event::FocusLost { node: node_a },
+            &mut ctx,
+        );
+        assert_eq!(blur_res, EventResult::Handled);
+        assert_eq!(blur_msg, Some("a_lost_focus"));
+
+        // 3. Dispatch MouseInput to View B without disruption
+        let (click_res, _) = View::<()>::handle_event(
+            &view_b,
+            &mut el_b,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Left,
+                pressed: true,
+                x: 0.0,
+                y: 0.0,
+                hit_nodes: vec![node_b],
+            },
+            &mut ctx,
+        );
+        assert_eq!(click_res, EventResult::Handled);
+
+        // 4. Node B cleanly gains focus
+        assert_eq!(ctx.focused_node(), Some(node_b));
+    }
+
+    #[test]
+    fn test_input_text_focus_lost_clears_selection() {
+        use crate::ui::widgets::input_text;
+
+        let mut ctx = Context::new();
+        let view = input_text();
+        let text_val = "Hello World".to_string();
+
+        let mut el = View::<String>::build(&view, &mut ctx);
+        let node = View::<String>::get_node(&view, &el);
+
+        // Focus and select text
+        ctx.request_focus(node);
+        let (res, _) = View::<String>::handle_event(
+            &view,
+            &mut el,
+            &text_val,
+            Event::MouseInput {
+                button: winit::event::MouseButton::Left,
+                pressed: true,
+                x: 10.0,
+                y: 10.0,
+                hit_nodes: vec![node],
+            },
+            &mut ctx,
+        );
+        assert_eq!(res, EventResult::Handled);
+
+        // 1. Simulate outside click blur
+        let blurred = ctx.check_click_focus_blur(&[]);
+        assert_eq!(blurred, Some(node));
+        assert_eq!(ctx.focused_node(), None);
+
+        // 2. Dispatch FocusLost
+        let (res_lost, _) = View::<String>::handle_event(
+            &view,
+            &mut el,
+            &text_val,
+            Event::FocusLost { node },
+            &mut ctx,
+        );
+        assert_eq!(res_lost, EventResult::Handled);
+
+        // 3. Selection and cursor are cleared
+        let render_info = node
+            .get_text_userdata::<crate::text::TextRenderInfo>(&ctx)
+            .unwrap();
+        assert_eq!(render_info.selection, None);
+        assert_eq!(render_info.cursor, None);
+    }
 }

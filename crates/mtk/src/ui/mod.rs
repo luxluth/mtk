@@ -95,6 +95,11 @@ pub enum Event {
         /// Geometry and state of the thumb.
         context: ThumbScrollContext,
     },
+    /// Dispatched when a previously focused node loses focus (e.g. on click outside or blur).
+    FocusLost {
+        /// The node that lost focus.
+        node: Node,
+    },
 }
 
 /// Describes a keyboard input targeting a window or UI node.
