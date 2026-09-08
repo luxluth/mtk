@@ -48,6 +48,14 @@ impl<Msg: 'static + Send> WindowHandle<Msg> {
     }
 }
 
+#[derive(Clone, Debug)]
+struct TouchScrollState {
+    tracker: crate::ui::KineticTracker,
+    accum_x: f32,
+    accum_y: f32,
+    last_move_time: Instant,
+}
+
 pub struct Window<'r, S, V>
 where
     V: View<S>,
@@ -71,7 +79,7 @@ where
     cursor_pos: (f32, f32),
     last_frame_time: Instant,
     scroll_trackers: HashMap<Node, crate::ui::KineticTracker>,
-    last_touch_velocity: HashMap<Node, (f32, f32)>,
+    touch_scroll_states: HashMap<Node, TouchScrollState>,
     drag_scroll_node: Option<(Node, f32, f32)>,
     drag_scroll_x_node: Option<(Node, f32, f32)>,
 
@@ -249,7 +257,7 @@ where
             cursor_pos: (0.0, 0.0),
             last_frame_time: Instant::now(),
             scroll_trackers: HashMap::new(),
-            last_touch_velocity: HashMap::new(),
+            touch_scroll_states: HashMap::new(),
             drag_scroll_node: None,
             drag_scroll_x_node: None,
             debug_tx: None,
@@ -833,47 +841,113 @@ where
                                     match phase {
                                         TouchPhase::Started => {
                                             self.scroll_trackers.remove(node);
-                                            self.last_touch_velocity.remove(node);
+                                            let mut tracker = crate::ui::KineticTracker::new(4.8);
+                                            tracker.on_press(0.0, 0.0);
+                                            self.touch_scroll_states.insert(
+                                                *node,
+                                                TouchScrollState {
+                                                    tracker,
+                                                    accum_x: 0.0,
+                                                    accum_y: 0.0,
+                                                    last_move_time: Instant::now(),
+                                                },
+                                            );
                                         }
                                         TouchPhase::Moved => {
-                                            self.scroll_trackers.remove(node);
-                                            let mut new_scroll_y = constraints.scroll.y;
-                                            let mut new_scroll_x = constraints.scroll.x;
+                                            if delta_x.abs() < 0.001 && delta_y.abs() < 0.001 {
+                                                // Handle zero-delta release (libinput / Wayland axis_stop)
+                                                if let Some(mut state) =
+                                                    self.touch_scroll_states.remove(node)
+                                                {
+                                                    let (vx, vy) = state.tracker.on_release();
+                                                    if vx.abs() > 30.0 || vy.abs() > 30.0 {
+                                                        let mut tracker =
+                                                            crate::ui::KineticTracker::new(4.8);
+                                                        tracker.set_velocity(vx, vy);
+                                                        self.scroll_trackers.insert(*node, tracker);
+                                                        scrolled = true;
+                                                    }
+                                                }
+                                            } else {
+                                                // Dynamic trackpad acceleration curve:
+                                                // Slow precise adjustments remain ~1.0x - 1.1x.
+                                                // Fast flick gestures accelerate smoothly up to 3.5x.
+                                                let event_dist =
+                                                    (delta_x * delta_x + delta_y * delta_y).sqrt();
+                                                let accel =
+                                                    (1.0 + (event_dist / 12.0)).clamp(1.0, 3.5);
+                                                let mut eff_delta_x = delta_x * accel;
+                                                let mut eff_delta_y = delta_y * accel;
 
-                                            if is_scrollable_y
-                                                && (max_scroll_y > 0.0
-                                                    || constraints.scroll.y > max_scroll_y)
-                                            {
-                                                new_scroll_y = (constraints.scroll.y - delta_y)
-                                                    .clamp(0.0, max_scroll_y);
-                                            }
-                                            if is_scrollable_x
-                                                && (max_scroll_x > 0.0
-                                                    || constraints.scroll.x > max_scroll_x)
-                                            {
-                                                new_scroll_x = (constraints.scroll.x - delta_x)
-                                                    .clamp(0.0, max_scroll_x);
-                                            }
+                                                if is_scrollable_x
+                                                    && !is_scrollable_y
+                                                    && delta_x.abs() == 0.0
+                                                {
+                                                    eff_delta_x = eff_delta_y;
+                                                    eff_delta_y = 0.0;
+                                                }
 
-                                            if new_scroll_y != constraints.scroll.y
-                                                || new_scroll_x != constraints.scroll.x
-                                            {
-                                                node.update_constraints(&mut self.context, |c| {
-                                                    c.scroll.y = new_scroll_y;
-                                                    c.scroll.x = new_scroll_x;
-                                                });
-                                                scrolled = true;
+                                                let mut new_scroll_y = constraints.scroll.y;
+                                                let mut new_scroll_x = constraints.scroll.x;
+
+                                                if is_scrollable_y
+                                                    && (max_scroll_y > 0.0
+                                                        || constraints.scroll.y > max_scroll_y)
+                                                {
+                                                    new_scroll_y = (constraints.scroll.y
+                                                        - eff_delta_y)
+                                                        .clamp(0.0, max_scroll_y);
+                                                }
+                                                if is_scrollable_x
+                                                    && (max_scroll_x > 0.0
+                                                        || constraints.scroll.x > max_scroll_x)
+                                                {
+                                                    new_scroll_x = (constraints.scroll.x
+                                                        - eff_delta_x)
+                                                        .clamp(0.0, max_scroll_x);
+                                                }
+
+                                                if new_scroll_y != constraints.scroll.y
+                                                    || new_scroll_x != constraints.scroll.x
+                                                {
+                                                    node.update_constraints(
+                                                        &mut self.context,
+                                                        |c| {
+                                                            c.scroll.y = new_scroll_y;
+                                                            c.scroll.x = new_scroll_x;
+                                                        },
+                                                    );
+                                                    scrolled = true;
+                                                }
+
+                                                let state = self
+                                                    .touch_scroll_states
+                                                    .entry(*node)
+                                                    .or_insert_with(|| {
+                                                        self.scroll_trackers.remove(node);
+                                                        let mut tracker =
+                                                            crate::ui::KineticTracker::new(4.8);
+                                                        tracker.on_press(0.0, 0.0);
+                                                        TouchScrollState {
+                                                            tracker,
+                                                            accum_x: 0.0,
+                                                            accum_y: 0.0,
+                                                            last_move_time: Instant::now(),
+                                                        }
+                                                    });
+
+                                                state.accum_x -= eff_delta_x;
+                                                state.accum_y -= eff_delta_y;
+                                                state.tracker.on_move(state.accum_x, state.accum_y);
+                                                state.last_move_time = Instant::now();
                                             }
-                                            let dt = (self.context.dt as f32).max(0.008);
-                                            let vy = -delta_y / dt;
-                                            let vx = -delta_x / dt;
-                                            self.last_touch_velocity.insert(*node, (vx, vy));
                                         }
                                         TouchPhase::Ended => {
-                                            if let Some((vx, vy)) =
-                                                self.last_touch_velocity.remove(node)
+                                            if let Some(mut state) =
+                                                self.touch_scroll_states.remove(node)
                                             {
-                                                if vx.abs() > 10.0 || vy.abs() > 10.0 {
+                                                let (vx, vy) = state.tracker.on_release();
+                                                if vx.abs() > 30.0 || vy.abs() > 30.0 {
                                                     let mut tracker =
                                                         crate::ui::KineticTracker::new(4.8);
                                                     tracker.set_velocity(vx, vy);
@@ -883,8 +957,8 @@ where
                                             }
                                         }
                                         TouchPhase::Cancelled => {
+                                            self.touch_scroll_states.remove(node);
                                             self.scroll_trackers.remove(node);
-                                            self.last_touch_velocity.remove(node);
                                         }
                                     }
                                 } else {
