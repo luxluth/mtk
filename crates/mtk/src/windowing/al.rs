@@ -447,7 +447,7 @@ where
             } = mtk_event
             {
                 if pressed {
-                    for node in hit_nodes.iter().rev() {
+                    for node in hit_nodes.iter() {
                         let constraints = node.get_constraints(&self.context).unwrap_or_default();
                         let sb_style = node.get_scrollbar_style(&self.context).unwrap_or_default();
                         if (constraints.overflow == crate::Overflow::Scroll
@@ -818,29 +818,37 @@ where
                     ref hit_nodes,
                 } = mtk_event
                 {
-                    for node in hit_nodes.iter().rev() {
+                    self.touch_scroll_states
+                        .retain(|_, s| s.last_move_time.elapsed().as_millis() < 600);
+
+                    for node in hit_nodes.iter() {
                         let constraints = node.get_constraints(&self.context).unwrap_or_default();
                         let is_scrollable_y = constraints.overflow == crate::Overflow::Scroll
                             || constraints.overflow == crate::Overflow::Auto;
                         let is_scrollable_x = constraints.overflow == crate::Overflow::Scroll
-                            || constraints.overflow == crate::Overflow::Auto
-                            || constraints.overflow == crate::Overflow::Hidden;
+                            || constraints.overflow == crate::Overflow::Auto;
 
-                        if is_scrollable_y || is_scrollable_x {
-                            if let Some(computed) = node.get_computed(&self.context) {
-                                let content_h = node.compute_content_height(&self.context);
-                                let max_scroll_y = (content_h - computed.h).max(0.0);
+                        if !is_scrollable_y && !is_scrollable_x {
+                            continue;
+                        }
 
-                                let content_w = computed.content_w.max(computed.w);
-                                let max_scroll_x = (content_w - computed.w).max(0.0);
+                        if let Some(computed) = node.get_computed(&self.context) {
+                            let content_h = node.compute_content_height(&self.context);
+                            let max_scroll_y = (content_h - computed.h).max(0.0);
 
-                                let mut scrolled = false;
+                            let content_w = computed.content_w.max(computed.w);
+                            let max_scroll_x = (content_w - computed.w).max(0.0);
 
-                                if is_touchpad {
-                                    use winit::event::TouchPhase;
-                                    match phase {
-                                        TouchPhase::Started => {
-                                            self.scroll_trackers.remove(node);
+                            let mut scrolled = false;
+
+                            if is_touchpad {
+                                use winit::event::TouchPhase;
+                                match phase {
+                                    TouchPhase::Started => {
+                                        if self.scroll_trackers.remove(node).is_some() {
+                                            scrolled = true;
+                                        }
+                                        if max_scroll_y > 0.0 || max_scroll_x > 0.0 {
                                             let mut tracker = crate::ui::KineticTracker::new(4.8);
                                             tracker.on_press(0.0, 0.0);
                                             self.touch_scroll_states.insert(
@@ -852,33 +860,13 @@ where
                                                     last_move_time: Instant::now(),
                                                 },
                                             );
-                                        }
-                                        TouchPhase::Moved => {
-                                            if delta_x.abs() < 0.001 && delta_y.abs() < 0.001 {
-                                                // Handle zero-delta release (libinput / Wayland axis_stop)
-                                                if let Some(mut state) =
-                                                    self.touch_scroll_states.remove(node)
-                                                {
-                                                    let (vx, vy) = state.tracker.on_release();
-                                                    if vx.abs() > 30.0 || vy.abs() > 30.0 {
-                                                        let mut tracker =
-                                                            crate::ui::KineticTracker::new(4.8);
-                                                        tracker.set_velocity(vx, vy);
-                                                        self.scroll_trackers.insert(*node, tracker);
-                                                        scrolled = true;
-                                                    }
-                                                }
-                                            } else {
-                                                // Dynamic trackpad acceleration curve:
-                                                // Slow precise adjustments remain ~1.0x - 1.1x.
-                                                // Fast flick gestures accelerate smoothly up to 3.5x.
+                                            if delta_x.abs() > 0.001 || delta_y.abs() > 0.001 {
                                                 let event_dist =
                                                     (delta_x * delta_x + delta_y * delta_y).sqrt();
                                                 let accel =
                                                     (1.0 + (event_dist / 12.0)).clamp(1.0, 3.5);
                                                 let mut eff_delta_x = delta_x * accel;
                                                 let mut eff_delta_y = delta_y * accel;
-
                                                 if is_scrollable_x
                                                     && !is_scrollable_y
                                                     && delta_x.abs() == 0.0
@@ -886,27 +874,18 @@ where
                                                     eff_delta_x = eff_delta_y;
                                                     eff_delta_y = 0.0;
                                                 }
-
-                                                let mut new_scroll_y = constraints.scroll.y;
-                                                let mut new_scroll_x = constraints.scroll.x;
-
-                                                if is_scrollable_y
-                                                    && (max_scroll_y > 0.0
-                                                        || constraints.scroll.y > max_scroll_y)
-                                                {
-                                                    new_scroll_y = (constraints.scroll.y
-                                                        - eff_delta_y)
-                                                        .clamp(0.0, max_scroll_y);
-                                                }
-                                                if is_scrollable_x
-                                                    && (max_scroll_x > 0.0
-                                                        || constraints.scroll.x > max_scroll_x)
-                                                {
-                                                    new_scroll_x = (constraints.scroll.x
-                                                        - eff_delta_x)
-                                                        .clamp(0.0, max_scroll_x);
-                                                }
-
+                                                let new_scroll_y = if is_scrollable_y {
+                                                    (constraints.scroll.y - eff_delta_y)
+                                                        .clamp(0.0, max_scroll_y)
+                                                } else {
+                                                    constraints.scroll.y
+                                                };
+                                                let new_scroll_x = if is_scrollable_x {
+                                                    (constraints.scroll.x - eff_delta_x)
+                                                        .clamp(0.0, max_scroll_x)
+                                                } else {
+                                                    constraints.scroll.x
+                                                };
                                                 if new_scroll_y != constraints.scroll.y
                                                     || new_scroll_x != constraints.scroll.x
                                                 {
@@ -919,7 +898,86 @@ where
                                                     );
                                                     scrolled = true;
                                                 }
+                                                if let Some(state) =
+                                                    self.touch_scroll_states.get_mut(node)
+                                                {
+                                                    state.accum_x -= eff_delta_x;
+                                                    state.accum_y -= eff_delta_y;
+                                                    state
+                                                        .tracker
+                                                        .on_move(state.accum_x, state.accum_y);
+                                                    state.last_move_time = Instant::now();
+                                                }
+                                            }
+                                        }
+                                    }
+                                    TouchPhase::Moved => {
+                                        if delta_x.abs() < 0.001 && delta_y.abs() < 0.001 {
+                                            if let Some(mut state) =
+                                                self.touch_scroll_states.remove(node)
+                                            {
+                                                let (vx, vy) = state.tracker.on_release();
+                                                if vx.abs() > 30.0 || vy.abs() > 30.0 {
+                                                    let mut tracker =
+                                                        crate::ui::KineticTracker::new(4.8);
+                                                    tracker.set_velocity(vx, vy);
+                                                    self.scroll_trackers.insert(*node, tracker);
+                                                    scrolled = true;
+                                                }
+                                            }
+                                        } else {
+                                            let can_scroll_y = is_scrollable_y
+                                                && (max_scroll_y > 0.0
+                                                    || constraints.scroll.y > max_scroll_y);
+                                            let can_scroll_x = is_scrollable_x
+                                                && (max_scroll_x > 0.0
+                                                    || constraints.scroll.x > max_scroll_x);
 
+                                            if !can_scroll_y && !can_scroll_x {
+                                                continue;
+                                            }
+
+                                            let event_dist =
+                                                (delta_x * delta_x + delta_y * delta_y).sqrt();
+                                            let accel = (1.0 + (event_dist / 12.0)).clamp(1.0, 3.5);
+                                            let mut eff_delta_x = delta_x * accel;
+                                            let mut eff_delta_y = delta_y * accel;
+
+                                            if is_scrollable_x
+                                                && !is_scrollable_y
+                                                && delta_x.abs() == 0.0
+                                            {
+                                                eff_delta_x = eff_delta_y;
+                                                eff_delta_y = 0.0;
+                                            }
+
+                                            let mut new_scroll_y = constraints.scroll.y;
+                                            let mut new_scroll_x = constraints.scroll.x;
+
+                                            if can_scroll_y {
+                                                new_scroll_y = (constraints.scroll.y - eff_delta_y)
+                                                    .clamp(0.0, max_scroll_y);
+                                            }
+                                            if can_scroll_x {
+                                                new_scroll_x = (constraints.scroll.x - eff_delta_x)
+                                                    .clamp(0.0, max_scroll_x);
+                                            }
+
+                                            let scroll_changed = new_scroll_y
+                                                != constraints.scroll.y
+                                                || new_scroll_x != constraints.scroll.x;
+
+                                            if scroll_changed {
+                                                node.update_constraints(&mut self.context, |c| {
+                                                    c.scroll.y = new_scroll_y;
+                                                    c.scroll.x = new_scroll_x;
+                                                });
+                                                scrolled = true;
+                                            }
+
+                                            if scrolled
+                                                || self.touch_scroll_states.contains_key(node)
+                                            {
                                                 let state = self
                                                     .touch_scroll_states
                                                     .entry(*node)
@@ -942,90 +1000,114 @@ where
                                                 state.last_move_time = Instant::now();
                                             }
                                         }
-                                        TouchPhase::Ended => {
-                                            if let Some(mut state) =
-                                                self.touch_scroll_states.remove(node)
-                                            {
-                                                let (vx, vy) = state.tracker.on_release();
-                                                if vx.abs() > 30.0 || vy.abs() > 30.0 {
-                                                    let mut tracker =
-                                                        crate::ui::KineticTracker::new(4.8);
-                                                    tracker.set_velocity(vx, vy);
-                                                    self.scroll_trackers.insert(*node, tracker);
-                                                    scrolled = true;
-                                                }
+                                    }
+                                    TouchPhase::Ended => {
+                                        if let Some(mut state) =
+                                            self.touch_scroll_states.remove(node)
+                                        {
+                                            let (vx, vy) = state.tracker.on_release();
+                                            if vx.abs() > 30.0 || vy.abs() > 30.0 {
+                                                let mut tracker =
+                                                    crate::ui::KineticTracker::new(4.8);
+                                                tracker.set_velocity(vx, vy);
+                                                self.scroll_trackers.insert(*node, tracker);
+                                                scrolled = true;
                                             }
                                         }
-                                        TouchPhase::Cancelled => {
-                                            self.touch_scroll_states.remove(node);
-                                            self.scroll_trackers.remove(node);
+                                    }
+                                    TouchPhase::Cancelled => {
+                                        self.touch_scroll_states.remove(node);
+                                        if self.scroll_trackers.remove(node).is_some() {
+                                            scrolled = true;
                                         }
                                     }
-                                } else {
-                                    let (cur_vx, cur_vy) = self
-                                        .scroll_trackers
-                                        .get(node)
-                                        .map(|t| t.velocity())
-                                        .unwrap_or((0.0, 0.0));
+                                }
+                            } else {
+                                let (cur_vx, cur_vy) = self
+                                    .scroll_trackers
+                                    .get(node)
+                                    .map(|t| t.velocity())
+                                    .unwrap_or((0.0, 0.0));
 
-                                    let mut new_vy = cur_vy;
-                                    let mut new_vx = cur_vx;
+                                let mut new_vy = cur_vy;
+                                let mut new_vx = cur_vx;
 
-                                    if is_scrollable_y
-                                        && (max_scroll_y > 0.0
-                                            || constraints.scroll.y > max_scroll_y)
-                                        && delta_y.abs() > 0.0
+                                if is_scrollable_y
+                                    && (max_scroll_y > 0.0 || constraints.scroll.y > max_scroll_y)
+                                    && delta_y.abs() > 0.0
+                                {
+                                    let impulse_y = -delta_y * 45.0;
+                                    new_vy = if (cur_vy > 0.0 && impulse_y > 0.0)
+                                        || (cur_vy < 0.0 && impulse_y < 0.0)
                                     {
-                                        let impulse_y = -delta_y * 45.0;
-                                        new_vy = if (cur_vy > 0.0 && impulse_y > 0.0)
-                                            || (cur_vy < 0.0 && impulse_y < 0.0)
-                                        {
-                                            (cur_vy * 0.7 + impulse_y).clamp(-15000.0, 15000.0)
-                                        } else {
-                                            impulse_y
-                                        };
-                                        scrolled = true;
-                                    }
-
-                                    let scroll_delta_x = if delta_x.abs() > 0.0 {
-                                        delta_x
-                                    } else if max_scroll_y == 0.0 || !is_scrollable_y {
-                                        delta_y
+                                        (cur_vy * 0.7 + impulse_y).clamp(-15000.0, 15000.0)
                                     } else {
-                                        0.0
+                                        impulse_y
                                     };
+                                    scrolled = true;
+                                }
 
-                                    if is_scrollable_x
-                                        && (max_scroll_x > 0.0
-                                            || constraints.scroll.x > max_scroll_x)
-                                        && scroll_delta_x.abs() > 0.0
+                                let scroll_delta_x = if delta_x.abs() > 0.0 {
+                                    delta_x
+                                } else if max_scroll_y == 0.0 || !is_scrollable_y {
+                                    delta_y
+                                } else {
+                                    0.0
+                                };
+
+                                if is_scrollable_x
+                                    && (max_scroll_x > 0.0 || constraints.scroll.x > max_scroll_x)
+                                    && scroll_delta_x.abs() > 0.0
+                                {
+                                    let impulse_x = -scroll_delta_x * 45.0;
+                                    new_vx = if (cur_vx > 0.0 && impulse_x > 0.0)
+                                        || (cur_vx < 0.0 && impulse_x < 0.0)
                                     {
-                                        let impulse_x = -scroll_delta_x * 45.0;
-                                        new_vx = if (cur_vx > 0.0 && impulse_x > 0.0)
-                                            || (cur_vx < 0.0 && impulse_x < 0.0)
-                                        {
-                                            (cur_vx * 0.7 + impulse_x).clamp(-15000.0, 15000.0)
-                                        } else {
-                                            impulse_x
-                                        };
-                                        scrolled = true;
-                                    }
-
-                                    if scrolled {
-                                        let mut tracker = self
-                                            .scroll_trackers
-                                            .remove(node)
-                                            .unwrap_or_else(|| crate::ui::KineticTracker::new(4.8));
-                                        tracker.set_velocity(new_vx, new_vy);
-                                        self.scroll_trackers.insert(*node, tracker);
-                                    }
+                                        (cur_vx * 0.7 + impulse_x).clamp(-15000.0, 15000.0)
+                                    } else {
+                                        impulse_x
+                                    };
+                                    scrolled = true;
                                 }
 
                                 if scrolled {
-                                    if let Some(window) = &self.window {
-                                        window.request_redraw();
+                                    let mut tracker = self
+                                        .scroll_trackers
+                                        .remove(node)
+                                        .unwrap_or_else(|| crate::ui::KineticTracker::new(4.8));
+                                    tracker.set_velocity(new_vx, new_vy);
+                                    self.scroll_trackers.insert(*node, tracker);
+                                }
+                            }
+
+                            if scrolled {
+                                if let Some(window) = &self.window {
+                                    window.request_redraw();
+                                }
+                                break;
+                            }
+                        }
+                    }
+
+                    if !self.touch_scroll_states.is_empty() {
+                        if let Event::MouseWheel {
+                            phase: winit::event::TouchPhase::Ended,
+                            ..
+                        } = mtk_event
+                        {
+                            let remaining: Vec<Node> =
+                                self.touch_scroll_states.keys().copied().collect();
+                            for node in remaining {
+                                if let Some(mut state) = self.touch_scroll_states.remove(&node) {
+                                    let (vx, vy) = state.tracker.on_release();
+                                    if vx.abs() > 30.0 || vy.abs() > 30.0 {
+                                        let mut tracker = crate::ui::KineticTracker::new(4.8);
+                                        tracker.set_velocity(vx, vy);
+                                        self.scroll_trackers.insert(node, tracker);
+                                        if let Some(window) = &self.window {
+                                            window.request_redraw();
+                                        }
                                     }
-                                    break;
                                 }
                             }
                         }
@@ -1530,5 +1612,136 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(50));
         window.process_pending_messages();
         assert_eq!(window.state, 777);
+    }
+
+    #[test]
+    fn test_trackpad_scroll_nested_hidden_parent_targets_inner_scroll() {
+        use crate::style::{Overflow, Size, Style};
+        use crate::ui::ViewStyleExt;
+        use crate::ui::widgets::{column, text};
+
+        let mut window = Window::with(
+            0,
+            |state: &mut i32, msg: i32| *state += msg,
+            |_state: &i32| {
+                // Outer container with Overflow::Hidden (like Router or card)
+                column((
+                    // Inner container with Overflow::Scroll (like virtual_list or scroll_view)
+                    column((
+                        text("Item 1").style(Style::new().height(Size::Fixed(200))),
+                        text("Item 2").style(Style::new().height(Size::Fixed(200))),
+                        text("Item 3").style(Style::new().height(Size::Fixed(200))),
+                    ))
+                    .style(
+                        Style::new()
+                            .width(Size::Fixed(300))
+                            .height(Size::Fixed(100))
+                            .overflow(Overflow::Scroll),
+                    ),
+                ))
+                .style(
+                    Style::new()
+                        .width(Size::Fixed(400))
+                        .height(Size::Fixed(400))
+                        .overflow(Overflow::Hidden),
+                )
+            },
+        );
+
+        // Compute layout and build render list
+        window.context.compute_layout(800.0, 600.0);
+        window.context.build_render_list(crate::style::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 800.0,
+            h: 600.0,
+        });
+
+        // Pick at (50, 50) which is inside the inner scrollable container
+        let hit_nodes = window.context.pick(50.0, 50.0);
+        assert!(hit_nodes.len() >= 2);
+
+        // Find outer (Hidden) and inner (Scroll) nodes
+        let mut inner_scroll_node = None;
+        let mut outer_hidden_node = None;
+        for &node in &hit_nodes {
+            let overflow = node.get_constraints(&window.context).map(|c| c.overflow);
+            if overflow == Some(Overflow::Scroll) {
+                inner_scroll_node = Some(node);
+            } else if overflow == Some(Overflow::Hidden) {
+                outer_hidden_node = Some(node);
+            }
+        }
+        let inner_node = inner_scroll_node.expect("Should find inner scroll node");
+        let outer_node = outer_hidden_node.expect("Should find outer hidden node");
+
+        // 1. Dispatch touch gesture Moves simulating a natural swipe across two frames (10ms apart)
+        window.dispatch_and_rebuild(Event::MouseWheel {
+            delta_x: 0.0,
+            delta_y: -20.0,
+            is_touchpad: true,
+            phase: winit::event::TouchPhase::Moved,
+            hit_nodes: hit_nodes.clone(),
+        });
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        window.dispatch_and_rebuild(Event::MouseWheel {
+            delta_x: 0.0,
+            delta_y: -20.0,
+            is_touchpad: true,
+            phase: winit::event::TouchPhase::Moved,
+            hit_nodes: hit_nodes.clone(),
+        });
+
+        // The inner node should have scrolled
+        let inner_scroll_y = inner_node
+            .get_constraints(&window.context)
+            .unwrap()
+            .scroll
+            .y;
+        let outer_scroll_y = outer_node
+            .get_constraints(&window.context)
+            .unwrap()
+            .scroll
+            .y;
+        assert!(
+            inner_scroll_y > 0.0,
+            "Inner node scroll.y should have increased"
+        );
+        assert_eq!(
+            outer_scroll_y, 0.0,
+            "Outer hidden node should NOT have scrolled"
+        );
+
+        // 2. Dispatch TouchPhase::Ended with release
+        window.dispatch_and_rebuild(Event::MouseWheel {
+            delta_x: 0.0,
+            delta_y: 0.0,
+            is_touchpad: true,
+            phase: winit::event::TouchPhase::Ended,
+            hit_nodes: hit_nodes.clone(),
+        });
+
+        // The kinetic tracker must be attached to the inner node, NOT the outer node!
+        assert!(
+            window.scroll_trackers.contains_key(&inner_node),
+            "Inner node should receive KineticTracker on release"
+        );
+        assert!(
+            !window.scroll_trackers.contains_key(&outer_node),
+            "Outer hidden node should NEVER receive KineticTracker"
+        );
+
+        // 3. Dispatch Tick to verify momentum glide advances scroll
+        let prev_scroll_y = inner_scroll_y;
+        window.dispatch_and_rebuild(Event::Tick { dt: 0.016 });
+        let after_tick_scroll_y = inner_node
+            .get_constraints(&window.context)
+            .unwrap()
+            .scroll
+            .y;
+        assert!(
+            after_tick_scroll_y > prev_scroll_y,
+            "Inner scroll node should continue gliding on tick"
+        );
     }
 }
