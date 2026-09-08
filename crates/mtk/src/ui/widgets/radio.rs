@@ -249,7 +249,11 @@ where
             Event::KeyboardInput { event: k_event, .. } => {
                 if Some(element.outer_circle) == ctx.focused_node() && k_event.state.is_pressed() {
                     match k_event.logical_key {
-                        Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) => {
+                        Key::Named(NamedKey::Enter) => {
+                            let msg = self.on_select.as_ref().map(|f| f());
+                            (EventResult::Handled, msg)
+                        }
+                        Key::Character(ref s) if s == " " => {
                             let msg = self.on_select.as_ref().map(|f| f());
                             (EventResult::Handled, msg)
                         }

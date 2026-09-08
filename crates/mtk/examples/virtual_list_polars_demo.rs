@@ -286,7 +286,7 @@ fn main() {
         total_count: row_count,
     };
 
-    let mut window = Window::with(state, update, |state: &AppState| {
+    let window = Window::with(state, update, |state: &AppState| {
         let rows_ref = Rc::clone(&state.filtered_rows);
         let count = rows_ref.len();
         let query_time = state.query_time_ms;

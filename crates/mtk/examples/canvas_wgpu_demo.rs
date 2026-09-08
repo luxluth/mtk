@@ -219,7 +219,7 @@ fn main() {
         is_pressed,
     };
 
-    let mut window = Window::with(
+    let window = Window::with(
         initial_state,
         |state, msg: AppMsg| match msg {
             AppMsg::MouseMove { u, v } => {
@@ -273,10 +273,12 @@ fn main() {
                 // Custom WGPU Canvas
                 wgpu_canvas(painter.clone())
                     .on_event(|_state, event, details| match event {
-                        Event::CursorMoved { .. } => Some(AppMsg::MouseMove {
-                            u: details.uv_x,
-                            v: details.uv_y,
-                        }),
+                        Event::CursorMoved { .. } | Event::StylusInput { .. } => {
+                            Some(AppMsg::MouseMove {
+                                u: details.uv_x,
+                                v: details.uv_y,
+                            })
+                        }
                         Event::MouseInput { pressed, .. } => {
                             Some(AppMsg::MouseClick { pressed })
                         }

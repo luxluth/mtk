@@ -96,7 +96,7 @@ fn main() {
         dark_mode: false,
     };
 
-    let mut window = Window::with(state, update, |state: &AppState| {
+    let window = Window::with(state, update, |state: &AppState| {
         let bg = if state.dark_mode {
             rgb!(20, 20, 20)
         } else {

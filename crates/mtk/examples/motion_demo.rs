@@ -63,7 +63,7 @@ fn main() {
         .repeat(Repeat::PingPong)
         .curve(Curve::ease_in_out());
 
-    let mut window = Window::with(
+    let window = Window::with(
         initial_state,
         |state, msg: Message| match msg {
             Message::Increment => state.click_count += 1,

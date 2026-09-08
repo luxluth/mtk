@@ -77,7 +77,7 @@ fn main() {
         bio: "Welcome to MTK TextArea!\nPress Enter for a new line.\nUse Arrow keys Up/Down/Left/Right to navigate.".to_string(),
     };
 
-    let mut window = Window::with(state, update, app);
+    let window = Window::with(state, update, app);
 
     window.present_with(
         WindowAttributes::default()

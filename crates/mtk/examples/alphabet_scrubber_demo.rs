@@ -487,7 +487,7 @@ fn main() {
         scroll_pct: 0.0,
     };
 
-    let mut window = Window::with(state, update, |state: &AppState| {
+    let window = Window::with(state, update, |state: &AppState| {
         // Material 3 slender segmented scrollbar style (Light Theme)
         let m3_scrollbar = ScrollbarStyle {
             width: 6.0,

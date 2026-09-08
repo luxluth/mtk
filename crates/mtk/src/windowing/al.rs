@@ -3,9 +3,15 @@ use std::{collections::HashMap, sync::Arc, time::Instant};
 use winit::{
     application::ApplicationHandler,
     dpi::{PhysicalPosition, PhysicalSize},
-    event::{MouseScrollDelta, WindowEvent},
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    window::{Window as WWindow, WindowId},
+    event::{
+        ButtonSource, DeviceEvent, ElementState, MouseScrollDelta, PointerSource, TabletToolKind,
+        WindowEvent,
+    },
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
+    window::{
+        ImeCapabilities, ImeEnableRequest, ImeHint, ImePurpose, ImeRequest, ImeRequestData,
+        Window as WWindow, WindowAttributes as WinitWindowAttributes, WindowId,
+    },
 };
 
 use crate::{
@@ -18,12 +24,11 @@ use crate::{
 
 use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use winit::event_loop::EventLoopProxy;
 
 /// A thread-safe, cloneable handle to dispatch messages to the UI event loop from background threads.
 pub struct WindowHandle<Msg: 'static + Send> {
     tx: Sender<Msg>,
-    proxy: Arc<Mutex<Option<EventLoopProxy<()>>>>,
+    proxy: Arc<Mutex<Option<EventLoopProxy>>>,
 }
 
 impl<Msg: 'static + Send> Clone for WindowHandle<Msg> {
@@ -41,7 +46,7 @@ impl<Msg: 'static + Send> WindowHandle<Msg> {
         self.tx.send(msg).map_err(|e| e.0)?;
         if let Ok(guard) = self.proxy.lock() {
             if let Some(proxy) = guard.as_ref() {
-                let _ = proxy.send_event(());
+                proxy.wake_up();
             }
         }
         Ok(())
@@ -56,17 +61,17 @@ struct TouchScrollState {
     last_move_time: Instant,
 }
 
-pub struct Window<'r, S, V>
+pub struct Window<S, V>
 where
     V: View<S>,
     V::Message: 'static + Send,
 {
     msg_tx: Sender<V::Message>,
     msg_rx: Receiver<V::Message>,
-    event_proxy: Arc<Mutex<Option<EventLoopProxy<()>>>>,
-    renderer: Option<Renderer<'r>>,
+    event_proxy: Arc<Mutex<Option<EventLoopProxy>>>,
+    renderer: Option<Renderer>,
 
-    window: Option<Arc<WWindow>>,
+    window: Option<Arc<dyn WWindow>>,
     context: Context,
     state: S,
 
@@ -203,7 +208,7 @@ impl Default for WindowAttributes {
     }
 }
 
-impl<'r, S, V> Window<'r, S, V>
+impl<S: 'static, V: 'static> Window<S, V>
 where
     V: View<S>,
     V::Message: 'static + Send,
@@ -282,7 +287,7 @@ where
     fn execute_command_inner(
         context: &mut Context,
         msg_tx: &Sender<V::Message>,
-        event_proxy: &Arc<Mutex<Option<EventLoopProxy<()>>>>,
+        event_proxy: &Arc<Mutex<Option<EventLoopProxy>>>,
         cmd: Command<V::Message>,
     ) {
         if cmd.is_empty() {
@@ -325,7 +330,7 @@ where
         Ok(self)
     }
 
-    pub fn present(&mut self) {
+    pub fn present(self) {
         let event_loop = EventLoop::new().unwrap();
         if let Ok(mut guard) = self.event_proxy.lock() {
             *guard = Some(event_loop.create_proxy());
@@ -340,7 +345,7 @@ where
         event_loop.run_app(self).unwrap();
     }
 
-    pub fn present_with(&mut self, attr: WindowAttributes) {
+    pub fn present_with(mut self, attr: WindowAttributes) {
         self.attr = attr;
         self.present();
     }
@@ -1189,24 +1194,28 @@ where
     }
 }
 
-impl<'r, S, V> ApplicationHandler for Window<'r, S, V>
+impl<S: 'static, V: 'static> ApplicationHandler for Window<S, V>
 where
     V: View<S>,
     V::Message: 'static + Send,
 {
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: ()) {
+    fn proxy_wake_up(&mut self, _event_loop: &dyn ActiveEventLoop) {
         self.process_pending_messages();
     }
 
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+    fn can_create_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
+        if self.window.is_some() {
+            return;
+        }
+
         let attr = self.attr.clone();
-        let mut window_attributes = WWindow::default_attributes()
+        let mut window_attributes = WinitWindowAttributes::default()
             .with_title(attr.title)
             .with_decorations(attr.decorations)
             .with_transparent(attr.transparent)
             .with_blur(attr.blur)
             .with_resizable(attr.resizable)
-            .with_inner_size(attr.size);
+            .with_surface_size(attr.size);
 
         #[cfg(any(
             target_os = "linux",
@@ -1216,25 +1225,41 @@ where
             target_os = "dragonfly"
         ))]
         {
-            use winit::platform::wayland::WindowAttributesExtWayland;
-            window_attributes = window_attributes.with_name(attr.app_id.clone(), "");
+            use winit::platform::wayland::{ActiveEventLoopExtWayland, WindowAttributesWayland};
+            if event_loop.is_wayland() {
+                let wayland_attr =
+                    WindowAttributesWayland::default().with_name(attr.app_id.clone(), "");
+                window_attributes =
+                    window_attributes.with_platform_attributes(Box::new(wayland_attr));
+            }
         }
 
         if let Some(min_size) = attr.min_size {
-            window_attributes = window_attributes.with_min_inner_size(min_size);
+            window_attributes = window_attributes.with_min_surface_size(min_size);
         }
 
         if let Some(max_size) = attr.max_size {
-            window_attributes = window_attributes.with_max_inner_size(max_size);
+            window_attributes = window_attributes.with_max_surface_size(max_size);
         }
 
-        let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
-        window.set_ime_allowed(true);
+        let window: Arc<dyn WWindow> =
+            Arc::from(event_loop.create_window(window_attributes).unwrap());
+        let ime_pos = PhysicalPosition::new(0, 0);
+        let ime_size = PhysicalSize::new(0, 0);
+        let ime_caps = ImeCapabilities::new()
+            .with_hint_and_purpose()
+            .with_cursor_area();
+        let request_data = ImeRequestData::default()
+            .with_hint_and_purpose(ImeHint::NONE, ImePurpose::Normal)
+            .with_cursor_area(ime_pos.into(), ime_size.into());
+        if let Some(enable_req) = ImeEnableRequest::new(ime_caps, request_data) {
+            let _ = window.request_ime_update(ImeRequest::Enable(enable_req));
+        }
 
         let scale_factor = window.scale_factor() as f32;
         self.context.scale_factor = scale_factor;
 
-        let phys_size = window.inner_size();
+        let phys_size = window.surface_size();
         let logical_w = phys_size.width as f32 / scale_factor;
         let logical_h = phys_size.height as f32 / scale_factor;
 
@@ -1251,7 +1276,7 @@ where
         window.request_redraw();
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, _event_loop: &dyn ActiveEventLoop) {
         self.process_pending_messages();
         if self.debug_tx.is_some() {
             if let Some(window) = &self.window {
@@ -1262,11 +1287,11 @@ where
 
     fn device_event(
         &mut self,
-        _event_loop: &ActiveEventLoop,
-        _device_id: winit::event::DeviceId,
-        event: winit::event::DeviceEvent,
+        _event_loop: &dyn ActiveEventLoop,
+        _device_id: Option<winit::event::DeviceId>,
+        event: DeviceEvent,
     ) {
-        if let winit::event::DeviceEvent::MouseMotion { delta } = event {
+        if let DeviceEvent::PointerMotion { delta } = event {
             if let Some(cap) = &self.context.captured_pointer {
                 if cap.policy == crate::CursorGrabPolicy::Locked {
                     let dx = delta.0 as f32;
@@ -1285,7 +1310,7 @@ where
         }
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, event_loop: &dyn ActiveEventLoop, id: WindowId, event: WindowEvent) {
         let window = self.window.as_ref().unwrap().clone();
         if id != window.id() {
             return;
@@ -1318,7 +1343,7 @@ where
                 let mtk_event = Event::Ime(ime);
                 self.dispatch_and_rebuild(mtk_event);
             }
-            WindowEvent::Resized(size) => {
+            WindowEvent::SurfaceResized(size) => {
                 let scale_factor = window.scale_factor() as f32;
                 self.context.scale_factor = scale_factor;
 
@@ -1349,7 +1374,9 @@ where
                 }
                 window.request_redraw();
             }
-            WindowEvent::CursorMoved { position, .. } => {
+            WindowEvent::PointerMoved {
+                position, source, ..
+            } => {
                 let scale_factor = window.scale_factor();
                 let x = (position.x / scale_factor) as f32;
                 let y = (position.y / scale_factor) as f32;
@@ -1383,6 +1410,26 @@ where
                     }
                 }
 
+                if let PointerSource::TabletTool { kind, data } = &source {
+                    let pressure = data
+                        .force
+                        .as_ref()
+                        .map_or(0.0, |f| f.normalized(None) as f32);
+                    let tilt = data.clone().tilt().map(|t| (t.x as f32, t.y as f32));
+                    let is_eraser = *kind == TabletToolKind::Eraser;
+                    let pressed = pressure > 0.0;
+                    let stylus_event = Event::StylusInput {
+                        x,
+                        y,
+                        pressure,
+                        tilt,
+                        is_eraser,
+                        pressed,
+                        hit_nodes: hit_nodes.clone(),
+                    };
+                    self.dispatch_and_rebuild(stylus_event);
+                }
+
                 let mtk_event = Event::CursorMoved {
                     x,
                     y,
@@ -1392,8 +1439,18 @@ where
                 };
                 self.dispatch_and_rebuild(mtk_event);
             }
-            WindowEvent::MouseInput { state, button, .. } => {
-                let pressed = state == winit::event::ElementState::Pressed;
+            WindowEvent::PointerButton {
+                state,
+                position,
+                button,
+                ..
+            } => {
+                let pressed = state == ElementState::Pressed;
+                let scale_factor = window.scale_factor();
+                let x = (position.x / scale_factor) as f32;
+                let y = (position.y / scale_factor) as f32;
+                self.cursor_pos = (x, y);
+
                 let mut hit_nodes = self
                     .context
                     .pick(self.cursor_pos.0, self.cursor_pos.1)
@@ -1403,14 +1460,44 @@ where
                         hit_nodes.insert(0, cap.node);
                     }
                 }
-                let mtk_event = Event::MouseInput {
-                    button,
-                    pressed,
-                    x: self.cursor_pos.0,
-                    y: self.cursor_pos.1,
-                    hit_nodes,
-                };
-                self.dispatch_and_rebuild(mtk_event);
+
+                if let ButtonSource::TabletTool { kind, data, .. } = &button {
+                    let pressure = data
+                        .force
+                        .as_ref()
+                        .map_or(if pressed { 1.0 } else { 0.0 }, |f| {
+                            f.normalized(None) as f32
+                        });
+                    let tilt = data.clone().tilt().map(|t| (t.x as f32, t.y as f32));
+                    let is_eraser = *kind == TabletToolKind::Eraser;
+                    let stylus_event = Event::StylusInput {
+                        x,
+                        y,
+                        pressure,
+                        tilt,
+                        is_eraser,
+                        pressed,
+                        hit_nodes: hit_nodes.clone(),
+                    };
+                    self.dispatch_and_rebuild(stylus_event);
+                }
+
+                if let Some(mouse_btn) = button.mouse_button() {
+                    let mtk_event = Event::MouseInput {
+                        button: mouse_btn,
+                        pressed,
+                        x: self.cursor_pos.0,
+                        y: self.cursor_pos.1,
+                        hit_nodes,
+                    };
+                    self.dispatch_and_rebuild(mtk_event);
+                }
+            }
+            WindowEvent::PointerLeft { .. } => {
+                self.hovered_node = None;
+                if let Some(tx) = &self.debug_tx {
+                    let _ = tx.send(crate::debugger::DebugEvent::HoveredNode(None));
+                }
             }
             WindowEvent::MouseWheel { delta, phase, .. } => {
                 let scale_factor = window.scale_factor();
@@ -1421,6 +1508,7 @@ where
                         (pos.y / scale_factor) as f32,
                         true,
                     ),
+                    _ => (0.0, 0.0, false),
                 };
                 let hit_nodes = self.context.pick(self.cursor_pos.0, self.cursor_pos.1);
                 let mtk_event = Event::MouseWheel {
@@ -1447,7 +1535,7 @@ where
                             }
                             crate::debugger::DebugCommand::RequestSnapshot => {
                                 let scale_factor = window.scale_factor() as f32;
-                                let size = window.inner_size();
+                                let size = window.surface_size();
                                 let logical_w = size.width as f32 / scale_factor;
                                 let logical_h = size.height as f32 / scale_factor;
                                 self.context.compute_layout(logical_w, logical_h);
@@ -1475,7 +1563,7 @@ where
                 let scale_factor = window.scale_factor() as f32;
                 self.context.scale_factor = scale_factor;
 
-                let phys_size = window.inner_size();
+                let phys_size = window.surface_size();
                 let logical_w = phys_size.width as f32 / scale_factor;
                 let logical_h = phys_size.height as f32 / scale_factor;
 
@@ -1510,7 +1598,10 @@ where
                                 (caret[2] * scale_factor) as u32,
                                 (caret[3] * scale_factor) as u32,
                             );
-                            window.set_ime_cursor_area(position, size);
+                            let _ = window.request_ime_update(ImeRequest::Update(
+                                ImeRequestData::default()
+                                    .with_cursor_area(position.into(), size.into()),
+                            ));
                         }
                     }
                 }
@@ -1742,6 +1833,78 @@ mod tests {
         assert!(
             after_tick_scroll_y > prev_scroll_y,
             "Inner scroll node should continue gliding on tick"
+        );
+    }
+
+    #[test]
+    fn test_stylus_interaction_and_widget_compatibility() {
+        use crate::ui::widgets::button;
+
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        enum AppMsg {
+            ButtonClicked,
+        }
+
+        let mut window = Window::with(
+            0,
+            |state: &mut i32, msg: AppMsg| match msg {
+                AppMsg::ButtonClicked => *state += 1,
+            },
+            |_state: &i32| button("Tap Me").on_click(AppMsg::ButtonClicked),
+        );
+
+        window.context.compute_layout(400.0, 300.0);
+        window.context.build_render_list(crate::style::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 400.0,
+            h: 300.0,
+        });
+
+        let hit_nodes = window.context.pick(10.0, 10.0).to_vec();
+        assert!(!hit_nodes.is_empty());
+
+        // 1. Tablet stylus contact down: emits StylusInput followed by MouseInput(Left, pressed=true)
+        window.dispatch_and_rebuild(Event::StylusInput {
+            x: 10.0,
+            y: 10.0,
+            pressure: 0.8,
+            tilt: Some((12.0, -5.0)),
+            is_eraser: false,
+            pressed: true,
+            hit_nodes: hit_nodes.clone(),
+        });
+        window.dispatch_and_rebuild(Event::MouseInput {
+            button: winit::event::MouseButton::Left,
+            pressed: true,
+            x: 10.0,
+            y: 10.0,
+            hit_nodes: hit_nodes.clone(),
+        });
+
+        assert_eq!(window.state, 0);
+
+        // 2. Tablet stylus contact release: emits StylusInput followed by MouseInput(Left, pressed=false)
+        window.dispatch_and_rebuild(Event::StylusInput {
+            x: 10.0,
+            y: 10.0,
+            pressure: 0.0,
+            tilt: Some((12.0, -5.0)),
+            is_eraser: false,
+            pressed: false,
+            hit_nodes: hit_nodes.clone(),
+        });
+        window.dispatch_and_rebuild(Event::MouseInput {
+            button: winit::event::MouseButton::Left,
+            pressed: false,
+            x: 10.0,
+            y: 10.0,
+            hit_nodes: hit_nodes.clone(),
+        });
+
+        assert_eq!(
+            window.state, 1,
+            "Button click should be triggered by stylus tap via pointer fallback"
         );
     }
 }

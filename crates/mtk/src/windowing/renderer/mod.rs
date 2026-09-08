@@ -48,10 +48,10 @@ pub struct SvgGpuResource {
     pub fit: crate::image::ObjectFit,
 }
 
-pub struct Renderer<'w> {
+pub struct Renderer {
     _instance: wgpu::Instance,
-    window: Arc<Window>,
-    pub surface: wgpu::Surface<'w>,
+    window: Arc<dyn Window>,
+    pub surface: wgpu::Surface<'static>,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub config: wgpu::SurfaceConfiguration,
@@ -116,9 +116,9 @@ fn generate_rgba8_mipmaps(width: u32, height: u32, base_pixels: &[u8]) -> Vec<(u
     mips
 }
 
-impl<'w> Renderer<'w> {
-    pub async fn new(display: OwnedDisplayHandle, window: Arc<Window>) -> Self {
-        let size = window.inner_size();
+impl Renderer {
+    pub async fn new(display: OwnedDisplayHandle, window: Arc<dyn Window>) -> Self {
+        let size = window.surface_size();
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle(
             Box::new(display),
@@ -651,6 +651,7 @@ impl<'w> Renderer<'w> {
                         let mut p_buf = crate::ui::widgets::PixelBuffer::new(
                             w,
                             h,
+                            scale_factor,
                             &mut canvas_data.cpu_buffer,
                             &any_canvas_requested_frame,
                         );
@@ -696,6 +697,7 @@ impl<'w> Renderer<'w> {
                             height: h,
                             format: wgpu::TextureFormat::Rgba8UnormSrgb,
                             dt: context.dt,
+                            scale_factor,
                             frame_requested: &any_canvas_requested_frame,
                         };
                         p.paint(&mut paint_ctx);

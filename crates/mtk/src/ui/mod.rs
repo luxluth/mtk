@@ -59,6 +59,23 @@ pub enum Event {
         /// Ordered list of layout nodes hit-tested under the cursor.
         hit_nodes: Vec<Node>,
     },
+    /// Dispatched when a graphics tablet stylus interaction occurs (pressure, tilt, tool proximity).
+    StylusInput {
+        /// Absolute horizontal pixel position.
+        x: f32,
+        /// Absolute vertical pixel position.
+        y: f32,
+        /// Normalized pressure (0.0 to 1.0).
+        pressure: f32,
+        /// 2-axis tilt in degrees (x, y), if supported by hardware.
+        tilt: Option<(f32, f32)>,
+        /// `true` if the tool is an eraser.
+        is_eraser: bool,
+        /// `true` if tool tip is in contact with the tablet surface.
+        pressed: bool,
+        /// Ordered list of layout nodes hit-tested under the stylus.
+        hit_nodes: Vec<Node>,
+    },
     /// Dispatched when mouse scroll wheel or touchpad scroll gestures are detected.
     MouseWheel {
         /// Horizontal scroll displacement.

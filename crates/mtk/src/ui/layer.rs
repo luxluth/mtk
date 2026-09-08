@@ -595,7 +595,9 @@ where
             // If modal/blocking, prevent events from falling through to base view
             if self.is_modal {
                 match event {
-                    Event::MouseInput { .. } | Event::CursorMoved { .. } => {
+                    Event::MouseInput { .. }
+                    | Event::CursorMoved { .. }
+                    | Event::StylusInput { .. } => {
                         return (EventResult::Handled, None);
                     }
                     _ => {}

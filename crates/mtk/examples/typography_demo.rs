@@ -78,7 +78,7 @@ fn main() {
         alignment: Alignment::Start,
     };
 
-    let mut window = Window::with(
+    let window = Window::with(
         initial_state,
         |state, msg: Message| match msg {
             Message::IncreaseSize => {

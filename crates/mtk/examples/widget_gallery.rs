@@ -882,7 +882,11 @@ fn main() {
         ],
     };
 
+    #[cfg(feature = "debugger")]
     let mut window = Window::with(initial_state, update, app);
+
+    #[cfg(not(feature = "debugger"))]
+    let window = Window::with(initial_state, update, app);
 
     #[cfg(feature = "debugger")]
     window.enable_terminal_debugger();
