@@ -8,7 +8,7 @@ authors = ["luxluth <delphin.blehoussi93@gmail.com>"]
 description = "Muse Toolkit"
 license = "MPL-2.0"
 repository = "https://github.com/luxluth/mtk"
-categories = ["gui"]
+categories = ["gui", "graphics"]
 
 [workspace.dependencies]
 bytemuck = "1.25"

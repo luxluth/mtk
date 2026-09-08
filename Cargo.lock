@@ -2641,11 +2641,11 @@ dependencies = [
 
 [[package]]
 name = "mtk-layout"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 
 [[package]]
 name = "mtk-macro"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "quote",
  "syn 3.0.4",
@@ -2653,7 +2653,7 @@ dependencies = [
 
 [[package]]
 name = "mtk-rs"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "arboard",
  "bytemuck",

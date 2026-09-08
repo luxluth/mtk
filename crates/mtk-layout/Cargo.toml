@@ -1,6 +1,6 @@
 [package]
 name = "mtk-layout"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 edition.workspace = true
 authors.workspace = true
 description = "Pure-Rust Data-Oriented Flexbox Layout Engine for MTK"
