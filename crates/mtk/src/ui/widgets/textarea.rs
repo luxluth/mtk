@@ -33,7 +33,7 @@ pub struct TextArea {
 #[track_caller]
 pub fn text_area() -> TextArea {
     TextArea {
-        captures_tab: true,
+        captures_tab: false,
         custom_style: None,
         source_loc: Some(SourceLocation::here("TextArea")),
     }
