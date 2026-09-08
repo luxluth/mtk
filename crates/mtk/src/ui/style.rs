@@ -9,7 +9,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::animation::{AnimatedValue, Curve, Keyframes};
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
-use crate::{Context, Node, Overflow, Style, TextRenderInfo, TextStyle, TransitionProperty};
+use crate::{
+    Context, Node, Overflow, ScrollbarVisibility, Style, TextRenderInfo, TextStyle,
+    TransitionProperty,
+};
 
 /// Extension trait for [`View`] that enables fluid `.style(...)` and `.animate_keyframes(...)` method chaining.
 pub trait ViewStyleExt: Sized {
@@ -325,6 +328,16 @@ impl<V> StyledView<V> {
 
         // Apply effects
         node.set_effects(ctx, active_style.base_effects.clone());
+
+        // Apply scrollbar style
+        if let Some(sb) = &active_style.scrollbar {
+            node.set_scrollbar_style(ctx, sb.clone());
+            if sb.visibility == ScrollbarVisibility::Never {
+                node.update_constraints(ctx, |c| c.scrollbar_visible = false);
+            } else {
+                node.update_constraints(ctx, |c| c.scrollbar_visible = true);
+            }
+        }
 
         // Apply text style
         if let Some(text) = node.get_text(ctx) {

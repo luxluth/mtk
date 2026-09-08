@@ -5,7 +5,7 @@
 //! for attaching click, hover, press, and release handlers to views.
 
 use super::{Event, View};
-use crate::{Context, Node};
+use crate::{Context, Node, style::Rect};
 use std::rc::Rc;
 
 /// Categorizes high-level user interaction gesture triggers.
@@ -23,6 +23,8 @@ pub enum EventKind {
     Release,
     /// Triggered when the user submits input (e.g., pressing Enter in a focused input field).
     Submit,
+    /// Triggered when a scrollbar thumb is dragged or scrolled.
+    ThumbScroll,
 }
 
 /// Indicates whether a view successfully processed or ignored an incoming event.
@@ -274,6 +276,11 @@ pub trait ViewEventExt<State>: View<State> + Sized {
     fn on_tick<F>(self, handler: F) -> TickHandler<State, Self, F>
     where
         F: Fn(&State, f32) -> Option<Self::Message> + 'static;
+
+    /// Attaches a scrollbar thumb scroll listener fired when the scroll thumb moves or is scrubbed.
+    fn on_thumb_scroll<F>(self, handler: F) -> ThumbScrollHandler<State, Self, F>
+    where
+        F: Fn(&State, ThumbScrollContext) -> Option<Self::Message> + 'static;
 }
 
 impl<State, V: View<State>> ViewEventExt<State> for V {
@@ -374,6 +381,94 @@ impl<State, V: View<State>> ViewEventExt<State> for V {
             handler: Rc::new(handler),
             _marker: std::marker::PhantomData,
         }
+    }
+
+    fn on_thumb_scroll<F>(self, handler: F) -> ThumbScrollHandler<State, Self, F>
+    where
+        F: Fn(&State, ThumbScrollContext) -> Option<Self::Message> + 'static,
+    {
+        ThumbScrollHandler {
+            inner: self,
+            handler: Rc::new(handler),
+            _marker: std::marker::PhantomData,
+        }
+    }
+}
+
+/// Contextual payload passed to scrollbar thumb scroll event listeners.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ThumbScrollContext {
+    /// Bounding rectangle (x, y, w, h) of the scrollbar thumb in logical pixels.
+    pub thumb: Rect,
+    /// Normalized scroll progress from 0.0 (top/left) to 1.0 (bottom/right).
+    pub scroll_pct: f32,
+    /// Whether the thumb is currently actively being dragged.
+    pub is_dragging: bool,
+}
+
+/// A wrapper view that attaches a scrollbar thumb scroll event listener to an inner view.
+pub struct ThumbScrollHandler<State, V, F> {
+    pub(crate) inner: V,
+    pub(crate) handler: Rc<F>,
+    pub(crate) _marker: std::marker::PhantomData<State>,
+}
+
+impl<State, V: View<State>, F> View<State> for ThumbScrollHandler<State, V, F>
+where
+    F: Fn(&State, ThumbScrollContext) -> Option<V::Message> + 'static,
+{
+    type Element = V::Element;
+    type Message = V::Message;
+
+    fn build(&self, ctx: &mut Context) -> Self::Element {
+        self.inner.build(ctx)
+    }
+
+    fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
+        self.inner.rebuild(&prev.inner, ctx, element);
+    }
+
+    fn rebuild_with_parent(
+        &self,
+        prev: &Self,
+        ctx: &mut Context,
+        element: &mut Self::Element,
+        parent: Node,
+        next_sibling: Option<Node>,
+    ) {
+        self.inner
+            .rebuild_with_parent(&prev.inner, ctx, element, parent, next_sibling);
+    }
+
+    fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
+        self.inner.teardown(ctx, element);
+    }
+
+    fn get_node(&self, element: &Self::Element) -> Node {
+        self.inner.get_node(element)
+    }
+
+    fn handle_event(
+        &self,
+        element: &mut Self::Element,
+        state: &State,
+        event: Event,
+        ctx: &mut Context,
+    ) -> (EventResult, Option<Self::Message>) {
+        let (inner_res, inner_msg) = self.inner.handle_event(element, state, event.clone(), ctx);
+        if inner_msg.is_some() {
+            return (inner_res, inner_msg);
+        }
+
+        let self_node = self.get_node(element);
+        if let Event::ThumbScroll { node, context } = event {
+            if node == self_node {
+                let msg = (self.handler)(state, context);
+                return (EventResult::Handled, msg);
+            }
+        }
+
+        (inner_res, None)
     }
 }
 
@@ -1246,5 +1341,80 @@ mod tests {
         );
         assert_eq!(enter_res, EventResult::Handled);
         assert_eq!(enter_msg, Some(KeyMsg::EnterUp));
+    }
+
+    #[test]
+    fn test_thumb_scroll_handler() {
+        use crate::style::Rect;
+        use crate::ui::widgets::button;
+        let mut ctx = Context::new();
+
+        #[derive(Debug, PartialEq, Clone)]
+        struct ScrolledData {
+            pct: f32,
+            dragging: bool,
+            y: f32,
+        }
+
+        let inner = button("test");
+        let handled = inner.on_thumb_scroll(|_state, ctx| {
+            Some(ScrolledData {
+                pct: ctx.scroll_pct,
+                dragging: ctx.is_dragging,
+                y: ctx.thumb.y,
+            })
+        });
+
+        let mut element = View::<()>::build(&handled, &mut ctx);
+        let node = View::<()>::get_node(&handled, &element);
+
+        // Matching node receives event
+        let (res, msg) = View::<()>::handle_event(
+            &handled,
+            &mut element,
+            &(),
+            Event::ThumbScroll {
+                node,
+                context: ThumbScrollContext {
+                    thumb: Rect {
+                        x: 95.0,
+                        y: 45.0,
+                        w: 5.0,
+                        h: 20.0,
+                    },
+                    scroll_pct: 0.5,
+                    is_dragging: true,
+                },
+            },
+            &mut ctx,
+        );
+        assert_eq!(res, EventResult::Handled);
+        assert_eq!(
+            msg,
+            Some(ScrolledData {
+                pct: 0.5,
+                dragging: true,
+                y: 45.0,
+            })
+        );
+
+        // Unrelated node does not trigger handler
+        let other_node = ctx.create_node();
+        let (other_res, other_msg) = View::<()>::handle_event(
+            &handled,
+            &mut element,
+            &(),
+            Event::ThumbScroll {
+                node: other_node,
+                context: ThumbScrollContext {
+                    thumb: Rect::default(),
+                    scroll_pct: 0.0,
+                    is_dragging: false,
+                },
+            },
+            &mut ctx,
+        );
+        assert_eq!(other_res, EventResult::Ignored);
+        assert_eq!(other_msg, None);
     }
 }

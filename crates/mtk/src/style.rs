@@ -94,6 +94,7 @@ pub enum TransitionProperty {
     Shadow,
     TextColor,
     FontSize,
+    Scrollbar,
 }
 
 /// Backwards compatibility alias for [`TransitionProperty`].
@@ -289,6 +290,87 @@ impl TextStyle {
     }
 }
 
+/// Visibility mode for a container's scrollbar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ScrollbarVisibility {
+    /// Shown automatically when content overflows the viewport.
+    #[default]
+    Auto,
+    /// Always visible even if content fits without overflowing.
+    Always,
+    /// Never visible (disables rendering and hit-testing; same as `no_scrollbar`).
+    Never,
+}
+
+/// Declarative styling parameters for Material-style segmented scrollbars.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScrollbarStyle {
+    /// Thickness of the scrollbar thumb and track in logical pixels.
+    pub width: f32,
+    /// Inset margin from the viewport edge in logical pixels.
+    pub margin: f32,
+    /// Air gap between the thumb and the top/bottom track segments.
+    pub gap: f32,
+    /// Color of the draggable thumb pill.
+    pub thumb_color: Color,
+    /// Optional color for the top/bottom track segments (None = no track rendered).
+    pub track_color: Option<Color>,
+    /// Corner border radii for the thumb and track pieces.
+    pub radius: Radius,
+    /// Minimum thumb length in logical pixels.
+    pub min_thumb_len: f32,
+    /// Visibility mode.
+    pub visibility: ScrollbarVisibility,
+}
+
+impl Default for ScrollbarStyle {
+    fn default() -> Self {
+        Self {
+            width: 4.0,
+            margin: 2.0,
+            gap: 2.0,
+            thumb_color: Color::new(102, 102, 102, 128),
+            track_color: None,
+            radius: Radius::all(2.0),
+            min_thumb_len: 20.0,
+            visibility: ScrollbarVisibility::Auto,
+        }
+    }
+}
+
+impl ScrollbarStyle {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn merge(&mut self, other: &ScrollbarStyle) {
+        if (other.width - 4.0).abs() > 1e-4 {
+            self.width = other.width;
+        }
+        if (other.margin - 2.0).abs() > 1e-4 {
+            self.margin = other.margin;
+        }
+        if (other.gap - 2.0).abs() > 1e-4 {
+            self.gap = other.gap;
+        }
+        if other.thumb_color != Color::new(102, 102, 102, 128) {
+            self.thumb_color = other.thumb_color;
+        }
+        if other.track_color.is_some() {
+            self.track_color = other.track_color;
+        }
+        if other.radius != Radius::all(2.0) {
+            self.radius = other.radius;
+        }
+        if (other.min_thumb_len - 20.0).abs() > 1e-4 {
+            self.min_thumb_len = other.min_thumb_len;
+        }
+        if other.visibility != ScrollbarVisibility::Auto {
+            self.visibility = other.visibility;
+        }
+    }
+}
+
 /// Declarative styling container defining layout constraints, visual effects, typography, pseudo-states, and transitions.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Style {
@@ -296,6 +378,7 @@ pub struct Style {
     pub base_effects: Effects,
     pub base_text_style: TextStyle,
     pub flex_direction: Option<FlexDirection>,
+    pub scrollbar: Option<ScrollbarStyle>,
 
     pub hover: Option<Box<Style>>,
     pub active: Option<Box<Style>>,
@@ -319,6 +402,16 @@ impl Style {
         if let Some(dir) = other.flex_direction {
             self.flex_direction = Some(dir);
             self.base_constraints.flex_direction = dir;
+        }
+
+        if let Some(sb) = other.scrollbar {
+            self.scrollbar = Some(match self.scrollbar {
+                Some(mut existing) => {
+                    existing.merge(&sb);
+                    existing
+                }
+                None => sb,
+            });
         }
 
         if let Some(h) = other.hover {
@@ -716,6 +809,84 @@ impl Style {
     pub fn animate(mut self, target: TransitionProperty, duration_ms: f64, curve: Curve) -> Self {
         self.transitions
             .push(Transition::new(target, duration_ms, curve));
+        self
+    }
+
+    pub fn scrollbar(mut self, style: ScrollbarStyle) -> Self {
+        if style.visibility == ScrollbarVisibility::Never {
+            self.base_constraints.scrollbar_visible = false;
+        }
+        self.scrollbar = Some(style);
+        self
+    }
+
+    pub fn scrollbar_width(mut self, width: f32) -> Self {
+        let mut sb = self.scrollbar.take().unwrap_or_default();
+        sb.width = width;
+        self.scrollbar = Some(sb);
+        self
+    }
+
+    pub fn scrollbar_margin(mut self, margin: f32) -> Self {
+        let mut sb = self.scrollbar.take().unwrap_or_default();
+        sb.margin = margin;
+        self.scrollbar = Some(sb);
+        self
+    }
+
+    pub fn scrollbar_gap(mut self, gap: f32) -> Self {
+        let mut sb = self.scrollbar.take().unwrap_or_default();
+        sb.gap = gap;
+        self.scrollbar = Some(sb);
+        self
+    }
+
+    pub fn scrollbar_thumb(mut self, color: Color) -> Self {
+        let mut sb = self.scrollbar.take().unwrap_or_default();
+        sb.thumb_color = color;
+        self.scrollbar = Some(sb);
+        self
+    }
+
+    pub fn scrollbar_thumb_color(self, color: Color) -> Self {
+        self.scrollbar_thumb(color)
+    }
+
+    pub fn scrollbar_track(mut self, color: Color) -> Self {
+        let mut sb = self.scrollbar.take().unwrap_or_default();
+        sb.track_color = Some(color);
+        self.scrollbar = Some(sb);
+        self
+    }
+
+    pub fn scrollbar_track_color(self, color: Color) -> Self {
+        self.scrollbar_track(color)
+    }
+
+    pub fn scrollbar_radius(mut self, radius: Radius) -> Self {
+        let mut sb = self.scrollbar.take().unwrap_or_default();
+        sb.radius = radius;
+        self.scrollbar = Some(sb);
+        self
+    }
+
+    pub fn scrollbar_visibility(mut self, visibility: ScrollbarVisibility) -> Self {
+        let mut sb = self.scrollbar.take().unwrap_or_default();
+        sb.visibility = visibility;
+        if visibility == ScrollbarVisibility::Never {
+            self.base_constraints.scrollbar_visible = false;
+        } else {
+            self.base_constraints.scrollbar_visible = true;
+        }
+        self.scrollbar = Some(sb);
+        self
+    }
+
+    pub fn no_scrollbar(mut self) -> Self {
+        let mut sb = self.scrollbar.take().unwrap_or_default();
+        sb.visibility = ScrollbarVisibility::Never;
+        self.scrollbar = Some(sb);
+        self.base_constraints.scrollbar_visible = false;
         self
     }
 }

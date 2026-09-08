@@ -314,6 +314,7 @@ pub struct Constraints {
 
     pub overflow: Overflow,
     pub scroll: Vector2,
+    pub scrollbar_visible: bool,
     pub z_index: i32,
 }
 
@@ -345,6 +346,7 @@ impl Default for Constraints {
 
             overflow: Overflow::Visible,
             scroll: Vector2 { x: 0.0, y: 0.0 },
+            scrollbar_visible: true,
             z_index: 0,
         }
     }
@@ -406,6 +408,9 @@ impl Constraints {
         }
         if other.overflow != Overflow::Visible {
             self.overflow = other.overflow;
+        }
+        if !other.scrollbar_visible {
+            self.scrollbar_visible = false;
         }
         if other.z_index != 0 {
             self.z_index = other.z_index;

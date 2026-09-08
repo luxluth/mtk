@@ -11,7 +11,8 @@ use winit::{
 use crate::{
     Context, Node, TextStyle,
     command::{Command, IntoCommand},
-    ui::{Event, View, event::EventResult},
+    style::{Rect, ScrollbarVisibility},
+    ui::{Event, ThumbScrollContext, View, event::EventResult},
     windowing::renderer::Renderer,
 };
 
@@ -411,6 +412,8 @@ where
                 }
             }
 
+            let mut thumb_scroll_event: Option<Event> = None;
+
             // B) Scrollbar thumb drag start
             if let Event::MouseInput {
                 pressed,
@@ -423,30 +426,99 @@ where
                 if pressed {
                     for node in hit_nodes.iter().rev() {
                         let constraints = node.get_constraints(&self.context).unwrap_or_default();
-                        if constraints.overflow == crate::Overflow::Scroll
-                            || constraints.overflow == crate::Overflow::Auto
+                        let sb_style = node.get_scrollbar_style(&self.context).unwrap_or_default();
+                        if (constraints.overflow == crate::Overflow::Scroll
+                            || constraints.overflow == crate::Overflow::Auto)
+                            && constraints.scrollbar_visible
+                            && sb_style.visibility != ScrollbarVisibility::Never
                         {
                             if let Some(computed) = node.get_computed(&self.context) {
                                 let content_h = node.compute_content_height(&self.context);
                                 let max_scroll_y = (content_h - computed.h).max(0.0);
+                                let hit_zone_w = (sb_style.width + sb_style.margin * 2.0).max(12.0);
                                 if max_scroll_y > 0.0 {
-                                    if x >= computed.x + computed.w - 14.0
+                                    if x >= computed.x + computed.w - hit_zone_w
                                         && x <= computed.x + computed.w
                                     {
                                         self.drag_scroll_node =
                                             Some((*node, y, constraints.scroll.y));
+                                        let padding_top =
+                                            constraints.padding.top + constraints.border.top;
+                                        let padding_bottom =
+                                            constraints.padding.bottom + constraints.border.bottom;
+                                        let track_h =
+                                            (computed.h - padding_top - padding_bottom).max(0.0);
+                                        let ratio = (computed.h / content_h).clamp(0.0, 1.0);
+                                        let thumb_h = (track_h * ratio)
+                                            .clamp(sb_style.min_thumb_len.min(track_h), track_h);
+                                        let scroll_pct =
+                                            (constraints.scroll.y / max_scroll_y).clamp(0.0, 1.0);
+                                        let thumb_x = computed.x + computed.w
+                                            - constraints.border.right
+                                            - sb_style.width
+                                            - sb_style.margin;
+                                        let thumb_y = computed.y
+                                            + padding_top
+                                            + scroll_pct * (track_h - thumb_h);
+                                        let thumb = Rect {
+                                            x: thumb_x,
+                                            y: thumb_y,
+                                            w: sb_style.width,
+                                            h: thumb_h,
+                                        };
+                                        thumb_scroll_event = Some(Event::ThumbScroll {
+                                            node: *node,
+                                            context: ThumbScrollContext {
+                                                thumb,
+                                                scroll_pct,
+                                                is_dragging: true,
+                                            },
+                                        });
                                         break;
                                     }
                                 }
 
                                 let content_w = computed.content_w.max(computed.w);
                                 let max_scroll_x = (content_w - computed.w).max(0.0);
+                                let hit_zone_h = (sb_style.width + sb_style.margin * 2.0).max(12.0);
                                 if max_scroll_x > 0.0 {
-                                    if y >= computed.y + computed.h - 14.0
+                                    if y >= computed.y + computed.h - hit_zone_h
                                         && y <= computed.y + computed.h
                                     {
                                         self.drag_scroll_x_node =
                                             Some((*node, x, constraints.scroll.x));
+                                        let padding_left =
+                                            constraints.padding.left + constraints.border.left;
+                                        let padding_right =
+                                            constraints.padding.right + constraints.border.right;
+                                        let track_w =
+                                            (computed.w - padding_left - padding_right).max(0.0);
+                                        let ratio = (computed.w / content_w).clamp(0.0, 1.0);
+                                        let thumb_w = (track_w * ratio)
+                                            .clamp(sb_style.min_thumb_len.min(track_w), track_w);
+                                        let scroll_pct =
+                                            (constraints.scroll.x / max_scroll_x).clamp(0.0, 1.0);
+                                        let thumb_x = computed.x
+                                            + padding_left
+                                            + scroll_pct * (track_w - thumb_w);
+                                        let thumb_y = computed.y + computed.h
+                                            - constraints.border.bottom
+                                            - sb_style.width
+                                            - sb_style.margin;
+                                        let thumb = Rect {
+                                            x: thumb_x,
+                                            y: thumb_y,
+                                            w: thumb_w,
+                                            h: sb_style.width,
+                                        };
+                                        thumb_scroll_event = Some(Event::ThumbScroll {
+                                            node: *node,
+                                            context: ThumbScrollContext {
+                                                thumb,
+                                                scroll_pct,
+                                                is_dragging: true,
+                                            },
+                                        });
                                         break;
                                     }
                                 }
@@ -454,8 +526,90 @@ where
                         }
                     }
                 } else {
-                    self.drag_scroll_node = None;
-                    self.drag_scroll_x_node = None;
+                    if let Some((node, _, _)) = self.drag_scroll_node.take() {
+                        if let Some(computed) = node.get_computed(&self.context) {
+                            let constraints =
+                                node.get_constraints(&self.context).unwrap_or_default();
+                            let content_h = node.compute_content_height(&self.context);
+                            let max_scroll_y = (content_h - computed.h).max(0.0);
+                            let sb_style =
+                                node.get_scrollbar_style(&self.context).unwrap_or_default();
+                            let padding_top = constraints.padding.top + constraints.border.top;
+                            let padding_bottom =
+                                constraints.padding.bottom + constraints.border.bottom;
+                            let track_h = (computed.h - padding_top - padding_bottom).max(0.0);
+                            let ratio = (computed.h / content_h).clamp(0.0, 1.0);
+                            let thumb_h = (track_h * ratio)
+                                .clamp(sb_style.min_thumb_len.min(track_h), track_h);
+                            let scroll_pct = if max_scroll_y > 0.0 {
+                                (constraints.scroll.y / max_scroll_y).clamp(0.0, 1.0)
+                            } else {
+                                0.0
+                            };
+                            let thumb_x = computed.x + computed.w
+                                - constraints.border.right
+                                - sb_style.width
+                                - sb_style.margin;
+                            let thumb_y =
+                                computed.y + padding_top + scroll_pct * (track_h - thumb_h);
+                            let thumb = Rect {
+                                x: thumb_x,
+                                y: thumb_y,
+                                w: sb_style.width,
+                                h: thumb_h,
+                            };
+                            thumb_scroll_event = Some(Event::ThumbScroll {
+                                node,
+                                context: ThumbScrollContext {
+                                    thumb,
+                                    scroll_pct,
+                                    is_dragging: false,
+                                },
+                            });
+                        }
+                    }
+                    if let Some((node, _, _)) = self.drag_scroll_x_node.take() {
+                        if let Some(computed) = node.get_computed(&self.context) {
+                            let constraints =
+                                node.get_constraints(&self.context).unwrap_or_default();
+                            let content_w = computed.content_w.max(computed.w);
+                            let max_scroll_x = (content_w - computed.w).max(0.0);
+                            let sb_style =
+                                node.get_scrollbar_style(&self.context).unwrap_or_default();
+                            let padding_left = constraints.padding.left + constraints.border.left;
+                            let padding_right =
+                                constraints.padding.right + constraints.border.right;
+                            let track_w = (computed.w - padding_left - padding_right).max(0.0);
+                            let ratio = (computed.w / content_w).clamp(0.0, 1.0);
+                            let thumb_w = (track_w * ratio)
+                                .clamp(sb_style.min_thumb_len.min(track_w), track_w);
+                            let scroll_pct = if max_scroll_x > 0.0 {
+                                (constraints.scroll.x / max_scroll_x).clamp(0.0, 1.0)
+                            } else {
+                                0.0
+                            };
+                            let thumb_x =
+                                computed.x + padding_left + scroll_pct * (track_w - thumb_w);
+                            let thumb_y = computed.y + computed.h
+                                - constraints.border.bottom
+                                - sb_style.width
+                                - sb_style.margin;
+                            let thumb = Rect {
+                                x: thumb_x,
+                                y: thumb_y,
+                                w: thumb_w,
+                                h: sb_style.width,
+                            };
+                            thumb_scroll_event = Some(Event::ThumbScroll {
+                                node,
+                                context: ThumbScrollContext {
+                                    thumb,
+                                    scroll_pct,
+                                    is_dragging: false,
+                                },
+                            });
+                        }
+                    }
                 }
             }
 
@@ -463,11 +617,19 @@ where
             if let Event::CursorMoved { x, y, .. } = mtk_event {
                 if let Some((node, drag_start_y, drag_start_scroll_y)) = self.drag_scroll_node {
                     if let Some(computed) = node.get_computed(&self.context) {
+                        let constraints = node.get_constraints(&self.context).unwrap_or_default();
                         let content_h = node.compute_content_height(&self.context);
                         let max_scroll_y = (content_h - computed.h).max(0.0);
                         if max_scroll_y > 0.0 {
-                            let track_h = (computed.h - 8.0).max(0.0);
-                            let thumb_h = ((track_h / content_h) * track_h).clamp(24.0, track_h);
+                            let sb_style =
+                                node.get_scrollbar_style(&self.context).unwrap_or_default();
+                            let padding_top = constraints.padding.top + constraints.border.top;
+                            let padding_bottom =
+                                constraints.padding.bottom + constraints.border.bottom;
+                            let track_h = (computed.h - padding_top - padding_bottom).max(0.0);
+                            let ratio = (computed.h / content_h).clamp(0.0, 1.0);
+                            let thumb_h = (track_h * ratio)
+                                .clamp(sb_style.min_thumb_len.min(track_h), track_h);
                             let track_travel = (track_h - thumb_h).max(1.0);
                             let delta_y = y - drag_start_y;
                             let scroll_delta = (delta_y / track_travel) * max_scroll_y;
@@ -480,16 +642,45 @@ where
                             if let Some(window) = &self.window {
                                 window.request_redraw();
                             }
+                            let scroll_pct = (new_scroll_y / max_scroll_y).clamp(0.0, 1.0);
+                            let thumb_x = computed.x + computed.w
+                                - constraints.border.right
+                                - sb_style.width
+                                - sb_style.margin;
+                            let thumb_y =
+                                computed.y + padding_top + scroll_pct * (track_h - thumb_h);
+                            let thumb = Rect {
+                                x: thumb_x,
+                                y: thumb_y,
+                                w: sb_style.width,
+                                h: thumb_h,
+                            };
+                            thumb_scroll_event = Some(Event::ThumbScroll {
+                                node,
+                                context: ThumbScrollContext {
+                                    thumb,
+                                    scroll_pct,
+                                    is_dragging: true,
+                                },
+                            });
                         }
                     }
                 }
                 if let Some((node, drag_start_x, drag_start_scroll_x)) = self.drag_scroll_x_node {
                     if let Some(computed) = node.get_computed(&self.context) {
+                        let constraints = node.get_constraints(&self.context).unwrap_or_default();
                         let content_w = computed.content_w.max(computed.w);
                         let max_scroll_x = (content_w - computed.w).max(0.0);
                         if max_scroll_x > 0.0 {
-                            let track_w = (computed.w - 8.0).max(0.0);
-                            let thumb_w = ((track_w / content_w) * track_w).clamp(24.0, track_w);
+                            let sb_style =
+                                node.get_scrollbar_style(&self.context).unwrap_or_default();
+                            let padding_left = constraints.padding.left + constraints.border.left;
+                            let padding_right =
+                                constraints.padding.right + constraints.border.right;
+                            let track_w = (computed.w - padding_left - padding_right).max(0.0);
+                            let ratio = (computed.w / content_w).clamp(0.0, 1.0);
+                            let thumb_w = (track_w * ratio)
+                                .clamp(sb_style.min_thumb_len.min(track_w), track_w);
                             let track_travel = (track_w - thumb_w).max(1.0);
                             let delta_x = x - drag_start_x;
                             let scroll_delta = (delta_x / track_travel) * max_scroll_x;
@@ -502,14 +693,43 @@ where
                             if let Some(window) = &self.window {
                                 window.request_redraw();
                             }
+                            let scroll_pct = (new_scroll_x / max_scroll_x).clamp(0.0, 1.0);
+                            let thumb_x =
+                                computed.x + padding_left + scroll_pct * (track_w - thumb_w);
+                            let thumb_y = computed.y + computed.h
+                                - constraints.border.bottom
+                                - sb_style.width
+                                - sb_style.margin;
+                            let thumb = Rect {
+                                x: thumb_x,
+                                y: thumb_y,
+                                w: thumb_w,
+                                h: sb_style.width,
+                            };
+                            thumb_scroll_event = Some(Event::ThumbScroll {
+                                node,
+                                context: ThumbScrollContext {
+                                    thumb,
+                                    scroll_pct,
+                                    is_dragging: true,
+                                },
+                            });
                         }
                     }
                 }
             }
 
             // Pass 1 - READONLY state down
-            let (result, optional_msg) =
+            let (result, mut optional_msg) =
                 view.handle_event(element, &self.state, mtk_event.clone(), &mut self.context);
+
+            if let Some(thumb_ev) = thumb_scroll_event {
+                let (_thumb_res, thumb_msg) =
+                    view.handle_event(element, &self.state, thumb_ev, &mut self.context);
+                if thumb_msg.is_some() {
+                    optional_msg = thumb_msg;
+                }
+            }
 
             if result == EventResult::Ignored {
                 if let Event::KeyboardInput {

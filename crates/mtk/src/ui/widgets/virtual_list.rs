@@ -1,7 +1,7 @@
 use crate::debugger::SourceLocation;
 use crate::{
     Context, Node,
-    style::{FlexDirection, Overflow, Size, Style},
+    style::{FlexDirection, Overflow, ScrollbarStyle, ScrollbarVisibility, Size, Style},
     ui::{Event, View, event::EventResult},
 };
 
@@ -14,6 +14,8 @@ pub struct VirtualList<T, F, V> {
     pub(crate) buffer: usize,
     pub(crate) custom_style: Option<Style>,
     pub(crate) source_loc: Option<SourceLocation>,
+    pub(crate) scrollbar_style: Option<ScrollbarStyle>,
+    pub(crate) scrollbar_visible: bool,
     pub(crate) _marker: std::marker::PhantomData<V>,
 }
 
@@ -32,6 +34,8 @@ where
         buffer: 4,
         custom_style: None,
         source_loc: Some(SourceLocation::here("VirtualList")),
+        scrollbar_style: None,
+        scrollbar_visible: true,
         _marker: std::marker::PhantomData,
     }
 }
@@ -54,6 +58,8 @@ where
         buffer: 4,
         custom_style: None,
         source_loc: Some(SourceLocation::here("VirtualList")),
+        scrollbar_style: None,
+        scrollbar_visible: true,
         _marker: std::marker::PhantomData,
     }
 }
@@ -68,6 +74,20 @@ impl<T, F, V> VirtualList<T, F, V> {
     /// Sets custom layout and visual styling on the outer scroll container.
     pub fn style(mut self, style: Style) -> Self {
         self.custom_style = Some(style);
+        self
+    }
+
+    pub fn scrollbar(mut self, scrollbar: ScrollbarStyle) -> Self {
+        self.scrollbar_visible = scrollbar.visibility != ScrollbarVisibility::Never;
+        self.scrollbar_style = Some(scrollbar);
+        self
+    }
+
+    pub fn no_scrollbar(mut self) -> Self {
+        self.scrollbar_visible = false;
+        if let Some(sb) = &mut self.scrollbar_style {
+            sb.visibility = ScrollbarVisibility::Never;
+        }
         self
     }
 }
@@ -99,10 +119,19 @@ where
             c.width = Size::Percent(1.0);
             c.height = Size::Percent(1.0);
             c.overflow = Overflow::Scroll;
+            c.scrollbar_visible = self.scrollbar_visible;
         });
 
         if let Some(style) = &self.custom_style {
             style.apply_to_node(ctx, container_node);
+        }
+
+        container_node.update_constraints(ctx, |c| {
+            c.overflow = Overflow::Scroll;
+            c.scrollbar_visible = self.scrollbar_visible;
+        });
+        if let Some(sb) = &self.scrollbar_style {
+            container_node.set_scrollbar_style(ctx, sb.clone());
         }
 
         let total_h = (self.count as f32 * self.item_height).round() as u32;
@@ -157,6 +186,13 @@ where
         if let Some(style) = &self.custom_style {
             style.apply_to_node(ctx, element.container_node);
         }
+        element.container_node.update_constraints(ctx, |c| {
+            c.overflow = Overflow::Scroll;
+            c.scrollbar_visible = self.scrollbar_visible;
+        });
+        if let Some(sb) = &self.scrollbar_style {
+            element.container_node.set_scrollbar_style(ctx, sb.clone());
+        }
 
         let total_h = (self.count as f32 * self.item_height).round() as u32;
         element.content_node.update_constraints(ctx, |c| {
@@ -208,7 +244,13 @@ where
             }
         }
 
-        if matches!(event, Event::MouseWheel { .. } | Event::Tick { .. }) {
+        if matches!(
+            event,
+            Event::MouseWheel { .. }
+                | Event::Tick { .. }
+                | Event::ThumbScroll { .. }
+                | Event::CursorMoved { .. }
+        ) {
             self.sync_visible_range(ctx, element, false);
         }
 

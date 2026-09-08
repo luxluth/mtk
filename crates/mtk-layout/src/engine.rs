@@ -2161,7 +2161,7 @@ impl LayoutEngine {
 
         // Scrollbars
         if let Some(c) = cons {
-            if matches!(c.overflow, Overflow::Scroll | Overflow::Auto) {
+            if matches!(c.overflow, Overflow::Scroll | Overflow::Auto) && c.scrollbar_visible {
                 let inner_h = comp.h - c.padding.top - c.padding.bottom;
                 let inner_w = comp.w - c.padding.left - c.padding.right;
 
@@ -2447,5 +2447,89 @@ mod tests {
         assert_eq!(card_comp.h, 130.0);
         assert_eq!(other_comp.y, 70.0);
         assert!(other_comp.y + other_comp.h <= card_comp.h);
+    }
+
+    #[test]
+    fn test_scrollbar_visible_flag_controls_scrollbar_generation() {
+        let mut engine = LayoutEngine::new();
+        let root = engine.create_node();
+        let mut root_cons = Constraints::default();
+        root_cons.width = Size::Fixed(100);
+        root_cons.height = Size::Fixed(100);
+        root_cons.overflow = Overflow::Scroll;
+        root_cons.scrollbar_visible = true;
+        engine.set_constraints(root, root_cons);
+
+        let child = engine.create_node();
+        let mut child_cons = Constraints::default();
+        child_cons.width = Size::Fixed(200);
+        child_cons.height = Size::Fixed(200);
+        engine.set_constraints(child, child_cons);
+
+        engine.append(root, child);
+        engine.root_attach(root);
+
+        let no_measure = |_node: NodeId,
+                          _text: &str,
+                          _userdata: Option<&dyn std::any::Any>,
+                          _w: f32,
+                          _h: f32| TextMetrics {
+            width: 0.0,
+            height: 0.0,
+            baseline_offset: 0.0,
+        };
+
+        engine.compute_layout(100.0, 100.0, no_measure);
+        engine.build_render_list(Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        });
+
+        let has_v = engine
+            .render_list
+            .iter()
+            .any(|cmd| matches!(cmd.kind, RenderCommandKind::ScrollbarV));
+        let has_h = engine
+            .render_list
+            .iter()
+            .any(|cmd| matches!(cmd.kind, RenderCommandKind::ScrollbarH));
+        assert!(
+            has_v,
+            "Vertical scrollbar should be present when scrollbar_visible is true"
+        );
+        assert!(
+            has_h,
+            "Horizontal scrollbar should be present when scrollbar_visible is true"
+        );
+
+        // Now disable scrollbar_visible and rebuild render list
+        root_cons.scrollbar_visible = false;
+        engine.set_constraints(root, root_cons);
+        engine.compute_layout(100.0, 100.0, no_measure);
+        engine.build_render_list(Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        });
+
+        let has_v_disabled = engine
+            .render_list
+            .iter()
+            .any(|cmd| matches!(cmd.kind, RenderCommandKind::ScrollbarV));
+        let has_h_disabled = engine
+            .render_list
+            .iter()
+            .any(|cmd| matches!(cmd.kind, RenderCommandKind::ScrollbarH));
+        assert!(
+            !has_v_disabled,
+            "Vertical scrollbar should NOT be present when scrollbar_visible is false"
+        );
+        assert!(
+            !has_h_disabled,
+            "Horizontal scrollbar should NOT be present when scrollbar_visible is false"
+        );
     }
 }

@@ -20,7 +20,7 @@ pub mod widgets;
 pub use adapter::{ViewAdaptExt, adapt};
 pub use event::{
     DragContext, DragElement, DragHandler, DragPhase, EventKind, KeyActionKind, KeyEventContext,
-    KeyHandler, KeyScope, TickHandler, ViewEventExt,
+    KeyHandler, KeyScope, ThumbScrollContext, ThumbScrollHandler, TickHandler, ViewEventExt,
 };
 pub use focus::{Focusable, FocusableExt};
 pub use kinetic::KineticTracker;
@@ -88,6 +88,13 @@ pub enum Event {
     },
     /// Dispatched when the parent application window size changes.
     WindowResized(WindowDimension),
+    /// Dispatched when a scrollbar thumb is dragged or scrubbed.
+    ThumbScroll {
+        /// The scroll container node whose thumb moved.
+        node: Node,
+        /// Geometry and state of the thumb.
+        context: ThumbScrollContext,
+    },
 }
 
 /// Describes a keyboard input targeting a window or UI node.

@@ -3,7 +3,7 @@
 use crate::Vector2;
 use crate::colors::Color;
 use crate::effects::{Effects, Radius, Shadow};
-use crate::style::{Edges, Size, Style};
+use crate::style::{Edges, ScrollbarStyle, Size, Style};
 
 pub mod keyframes;
 pub mod math;
@@ -323,6 +323,46 @@ impl Animatable for Effects {
     }
 }
 
+impl Animatable for ScrollbarStyle {
+    fn interpolate(start: &Self, end: &Self, t: f64) -> Self {
+        let t_f = t as f32;
+        ScrollbarStyle {
+            width: start.width + (end.width - start.width) * t_f,
+            margin: start.margin + (end.margin - start.margin) * t_f,
+            gap: start.gap + (end.gap - start.gap) * t_f,
+            thumb_color: Color::interpolate(&start.thumb_color, &end.thumb_color, t),
+            track_color: match (&start.track_color, &end.track_color) {
+                (Some(s), Some(e)) => Some(Color::interpolate(s, e, t)),
+                (Some(s), None) => Some(Color::interpolate(s, &Color::new(s.r, s.g, s.b, 0), t)),
+                (None, Some(e)) => Some(Color::interpolate(&Color::new(e.r, e.g, e.b, 0), e, t)),
+                (None, None) => None,
+            },
+            radius: Radius::interpolate(&start.radius, &end.radius, t),
+            min_thumb_len: start.min_thumb_len + (end.min_thumb_len - start.min_thumb_len) * t_f,
+            visibility: if t >= 0.5 {
+                end.visibility
+            } else {
+                start.visibility
+            },
+        }
+    }
+
+    fn is_finished(&self, target: &Self) -> bool {
+        (self.width - target.width).abs() < 1e-4
+            && (self.margin - target.margin).abs() < 1e-4
+            && (self.gap - target.gap).abs() < 1e-4
+            && self.thumb_color.is_finished(&target.thumb_color)
+            && match (&self.track_color, &target.track_color) {
+                (Some(s), Some(t)) => s.is_finished(t),
+                (None, None) => true,
+                _ => false,
+            }
+            && self.radius.is_finished(&target.radius)
+            && (self.min_thumb_len - target.min_thumb_len).abs() < 1e-4
+            && self.visibility == target.visibility
+    }
+}
+
 impl Animatable for Style {
     fn interpolate(start: &Self, end: &Self, t: f64) -> Self {
         let t_f = t as f32;
@@ -354,6 +394,12 @@ impl Animatable for Style {
             + (end.base_text_style.font_size - start.base_text_style.font_size) * t_f;
         interpolated.base_text_style.color =
             Color::interpolate(&start.base_text_style.color, &end.base_text_style.color, t);
+        interpolated.scrollbar = match (&start.scrollbar, &end.scrollbar) {
+            (Some(s), Some(e)) => Some(ScrollbarStyle::interpolate(s, e, t)),
+            (Some(s), None) => Some(s.clone()),
+            (None, Some(e)) => Some(e.clone()),
+            (None, None) => None,
+        };
         interpolated
     }
     fn is_finished(&self, target: &Self) -> bool {
@@ -372,6 +418,11 @@ impl Animatable for Style {
                 .base_text_style
                 .color
                 .is_finished(&target.base_text_style.color)
+            && match (&self.scrollbar, &target.scrollbar) {
+                (Some(s), Some(t)) => s.is_finished(t),
+                (None, None) => true,
+                _ => false,
+            }
     }
 }
 
@@ -517,5 +568,29 @@ mod tests {
         assert!((mid.base_constraints.padding.top - 15.0).abs() < 1e-3);
         assert!((mid.base_effects.scale - 1.5).abs() < 1e-3);
         assert!((mid.base_effects.opacity - 0.5).abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_scrollbar_style_interpolation() {
+        let start = ScrollbarStyle {
+            width: 8.0,
+            gap: 2.0,
+            thumb_color: Color::new(100, 100, 100, 255),
+            track_color: Some(Color::new(20, 20, 20, 200)),
+            ..Default::default()
+        };
+        let end = ScrollbarStyle {
+            width: 14.0,
+            gap: 6.0,
+            thumb_color: Color::new(200, 200, 200, 255),
+            track_color: Some(Color::new(40, 40, 40, 200)),
+            ..Default::default()
+        };
+
+        let mid = ScrollbarStyle::interpolate(&start, &end, 0.5);
+        assert!((mid.width - 11.0).abs() < 1e-3);
+        assert!((mid.gap - 4.0).abs() < 1e-3);
+        assert_eq!(mid.thumb_color.r, 150);
+        assert_eq!(mid.track_color.unwrap().r, 30);
     }
 }

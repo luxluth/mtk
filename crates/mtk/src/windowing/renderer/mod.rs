@@ -15,6 +15,7 @@ use self::svg_cache::{SvgRasterPool, SvgRasterRequest};
 use self::text_batch::{RenderTextData, TextBatch};
 use crate::effects::Filter;
 use crate::render::RenderCommandKind;
+use crate::style::ScrollbarVisibility;
 use std::collections::HashMap;
 use std::sync::Arc;
 use winit::event_loop::OwnedDisplayHandle;
@@ -1528,39 +1529,103 @@ fn prepare_command_slice<'a, I>(
             }
         } else if cmd.kind() == RenderCommandKind::ScrollbarV {
             let node = cmd.node();
+            let scrollbar_style = node.get_scrollbar_style(context).unwrap_or_default();
+            if scrollbar_style.visibility == ScrollbarVisibility::Never {
+                return;
+            }
+
             let computed = cmd.computed();
             let constraints = node.get_constraints(context).unwrap_or_default();
             let content_h = node.compute_content_height(context).max(computed.h) * scale_factor;
             let computed_h_scaled = computed.h * scale_factor;
 
-            if content_h > computed_h_scaled + 0.5 {
+            let should_render = match scrollbar_style.visibility {
+                ScrollbarVisibility::Always => true,
+                ScrollbarVisibility::Auto => content_h > computed_h_scaled + 0.5,
+                ScrollbarVisibility::Never => false,
+            };
+
+            if should_render {
                 let padding_top = (constraints.padding.top + constraints.border.top) * scale_factor;
                 let padding_bottom =
                     (constraints.padding.bottom + constraints.border.bottom) * scale_factor;
                 let track_h = (computed_h_scaled - padding_top - padding_bottom).max(0.0);
                 if track_h > 0.0 {
+                    let min_thumb_len = scrollbar_style.min_thumb_len * scale_factor;
                     let ratio = (computed_h_scaled / content_h).clamp(0.0, 1.0);
-                    let thumb_h = (track_h * ratio).clamp(20.0 * scale_factor, track_h);
+                    let thumb_h = (track_h * ratio).clamp(min_thumb_len.min(track_h), track_h);
                     let max_scroll_y = (content_h - computed_h_scaled).max(0.0);
                     let scroll_pct = if max_scroll_y > 0.0 {
                         ((constraints.scroll.y * scale_factor) / max_scroll_y).clamp(0.0, 1.0)
                     } else {
                         0.0
                     };
-                    let thumb_w = 4.0 * scale_factor;
-                    let margin = 2.0 * scale_factor;
+                    let thumb_w = scrollbar_style.width * scale_factor;
+                    let margin = scrollbar_style.margin * scale_factor;
+                    let gap = scrollbar_style.gap * scale_factor;
                     let thumb_x = (computed.x + computed.w - constraints.border.right)
                         * scale_factor
                         - thumb_w
                         - margin;
-                    let thumb_y =
-                        computed.y * scale_factor + padding_top + scroll_pct * (track_h - thumb_h);
+                    let track_top = computed.y * scale_factor + padding_top;
+                    let track_bottom = track_top + track_h;
+                    let thumb_y = track_top + scroll_pct * (track_h - thumb_h);
 
+                    let border_radii = [
+                        scrollbar_style.radius.tl * scale_factor,
+                        scrollbar_style.radius.tr * scale_factor,
+                        scrollbar_style.radius.br * scale_factor,
+                        scrollbar_style.radius.bl * scale_factor,
+                    ];
+
+                    // Material 3 segmented track quads
+                    if let Some(track_color) = scrollbar_style.track_color {
+                        let track_rgba: [f32; 4] = track_color.into();
+
+                        // Top track segment: [track_top .. thumb_y - gap]
+                        let top_track_h = (thumb_y - track_top - gap).max(0.0);
+                        if top_track_h > 0.5 {
+                            let top_track_quad = QuadInstance {
+                                pos: [thumb_x, track_top],
+                                quad_size: [thumb_w, top_track_h],
+                                color: track_rgba,
+                                border_radii,
+                                border_color: [0.0; 4],
+                                border_widths: [0.0; 4],
+                                shadow_color: [0.0; 4],
+                                shadow_params: [0.0, 0.0, 1.0, 0.0],
+                                effects: [0.0; 4],
+                                clip_rect,
+                            };
+                            push_solid_quad(quad_instances, draw_batches, top_track_quad);
+                        }
+
+                        // Bottom track segment: [thumb_y + thumb_h + gap .. track_bottom]
+                        let bot_track_y = thumb_y + thumb_h + gap;
+                        let bot_track_h = (track_bottom - bot_track_y).max(0.0);
+                        if bot_track_h > 0.5 {
+                            let bot_track_quad = QuadInstance {
+                                pos: [thumb_x, bot_track_y],
+                                quad_size: [thumb_w, bot_track_h],
+                                color: track_rgba,
+                                border_radii,
+                                border_color: [0.0; 4],
+                                border_widths: [0.0; 4],
+                                shadow_color: [0.0; 4],
+                                shadow_params: [0.0, 0.0, 1.0, 0.0],
+                                effects: [0.0; 4],
+                                clip_rect,
+                            };
+                            push_solid_quad(quad_instances, draw_batches, bot_track_quad);
+                        }
+                    }
+
+                    // Draggable Thumb
                     let thumb_quad = QuadInstance {
                         pos: [thumb_x, thumb_y],
                         quad_size: [thumb_w, thumb_h],
-                        color: [0.4, 0.4, 0.4, 0.5],
-                        border_radii: [thumb_w / 2.0; 4],
+                        color: scrollbar_style.thumb_color.into(),
+                        border_radii,
                         border_color: [0.0; 4],
                         border_widths: [0.0; 4],
                         shadow_color: [0.0; 4],
@@ -1573,40 +1638,104 @@ fn prepare_command_slice<'a, I>(
             }
         } else if cmd.kind() == RenderCommandKind::ScrollbarH {
             let node = cmd.node();
+            let scrollbar_style = node.get_scrollbar_style(context).unwrap_or_default();
+            if scrollbar_style.visibility == ScrollbarVisibility::Never {
+                return;
+            }
+
             let computed = cmd.computed();
             let constraints = node.get_constraints(context).unwrap_or_default();
             let content_w = computed.content_w.max(computed.w) * scale_factor;
             let computed_w_scaled = computed.w * scale_factor;
 
-            if content_w > computed_w_scaled + 0.5 {
+            let should_render = match scrollbar_style.visibility {
+                ScrollbarVisibility::Always => true,
+                ScrollbarVisibility::Auto => content_w > computed_w_scaled + 0.5,
+                ScrollbarVisibility::Never => false,
+            };
+
+            if should_render {
                 let padding_left =
                     (constraints.padding.left + constraints.border.left) * scale_factor;
                 let padding_right =
                     (constraints.padding.right + constraints.border.right) * scale_factor;
                 let track_w = (computed_w_scaled - padding_left - padding_right).max(0.0);
                 if track_w > 0.0 {
+                    let min_thumb_len = scrollbar_style.min_thumb_len * scale_factor;
                     let ratio = (computed_w_scaled / content_w).clamp(0.0, 1.0);
-                    let thumb_w = (track_w * ratio).clamp(20.0 * scale_factor, track_w);
+                    let thumb_w = (track_w * ratio).clamp(min_thumb_len.min(track_w), track_w);
                     let max_scroll_x = (content_w - computed_w_scaled).max(0.0);
                     let scroll_pct = if max_scroll_x > 0.0 {
                         ((constraints.scroll.x * scale_factor) / max_scroll_x).clamp(0.0, 1.0)
                     } else {
                         0.0
                     };
-                    let thumb_h = 4.0 * scale_factor;
-                    let margin = 2.0 * scale_factor;
-                    let thumb_x =
-                        computed.x * scale_factor + padding_left + scroll_pct * (track_w - thumb_w);
+                    let thumb_h = scrollbar_style.width * scale_factor;
+                    let margin = scrollbar_style.margin * scale_factor;
+                    let gap = scrollbar_style.gap * scale_factor;
+                    let track_left = computed.x * scale_factor + padding_left;
+                    let track_right = track_left + track_w;
+                    let thumb_x = track_left + scroll_pct * (track_w - thumb_w);
                     let thumb_y = (computed.y + computed.h - constraints.border.bottom)
                         * scale_factor
                         - thumb_h
                         - margin;
 
+                    let border_radii = [
+                        scrollbar_style.radius.tl * scale_factor,
+                        scrollbar_style.radius.tr * scale_factor,
+                        scrollbar_style.radius.br * scale_factor,
+                        scrollbar_style.radius.bl * scale_factor,
+                    ];
+
+                    // Material 3 segmented track quads
+                    if let Some(track_color) = scrollbar_style.track_color {
+                        let track_rgba: [f32; 4] = track_color.into();
+
+                        // Left track segment: [track_left .. thumb_x - gap]
+                        let left_track_w = (thumb_x - track_left - gap).max(0.0);
+                        if left_track_w > 0.5 {
+                            let left_track_quad = QuadInstance {
+                                pos: [track_left, thumb_y],
+                                quad_size: [left_track_w, thumb_h],
+                                color: track_rgba,
+                                border_radii,
+                                border_color: [0.0; 4],
+                                border_widths: [0.0; 4],
+                                shadow_color: [0.0; 4],
+                                shadow_params: [0.0, 0.0, 1.0, 0.0],
+                                effects: [0.0; 4],
+                                clip_rect,
+                            };
+                            push_solid_quad(quad_instances, draw_batches, left_track_quad);
+                        }
+
+                        // Right track segment: [thumb_x + thumb_w + gap .. track_right]
+                        let right_track_x = thumb_x + thumb_w + gap;
+                        let right_track_w = (track_right - right_track_x).max(0.0);
+                        if right_track_w > 0.5 {
+                            let right_track_quad = QuadInstance {
+                                pos: [right_track_x, thumb_y],
+                                quad_size: [right_track_w, thumb_h],
+                                color: track_rgba,
+                                border_radii,
+                                border_color: [0.0; 4],
+                                border_widths: [0.0; 4],
+                                shadow_color: [0.0; 4],
+                                shadow_params: [0.0, 0.0, 1.0, 0.0],
+                                effects: [0.0; 4],
+                                clip_rect,
+                            };
+                            push_solid_quad(quad_instances, draw_batches, right_track_quad);
+                        }
+                    }
+
+                    // Draggable Thumb
                     let thumb_quad = QuadInstance {
                         pos: [thumb_x, thumb_y],
                         quad_size: [thumb_w, thumb_h],
-                        color: [0.4, 0.4, 0.4, 0.5],
-                        border_radii: [thumb_h / 2.0; 4],
+                        color: scrollbar_style.thumb_color.into(),
+                        border_radii,
                         border_color: [0.0; 4],
                         border_widths: [0.0; 4],
                         shadow_color: [0.0; 4],

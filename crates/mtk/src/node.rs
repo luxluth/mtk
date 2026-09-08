@@ -1,7 +1,7 @@
 use crate::Context;
 use crate::effects::Effects;
 use crate::layout::NodeId;
-use crate::style::{Computed, Constraints};
+use crate::style::{Computed, Constraints, ScrollbarStyle};
 
 /// An opaque, generational handle representing a UI layout element.
 ///
@@ -147,6 +147,36 @@ impl Node {
     /// Builder method to add effects or overwrite the current existing effects on a node.
     pub fn with_effects(self, ctxt: &mut Context, effects: Effects) -> Self {
         self.set_effects(ctxt, effects);
+        self
+    }
+
+    /// Sets the scrollbar style on this node.
+    pub fn set_scrollbar_style(&self, ctxt: &mut Context, style: ScrollbarStyle) {
+        ctxt.scrollbars.insert(*self, style);
+    }
+
+    /// Gets the scrollbar style on this node, if configured.
+    pub fn get_scrollbar_style(&self, ctxt: &Context) -> Option<ScrollbarStyle> {
+        ctxt.scrollbars.get(self).cloned()
+    }
+
+    /// Fetches, modifies, and applies scrollbar style on this node.
+    pub fn update_scrollbar_style<F>(&self, ctxt: &mut Context, update_fn: F)
+    where
+        F: FnOnce(&mut ScrollbarStyle),
+    {
+        if let Some(sb) = ctxt.scrollbars.get_mut(self) {
+            update_fn(sb);
+        } else {
+            let mut sb = ScrollbarStyle::default();
+            update_fn(&mut sb);
+            ctxt.scrollbars.insert(*self, sb);
+        }
+    }
+
+    /// Builder method to set scrollbar style on a node.
+    pub fn with_scrollbar_style(self, ctxt: &mut Context, style: ScrollbarStyle) -> Self {
+        self.set_scrollbar_style(ctxt, style);
         self
     }
 
