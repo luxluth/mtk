@@ -353,6 +353,10 @@ impl View<String> for TextArea {
                             element.editor.set_ime_preedit(String::new(), None);
                             ctx.request_frame();
                         }
+                        Ime::DeleteSurrounding { .. } => {
+                            eprintln!("[mtk(ime)]: Not supported yet {ime:?}")
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -362,7 +366,7 @@ impl View<String> for TextArea {
                     let shift = ctx.modifiers().shift_key();
                     let ctrl_alt = ctx.modifiers().control_key()
                         || ctx.modifiers().alt_key()
-                        || ctx.modifiers().super_key();
+                        || ctx.modifiers().meta_key();
 
                     match event.logical_key.as_ref() {
                         Key::Named(NamedKey::ArrowLeft) => {

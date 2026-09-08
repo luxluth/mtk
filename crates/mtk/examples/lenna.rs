@@ -15,7 +15,7 @@ fn main() {
         "/examples/assets/Lenna_(test_image).png"
     ));
 
-    let mut window = Window::with(
+    let window = Window::with(
         (),
         |_state, _msg: ()| {},
         move |_state| {

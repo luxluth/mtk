@@ -811,6 +811,12 @@ impl KeyEventContext {
         ) || matches!(self.text.as_deref(), Some("\r") | Some("\n"))
     }
 
+    /// Returns `true` if the Space key was pressed.
+    pub fn is_space(&self) -> bool {
+        self.logical_key == " "
+            || matches!(self.logical_key, winit::keyboard::Key::Character(ref s) if s == " ")
+    }
+
     /// Returns `true` if the Tab key was pressed.
     pub fn is_tab(&self) -> bool {
         self.logical_key == winit::keyboard::Key::Named(winit::keyboard::NamedKey::Tab)
@@ -833,7 +839,7 @@ impl KeyEventContext {
 
     /// Returns `true` if the Super / Meta / Windows / Command key is currently held.
     pub fn with_super(&self) -> bool {
-        self.modifiers.super_key()
+        self.modifiers.meta_key()
     }
 }
 

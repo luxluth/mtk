@@ -75,7 +75,7 @@ fn calculate_area(radius: f64) -> f64 {
             .id(TokenKind::Parameter("radius: input argument")),
     ];
 
-    let mut window = Window::with(
+    let window = Window::with(
         DemoState::default(),
         |state, msg: DemoMsg| match msg {
             DemoMsg::TokenHovered(token, hovered, geom) => {

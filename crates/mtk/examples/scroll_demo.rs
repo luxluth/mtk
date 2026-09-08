@@ -34,7 +34,7 @@ fn main() {
 
     let state = AppState { rows: initial_rows };
 
-    let mut window = Window::with(state, update, |state: &AppState| {
+    let window = Window::with(state, update, |state: &AppState| {
         let mut items = Vec::new();
 
         for row_rc in &state.rows {

@@ -385,7 +385,7 @@ fn main() {
     };
 
     // Note the new signature: state, update_fn, view_builder(&State)
-    let mut window = Window::with(state, update, app_view);
+    let window = Window::with(state, update, app_view);
 
     window.present_with(
         WindowAttributes::default()

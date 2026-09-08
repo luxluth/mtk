@@ -298,7 +298,12 @@ where
             Event::KeyboardInput { event: k_event, .. } => {
                 if Some(element.track_node) == ctx.focused_node() && k_event.state.is_pressed() {
                     match k_event.logical_key {
-                        Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) => {
+                        Key::Named(NamedKey::Enter) => {
+                            let new_val = !self.is_on;
+                            let msg = self.on_toggle.as_ref().map(|f| f(new_val));
+                            (EventResult::Handled, msg)
+                        }
+                        Key::Character(ref s) if s == " " => {
                             let new_val = !self.is_on;
                             let msg = self.on_toggle.as_ref().map(|f| f(new_val));
                             (EventResult::Handled, msg)

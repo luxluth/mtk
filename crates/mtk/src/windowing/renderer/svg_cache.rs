@@ -29,7 +29,7 @@ struct SvgPoolShared {
     queue: HashMap<crate::Node, SvgRasterRequest>,
     shutdown: bool,
     response_tx: Sender<SvgRasterResponse>,
-    window: Arc<Window>,
+    window: Arc<dyn Window>,
 }
 
 /// Background thread pool for non-blocking asynchronous SVG rasterization.
@@ -83,7 +83,7 @@ fn worker_loop(shared: Arc<(Mutex<SvgPoolShared>, Condvar)>) {
 
 impl SvgRasterPool {
     /// Creates a new background worker pool bounded to CPU parallelism.
-    pub fn new(window: Arc<Window>) -> Self {
+    pub fn new(window: Arc<dyn Window>) -> Self {
         let (response_tx, response_rx) = channel();
         let num_threads = std::thread::available_parallelism()
             .map(|n| n.get())

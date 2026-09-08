@@ -143,7 +143,7 @@ fn main() {
         global_burst_count: 0,
     };
 
-    let mut window = Window::with(
+    let window = Window::with(
         initial_state,
         |state, msg: Message| match msg {
             Message::NodeDrag(ctx) => {

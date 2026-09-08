@@ -553,6 +553,10 @@ impl View<String> for InputText {
                             element.editor.set_ime_preedit(String::new(), None);
                             ctx.request_frame();
                         }
+                        Ime::DeleteSurrounding { .. } => {
+                            eprintln!("[mtk(ime)]: Not supported {ime:?}")
+                        }
+                        _ => {}
                     }
                 }
             }

@@ -18,7 +18,7 @@ pollster = "1"
 resvg = "0.48.1"
 swash = "0.2.10"
 wgpu = "30.0.1"
-winit = "0.30.13"
+winit = "=0.31.0-beta.3"
 zune-image = "0.5"
 zune-core = "0.5"
 arboard = { version = "3", features = ["wayland-data-control"] }

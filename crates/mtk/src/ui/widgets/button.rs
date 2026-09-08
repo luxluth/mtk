@@ -285,7 +285,10 @@ impl<State, Msg: Clone> View<State> for Button<Msg> {
             Event::KeyboardInput { event: k_event, .. } => {
                 if Some(element.node) == ctx.focused_node() && k_event.state.is_pressed() {
                     match k_event.logical_key {
-                        Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) => {
+                        Key::Named(NamedKey::Enter) => {
+                            (EventResult::Handled, self.on_click.clone())
+                        }
+                        Key::Character(ref s) if s == " " => {
                             (EventResult::Handled, self.on_click.clone())
                         }
                         _ => (EventResult::Ignored, None),

@@ -36,6 +36,8 @@ pub struct PixelBuffer<'a> {
     pub width: u32,
     /// Physical canvas height in pixels.
     pub height: u32,
+    /// Current display scale factor.
+    pub scale_factor: f32,
     /// Mutable slice of 32-bit pixel values with length `width * height` in RGBA8 format.
     pub pixels: &'a mut [u32],
     pub(crate) frame_requested: &'a Cell<bool>,
@@ -59,15 +61,48 @@ impl<'a> PixelBuffer<'a> {
     pub fn new(
         width: u32,
         height: u32,
+        scale_factor: f32,
         pixels: &'a mut [u32],
         frame_requested: &'a Cell<bool>,
     ) -> Self {
         Self {
             width,
             height,
+            scale_factor,
             pixels,
             frame_requested,
         }
+    }
+
+    /// Returns the logical width of the canvas in points.
+    #[inline]
+    pub fn logical_width(&self) -> f32 {
+        self.width as f32 / self.scale_factor
+    }
+
+    /// Returns the logical height of the canvas in points.
+    #[inline]
+    pub fn logical_height(&self) -> f32 {
+        self.height as f32 / self.scale_factor
+    }
+
+    /// Converts logical canvas coordinates `(x, y)` to physical buffer pixel coordinates `(px, py)`.
+    #[inline]
+    pub fn logical_to_physical(&self, x: f32, y: f32) -> (u32, u32) {
+        (
+            ((x * self.scale_factor).round() as u32).min(self.width.saturating_sub(1)),
+            ((y * self.scale_factor).round() as u32).min(self.height.saturating_sub(1)),
+        )
+    }
+
+    /// Fills a rectangular region defined in logical points, properly scaled by `scale_factor`.
+    #[inline]
+    pub fn fill_logical_rect_with_color(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
+        let px = (x * self.scale_factor).round() as i32;
+        let py = (y * self.scale_factor).round() as i32;
+        let pw = ((w * self.scale_factor).round() as u32).max(1);
+        let ph = ((h * self.scale_factor).round() as u32).max(1);
+        self.fill_rect_with_color(px, py, pw, ph, color);
     }
 
     /// Schedules a redraw for the next frame. Call this if your pixel canvas contains continuous animations.
@@ -269,6 +304,8 @@ pub struct PaintContext<'a> {
     pub format: wgpu::TextureFormat,
     /// Elapsed delta time in seconds since the previous frame tick.
     pub dt: f32,
+    /// Current display scale factor.
+    pub scale_factor: f32,
     pub(crate) frame_requested: &'a Cell<bool>,
 }
 
@@ -277,6 +314,18 @@ impl<'a> PaintContext<'a> {
     #[inline]
     pub fn request_frame(&self) {
         self.frame_requested.set(true);
+    }
+
+    /// Returns the logical width of the canvas in points.
+    #[inline]
+    pub fn logical_width(&self) -> f32 {
+        self.width as f32 / self.scale_factor
+    }
+
+    /// Returns the logical height of the canvas in points.
+    #[inline]
+    pub fn logical_height(&self) -> f32 {
+        self.height as f32 / self.scale_factor
     }
 }
 
@@ -335,14 +384,20 @@ pub struct CanvasData {
 /// Interaction event information passed to canvas event handlers.
 #[derive(Clone, Copy, Debug)]
 pub struct CanvasEventDetails {
-    /// Local horizontal pixel position relative to top-left of canvas.
+    /// Local horizontal logical position relative to top-left of canvas.
     pub local_x: f32,
-    /// Local vertical pixel position relative to top-left of canvas.
+    /// Local vertical logical position relative to top-left of canvas.
     pub local_y: f32,
+    /// Physical horizontal pixel position matching PixelBuffer pixels (`local_x * scale_factor`).
+    pub pixel_x: f32,
+    /// Physical vertical pixel position matching PixelBuffer pixels (`local_y * scale_factor`).
+    pub pixel_y: f32,
     /// Normalized horizontal position `0.0..=1.0`.
     pub uv_x: f32,
     /// Normalized vertical position `0.0..=1.0`.
     pub uv_y: f32,
+    /// Current display scale factor for the canvas.
+    pub scale_factor: f32,
 }
 
 /// A declarative UI element that renders custom 2D/3D graphics via an attached painter.
@@ -486,6 +541,9 @@ impl<State: 'static, Msg: 'static> View<State> for Canvas<State, Msg> {
                 Event::MouseInput {
                     x, y, hit_nodes, ..
                 } => (*x, *y, hit_nodes.contains(element)),
+                Event::StylusInput {
+                    x, y, hit_nodes, ..
+                } => (*x, *y, hit_nodes.contains(element)),
                 Event::MouseWheel { hit_nodes, .. } => (0.0, 0.0, hit_nodes.contains(element)),
                 _ => (0.0, 0.0, false),
             };
@@ -494,6 +552,9 @@ impl<State: 'static, Msg: 'static> View<State> for Canvas<State, Msg> {
                 if let Some(computed) = element.get_computed(ctx) {
                     let local_x = (cursor_x - computed.x).max(0.0);
                     let local_y = (cursor_y - computed.y).max(0.0);
+                    let scale_factor = ctx.scale_factor.max(0.1);
+                    let pixel_x = (local_x * scale_factor).max(0.0);
+                    let pixel_y = (local_y * scale_factor).max(0.0);
                     let uv_x = if computed.w > 0.0 {
                         (local_x / computed.w).clamp(0.0, 1.0)
                     } else {
@@ -508,8 +569,11 @@ impl<State: 'static, Msg: 'static> View<State> for Canvas<State, Msg> {
                     let details = CanvasEventDetails {
                         local_x,
                         local_y,
+                        pixel_x,
+                        pixel_y,
                         uv_x,
                         uv_y,
+                        scale_factor,
                     };
 
                     if let Some(msg) = (on_event)(state, event, details) {
@@ -530,7 +594,11 @@ mod tests {
     fn test_pixel_buffer_operations() {
         let mut data = vec![0u32; 100]; // 10x10
         let frame_requested = Cell::new(false);
-        let mut buf = PixelBuffer::new(10, 10, &mut data, &frame_requested);
+        let mut buf = PixelBuffer::new(10, 10, 1.0, &mut data, &frame_requested);
+
+        assert_eq!(buf.logical_width(), 10.0);
+        assert_eq!(buf.logical_height(), 10.0);
+        assert_eq!(buf.logical_to_physical(2.0, 3.0), (2, 3));
 
         buf.set_pixel(2, 3, 0xFF112233);
         assert_eq!(buf.get_pixel(2, 3), Some(0xFF112233));
@@ -561,7 +629,7 @@ mod tests {
     fn test_pixel_buffer_color_operations() {
         let mut data = vec![0u32; 100]; // 10x10
         let frame_requested = Cell::new(false);
-        let mut buf = PixelBuffer::new(10, 10, &mut data, &frame_requested);
+        let mut buf = PixelBuffer::new(10, 10, 1.0, &mut data, &frame_requested);
 
         let red = Color::new(255, 0, 0, 255);
         let blue = Color::new(0, 0, 255, 255);

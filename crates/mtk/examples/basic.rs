@@ -5,7 +5,7 @@ use mtk::ui::widgets::text;
 use mtk::windowing::{Window, WindowAttributes};
 
 fn main() {
-    let mut window = Window::with(
+    let window = Window::with(
         (),
         |_state, _msg: ()| {},
         |_state| {

@@ -110,7 +110,7 @@ fn h_item_style() -> Style {
 fn main() {
     let state = AppState {};
 
-    let mut window = Window::with(state, update, app);
+    let window = Window::with(state, update, app);
     window.present_with(
         WindowAttributes::default()
             .with_decorations(true)

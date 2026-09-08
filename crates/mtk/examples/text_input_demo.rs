@@ -86,7 +86,7 @@ fn main() {
         username: "Luthor".to_string(),
     };
 
-    let mut window = Window::with(state, update, app);
+    let window = Window::with(state, update, app);
 
     window.present_with(
         WindowAttributes::default()

@@ -59,7 +59,7 @@ fn main() {
         panel_offset_x: 0.0,
     };
 
-    let mut window = Window::with(
+    let window = Window::with(
         initial_state,
         |state, msg: Message| match msg {
             Message::SetVibrancy(v) => state.vibrancy = v.clamp(0.0, 1.0),

@@ -102,7 +102,7 @@ pub struct Context {
     pub text_context: SharedTextContext,
     pub focused_node: Option<Node>,
     pub focusable_nodes: Vec<Node>,
-    pub window: Option<Arc<Window>>,
+    pub window: Option<Arc<dyn Window>>,
     pub modifiers: ModifiersState,
     pub ensure_visible_requests: HashMap<Node, crate::style::Rect>,
     pub clipboard: Arc<Mutex<Option<arboard::Clipboard>>>,
@@ -535,7 +535,7 @@ impl Context {
     }
 
     /// Returns a reference-counted handle to the underlying window, if attached.
-    pub fn window(&self) -> Option<Arc<winit::window::Window>> {
+    pub fn window(&self) -> Option<Arc<dyn winit::window::Window>> {
         self.window.clone()
     }
 

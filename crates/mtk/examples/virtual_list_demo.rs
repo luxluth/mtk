@@ -217,7 +217,7 @@ fn main() {
         filter_level: FilterLevel::All,
     };
 
-    let mut window = Window::with(state, update, |state: &AppState| {
+    let window = Window::with(state, update, |state: &AppState| {
         let logs_ref = Rc::clone(&state.filtered_logs);
         let count = logs_ref.len();
         let total = state.all_logs.len();

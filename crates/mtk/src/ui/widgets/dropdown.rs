@@ -440,7 +440,18 @@ where
             } => {
                 if Some(element.trigger_node) == ctx.focused_node() && k_event.state.is_pressed() {
                     match k_event.logical_key {
-                        Key::Named(NamedKey::Space) | Key::Named(NamedKey::Enter) => {
+                        Key::Named(NamedKey::Enter) => {
+                            element.is_open = !element.is_open;
+                            if element.is_open {
+                                element.container_node.append(ctx, element.menu_node);
+                                element.icon_node.set_text(ctx, "▴");
+                            } else {
+                                element.menu_node.remove(ctx);
+                                element.icon_node.set_text(ctx, "▾");
+                            }
+                            return (EventResult::Handled, None);
+                        }
+                        Key::Character(ref s) if s == " " => {
                             element.is_open = !element.is_open;
                             if element.is_open {
                                 element.container_node.append(ctx, element.menu_node);
