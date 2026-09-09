@@ -178,6 +178,18 @@ impl InputInner {
             click_count: 0,
         }
     }
+
+    /// Returns a reference to the internal text editor.
+    #[inline]
+    pub fn editor(&self) -> &Editor {
+        &self.editor
+    }
+
+    /// Returns a mutable reference to the internal text editor.
+    #[inline]
+    pub fn editor_mut(&mut self) -> &mut Editor {
+        &mut self.editor
+    }
 }
 
 impl View<String> for InputText {

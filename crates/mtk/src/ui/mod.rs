@@ -8,6 +8,7 @@ use crate::{Context, Node, ui::event::EventResult, windowing::WindowDimension};
 pub mod adapter;
 pub mod event;
 pub mod focus;
+pub mod keyed;
 pub mod kinetic;
 pub mod layer;
 pub mod lens;
@@ -23,6 +24,7 @@ pub use event::{
     KeyHandler, KeyScope, ThumbScrollContext, ThumbScrollHandler, TickHandler, ViewEventExt,
 };
 pub use focus::{Focusable, FocusableExt};
+pub use keyed::{Keyed, KeyedViewSequence, keyed, keyed_sequence};
 pub use kinetic::KineticTracker;
 pub use layer::{Layer, ViewLayerExt, layer};
 pub use lens::Lens;

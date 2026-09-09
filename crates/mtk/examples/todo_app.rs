@@ -2,6 +2,7 @@ use mtk::{
     AlignItems, AlignSelf, Lens, Size, Style, TextStyle, clr, hsl, text_property,
     ui::{
         EventKind, View, ViewAdaptExt, ViewEventExt, ViewStyleExt,
+        keyed::{keyed, keyed_sequence},
         memoize::memoize,
         widgets::{column, input_text, row, scroll_view, text},
     },
@@ -203,16 +204,17 @@ fn app(state: &TodoState) -> impl View<TodoState, Message = TodoMsg> + use<> {
         if active_count <= 1 { "" } else { "s" }
     );
 
-    let filtered_items: Vec<_> = state
-        .todos
-        .iter()
-        .filter(|t| match state.filter {
-            FilterKind::All => true,
-            FilterKind::Active => !t.completed,
-            FilterKind::Completed => t.completed,
-        })
-        .map(|t| memoize(t.clone(), todo_item_view))
-        .collect();
+    let filtered_items = keyed_sequence(
+        state
+            .todos
+            .iter()
+            .filter(|t| match state.filter {
+                FilterKind::All => true,
+                FilterKind::Active => !t.completed,
+                FilterKind::Completed => t.completed,
+            })
+            .map(|t| keyed(t.id, memoize(t.clone(), todo_item_view))),
+    );
 
     let has_completed = completed_count > 0;
 

@@ -157,8 +157,18 @@ impl LayoutEngine {
         self.hierarchies.get(node).and_then(|h| h.first_child)
     }
 
+    #[inline(always)]
+    pub fn last_child(&self, node: NodeId) -> Option<NodeId> {
+        self.hierarchies.get(node).and_then(|h| h.last_child)
+    }
+
     pub fn next_sibling(&self, node: NodeId) -> Option<NodeId> {
         self.hierarchies.get(node).and_then(|h| h.next_sibling)
+    }
+
+    #[inline(always)]
+    pub fn prev_sibling(&self, node: NodeId) -> Option<NodeId> {
+        self.hierarchies.get(node).and_then(|h| h.prev_sibling)
     }
 
     pub fn children(&self, parent: NodeId) -> Vec<NodeId> {

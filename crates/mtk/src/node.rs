@@ -76,6 +76,26 @@ impl Node {
         ctxt.layout.parent(self.0).map(Node)
     }
 
+    /// Returns the first child of this node in the layout hierarchy, if any.
+    pub fn first_child(&self, ctxt: &Context) -> Option<Node> {
+        ctxt.layout.first_child(self.0).map(Node)
+    }
+
+    /// Returns the last child of this node in the layout hierarchy, if any.
+    pub fn last_child(&self, ctxt: &Context) -> Option<Node> {
+        ctxt.layout.last_child(self.0).map(Node)
+    }
+
+    /// Returns the next sibling of this node in the layout hierarchy, if any.
+    pub fn next_sibling(&self, ctxt: &Context) -> Option<Node> {
+        ctxt.layout.next_sibling(self.0).map(Node)
+    }
+
+    /// Returns the previous sibling of this node in the layout hierarchy, if any.
+    pub fn prev_sibling(&self, ctxt: &Context) -> Option<Node> {
+        ctxt.layout.prev_sibling(self.0).map(Node)
+    }
+
     /// Returns true if this node is equal to or a descendant of `ancestor`.
     pub fn is_descendant_of(&self, ctxt: &Context, ancestor: Node) -> bool {
         ctxt.layout.is_descendant_of(self.0, ancestor.0)
