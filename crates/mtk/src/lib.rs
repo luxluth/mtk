@@ -36,6 +36,7 @@ pub use crate::ui::KineticTracker;
 pub use crate::ui::widgets::canvas::{
     CanvasData, CanvasEventDetails, CanvasPainterKind, PaintContext, PixelPainter, WgpuPainter,
 };
+pub use crate::ui::widgets::{CheckboxStyle, RadioGroup, RadioStyle, SwitchStyle};
 pub use crate::ui::{
     DragContext, DragPhase, Focusable, FocusableExt, KeyEvent, KeyEventContext, Keyed,
     KeyedViewSequence, keyed, keyed_sequence,
