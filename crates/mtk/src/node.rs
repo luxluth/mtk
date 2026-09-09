@@ -1,7 +1,7 @@
-use crate::Context;
 use crate::effects::Effects;
 use crate::layout::NodeId;
 use crate::style::{Computed, Constraints, ScrollbarStyle};
+use crate::{AccessibleInfo, Context};
 
 /// An opaque, generational handle representing a UI layout element.
 ///
@@ -32,6 +32,18 @@ impl Node {
     /// Constructs a `Node` from a layout node handle.
     pub fn from_raw(raw: NodeId) -> Self {
         Node(raw)
+    }
+
+    /// Converts this node into a persistent 64-bit AccessKit NodeId preserving generation and index.
+    #[inline(always)]
+    pub fn to_accesskit_id(&self) -> accesskit::NodeId {
+        crate::accessibility::to_accesskit_id(*self)
+    }
+
+    /// Reconstructs a `Node` from an AccessKit NodeId.
+    #[inline(always)]
+    pub fn from_accesskit_id(id: accesskit::NodeId) -> Self {
+        crate::accessibility::from_accesskit_id(id)
     }
 
     pub fn get_invalid() -> Node {
@@ -99,6 +111,31 @@ impl Node {
     /// Returns true if this node is equal to or a descendant of `ancestor`.
     pub fn is_descendant_of(&self, ctxt: &Context, ancestor: Node) -> bool {
         ctxt.layout.is_descendant_of(self.0, ancestor.0)
+    }
+
+    /// Returns an iterator over all direct children of this node in the layout hierarchy.
+    pub fn children_iter<'a>(&self, ctxt: &'a Context) -> impl Iterator<Item = Node> + 'a {
+        let mut curr = self.first_child(ctxt);
+        std::iter::from_fn(move || {
+            let next = curr?;
+            curr = next.next_sibling(ctxt);
+            Some(next)
+        })
+    }
+
+    /// Attaches accessibility metadata to this layout node.
+    pub fn set_accessible(&self, ctxt: &mut Context, info: AccessibleInfo) {
+        ctxt.set_accessible(*self, info);
+    }
+
+    /// Retrieves accessibility metadata attached to this layout node, if any.
+    pub fn get_accessible<'a>(&self, ctxt: &'a Context) -> Option<&'a AccessibleInfo> {
+        ctxt.get_accessible(*self)
+    }
+
+    /// Removes accessibility metadata attached to this layout node, if any.
+    pub fn remove_accessible(&self, ctxt: &mut Context) -> Option<AccessibleInfo> {
+        ctxt.remove_accessible(*self)
     }
 
     /// Append a child node to the end of the parent node tree.

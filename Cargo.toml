@@ -22,3 +22,4 @@ winit = "=0.31.0-beta.3"
 zune-image = "0.5"
 zune-core = "0.5"
 arboard = { version = "3", features = ["wayland-data-control"] }
+accesskit = "0.25.0"

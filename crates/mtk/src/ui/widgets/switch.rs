@@ -11,7 +11,94 @@ use crate::style::{
 use crate::text_property::FontWeight;
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
-use crate::{Context, Node, clr, rgb, rgba};
+use crate::{AccessibleInfo, Context, Node, clr, rgb, rgba};
+
+/// Visual styling configuration for a [`Switch`] widget.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SwitchStyle {
+    pub on_bg: Color,
+    pub off_bg: Color,
+    pub disabled_bg: Color,
+    pub knob_color: Color,
+    pub label_style: Option<TextStyle>,
+    pub gap: f32,
+}
+
+impl Default for SwitchStyle {
+    fn default() -> Self {
+        Self {
+            on_bg: rgb!(59, 130, 246),
+            off_bg: rgb!(226, 232, 240),
+            disabled_bg: rgb!(203, 213, 225),
+            knob_color: clr!(white),
+            label_style: None,
+            gap: 10.0,
+        }
+    }
+}
+
+impl SwitchStyle {
+    /// Creates a new `SwitchStyle` with default visual properties.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the background color of the track when the switch is active (on).
+    pub fn on_bg(mut self, color: Color) -> Self {
+        self.on_bg = color;
+        self
+    }
+
+    /// Sets the active (on) background color of the track.
+    pub fn active_color(mut self, color: Color) -> Self {
+        self.on_bg = color;
+        self
+    }
+
+    /// Sets the background color of the track when the switch is inactive (off).
+    pub fn off_bg(mut self, color: Color) -> Self {
+        self.off_bg = color;
+        self
+    }
+
+    /// Sets the inactive (off) background color of the track.
+    pub fn inactive_color(mut self, color: Color) -> Self {
+        self.off_bg = color;
+        self
+    }
+
+    /// Sets the background color of the track when the switch is disabled.
+    pub fn disabled_bg(mut self, color: Color) -> Self {
+        self.disabled_bg = color;
+        self
+    }
+
+    /// Sets the color of the sliding knob circle.
+    pub fn knob_color(mut self, color: Color) -> Self {
+        self.knob_color = color;
+        self
+    }
+
+    /// Sets custom styling for the label text.
+    pub fn label_style(mut self, style: TextStyle) -> Self {
+        self.label_style = Some(style);
+        self
+    }
+
+    /// Sets the text color of the label.
+    pub fn label_color(mut self, color: Color) -> Self {
+        let mut style = self.label_style.unwrap_or_default();
+        style.color = color;
+        self.label_style = Some(style);
+        self
+    }
+
+    /// Sets the gap between the switch track and its label.
+    pub fn gap(mut self, gap: f32) -> Self {
+        self.gap = gap;
+        self
+    }
+}
 
 /// A smooth pill-shaped toggle switch widget with fluid animation and optional label.
 pub struct Switch<Msg, F = fn(bool) -> Msg> {
@@ -19,6 +106,7 @@ pub struct Switch<Msg, F = fn(bool) -> Msg> {
     pub(crate) label: Option<String>,
     pub(crate) on_toggle: Option<F>,
     pub(crate) disabled: bool,
+    pub(crate) style: SwitchStyle,
     pub(crate) source_loc: Option<SourceLocation>,
     _marker: PhantomData<Msg>,
 }
@@ -29,6 +117,7 @@ pub struct Switch<Msg, F = fn(bool) -> Msg> {
 /// ```rust,ignore
 /// switch(state.notifications_enabled)
 ///     .label("Notifications")
+///     .active_color(rgb!(16, 185, 129))
 ///     .on_toggle(|on| AppMsg::SetNotifications(on))
 /// ```
 #[track_caller]
@@ -38,6 +127,7 @@ pub fn switch<Msg>(is_on: bool) -> Switch<Msg, fn(bool) -> Msg> {
         label: None,
         on_toggle: None,
         disabled: false,
+        style: SwitchStyle::default(),
         source_loc: Some(SourceLocation::here("Switch")),
         _marker: PhantomData,
     }
@@ -50,6 +140,48 @@ impl<Msg, F> Switch<Msg, F> {
         self
     }
 
+    /// Sets the visual style configuration for the switch.
+    pub fn style(mut self, style: SwitchStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    /// Sets the active (on) background color of the track.
+    pub fn active_color(mut self, color: Color) -> Self {
+        self.style = self.style.active_color(color);
+        self
+    }
+
+    /// Sets the inactive (off) background color of the track.
+    pub fn inactive_color(mut self, color: Color) -> Self {
+        self.style = self.style.inactive_color(color);
+        self
+    }
+
+    /// Sets the color of the sliding knob circle.
+    pub fn knob_color(mut self, color: Color) -> Self {
+        self.style = self.style.knob_color(color);
+        self
+    }
+
+    /// Sets custom styling for the label text.
+    pub fn label_style(mut self, style: TextStyle) -> Self {
+        self.style = self.style.label_style(style);
+        self
+    }
+
+    /// Sets the text color of the label.
+    pub fn label_color(mut self, color: Color) -> Self {
+        self.style = self.style.label_color(color);
+        self
+    }
+
+    /// Sets the gap between the switch track and its label.
+    pub fn gap(mut self, gap: f32) -> Self {
+        self.style = self.style.gap(gap);
+        self
+    }
+
     /// Sets the callback invoked when the switch is toggled.
     pub fn on_toggle<NewF: Fn(bool) -> Msg>(self, on_toggle: NewF) -> Switch<Msg, NewF> {
         Switch {
@@ -57,6 +189,7 @@ impl<Msg, F> Switch<Msg, F> {
             label: self.label,
             on_toggle: Some(on_toggle),
             disabled: self.disabled,
+            style: self.style,
             source_loc: self.source_loc,
             _marker: PhantomData,
         }
@@ -97,21 +230,21 @@ where
         Style::new()
             .flex_direction(FlexDirection::Row)
             .align_items(AlignItems::Center)
-            .gap(10.0)
+            .gap(self.style.gap)
             .apply_to_node(ctx, container_node);
 
         let initial_progress = if self.is_on { 1.0f32 } else { 0.0f32 };
         let anim_progress = AnimatedValue::new(initial_progress);
         let anim_start = Instant::now();
 
-        let off_bg = rgb!(226, 232, 240);
-        let on_bg = rgb!(59, 130, 246);
-        let disabled_bg = rgb!(203, 213, 225);
-
         let track_bg = if self.disabled {
-            disabled_bg
+            self.style.disabled_bg
         } else {
-            Color::interpolate(&off_bg, &on_bg, initial_progress as f64)
+            Color::interpolate(
+                &self.style.off_bg,
+                &self.style.on_bg,
+                initial_progress as f64,
+            )
         };
 
         let initial_pad_left = 2.0 + initial_progress * 20.0;
@@ -135,7 +268,7 @@ where
             .width(Size::Fixed(20))
             .height(Size::Fixed(20))
             .corner_radius(10.0)
-            .bg_color(clr!(white))
+            .bg_color(self.style.knob_color)
             .shadow(rgba!(0, 0, 0, 40), 4.0, 0.2)
             .apply_to_node(ctx, knob_node);
 
@@ -144,21 +277,17 @@ where
 
         let label_node = if let Some(ref text_str) = self.label {
             let l_node = ctx.create_node();
-            l_node.set_text_with_userdata(
-                ctx,
-                text_str,
-                TextStyle {
-                    font_size: 14.0,
-                    font_weight: FontWeight::MEDIUM,
-                    vertical_alignment: VerticalAlignment::Center,
-                    color: if self.disabled {
-                        rgb!(148, 163, 184)
-                    } else {
-                        rgb!(15, 23, 42)
-                    },
-                    ..Default::default()
-                },
-            );
+            let mut text_style = self.style.label_style.clone().unwrap_or_else(|| TextStyle {
+                font_size: 14.0,
+                font_weight: FontWeight::MEDIUM,
+                vertical_alignment: VerticalAlignment::Center,
+                color: rgb!(15, 23, 42),
+                ..Default::default()
+            });
+            if self.disabled {
+                text_style.color = rgb!(148, 163, 184);
+            }
+            l_node.set_text_with_userdata(ctx, text_str, text_style);
             container_node.append(ctx, l_node);
             Some(l_node)
         } else {
@@ -168,6 +297,16 @@ where
         if !self.disabled {
             ctx.register_focusable(track_node);
         }
+
+        let mut a11y_info = AccessibleInfo::new(accesskit::Role::Switch)
+            .with_toggled(self.is_on)
+            .with_disabled(self.disabled)
+            .with_action(accesskit::Action::Click)
+            .with_action(accesskit::Action::Focus);
+        if let Some(ref l) = self.label {
+            a11y_info = a11y_info.with_label(l);
+        }
+        ctx.set_accessible(track_node, a11y_info);
 
         SwitchElement {
             container_node,
@@ -190,30 +329,68 @@ where
             ctx.request_frame();
         }
 
-        if self.label != prev.label {
-            if let (Some(l_node), Some(text_str)) = (element.label_node, &self.label) {
-                l_node.set_text(ctx, text_str);
-            }
+        if self.style.gap != prev.style.gap {
+            element.container_node.update_constraints(ctx, |c| {
+                c.gap = self.style.gap;
+            });
         }
 
-        if self.disabled != prev.disabled {
-            let off_bg = rgb!(226, 232, 240);
-            let on_bg = rgb!(59, 130, 246);
-            let disabled_bg = rgb!(203, 213, 225);
+        if self.style.knob_color != prev.style.knob_color {
+            element.knob_node.update_effects(ctx, |e| {
+                e.background_color = self.style.knob_color;
+            });
+        }
 
+        if self.disabled != prev.disabled || self.style != prev.style {
             let track_bg = if self.disabled {
-                disabled_bg
+                self.style.disabled_bg
             } else {
-                Color::interpolate(&off_bg, &on_bg, element.anim_progress.get() as f64)
+                Color::interpolate(
+                    &self.style.off_bg,
+                    &self.style.on_bg,
+                    element.anim_progress.get() as f64,
+                )
             };
 
             element.track_node.update_effects(ctx, |e| {
                 e.background_color = track_bg;
             });
         }
+
+        if self.label != prev.label
+            || self.style.label_style != prev.style.label_style
+            || self.disabled != prev.disabled
+        {
+            if let (Some(l_node), Some(text_str)) = (element.label_node, &self.label) {
+                let mut text_style = self.style.label_style.clone().unwrap_or_else(|| TextStyle {
+                    font_size: 14.0,
+                    font_weight: FontWeight::MEDIUM,
+                    vertical_alignment: VerticalAlignment::Center,
+                    color: rgb!(15, 23, 42),
+                    ..Default::default()
+                });
+                if self.disabled {
+                    text_style.color = rgb!(148, 163, 184);
+                }
+                l_node.set_text_with_userdata(ctx, text_str, text_style);
+            }
+        }
+
+        if self.is_on != prev.is_on || self.disabled != prev.disabled || self.label != prev.label {
+            let mut a11y_info = AccessibleInfo::new(accesskit::Role::Switch)
+                .with_toggled(self.is_on)
+                .with_disabled(self.disabled)
+                .with_action(accesskit::Action::Click)
+                .with_action(accesskit::Action::Focus);
+            if let Some(ref l) = self.label {
+                a11y_info = a11y_info.with_label(l);
+            }
+            ctx.set_accessible(element.track_node, a11y_info);
+        }
     }
 
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
+        ctx.remove_accessible(element.track_node);
         ctx.unregister_focusable(element.track_node);
         if let Some(l_node) = element.label_node {
             l_node.remove(ctx);
@@ -249,9 +426,8 @@ where
                 });
 
                 if !self.disabled {
-                    let off_bg = rgb!(226, 232, 240);
-                    let on_bg = rgb!(59, 130, 246);
-                    let bg = Color::interpolate(&off_bg, &on_bg, progress as f64);
+                    let bg =
+                        Color::interpolate(&self.style.off_bg, &self.style.on_bg, progress as f64);
                     element.track_node.update_effects(ctx, |e| {
                         e.background_color = bg;
                     });
@@ -307,6 +483,24 @@ where
                             let new_val = !self.is_on;
                             let msg = self.on_toggle.as_ref().map(|f| f(new_val));
                             (EventResult::Handled, msg)
+                        }
+                        _ => (EventResult::Ignored, None),
+                    }
+                } else {
+                    (EventResult::Ignored, None)
+                }
+            }
+            Event::Action { node, action, .. } => {
+                if node == element.track_node || node == element.container_node {
+                    match action {
+                        accesskit::Action::Click => {
+                            let new_val = !self.is_on;
+                            let msg = self.on_toggle.as_ref().map(|f| f(new_val));
+                            (EventResult::Handled, msg)
+                        }
+                        accesskit::Action::Focus => {
+                            ctx.request_focus(element.track_node);
+                            (EventResult::Handled, None)
                         }
                         _ => (EventResult::Ignored, None),
                     }

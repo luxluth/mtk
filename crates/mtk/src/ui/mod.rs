@@ -119,6 +119,15 @@ pub enum Event {
         /// The node that lost focus.
         node: Node,
     },
+    /// Dispatched when an OS assistive technology (screen reader / accessibility client) requests an action.
+    Action {
+        /// The target layout node of the action.
+        node: Node,
+        /// The accessibility action requested.
+        action: accesskit::Action,
+        /// Optional action data payload (e.g. string value for SetValue).
+        data: Option<accesskit::ActionData>,
+    },
 }
 
 /// Describes a keyboard input targeting a window or UI node.

@@ -5,7 +5,7 @@ use crate::debugger::SourceLocation;
 use crate::style::{AlignItems, FlexDirection, JustifyContent, Size, Style};
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
-use crate::{Context, Node, rgb};
+use crate::{AccessibleInfo, Context, Node, rgb};
 
 /// A continuous or stepped horizontal range slider widget.
 pub struct Slider<Msg, F = fn(f32) -> Msg> {
@@ -145,6 +145,22 @@ where
             ctx.register_focusable(container_node);
         }
 
+        ctx.set_accessible(
+            container_node,
+            AccessibleInfo::new(accesskit::Role::Slider)
+                .with_numeric_range(
+                    self.value as f64,
+                    self.min as f64,
+                    self.max as f64,
+                    self.step.map(|s| s as f64),
+                )
+                .with_disabled(self.disabled)
+                .with_action(accesskit::Action::SetValue)
+                .with_action(accesskit::Action::Increment)
+                .with_action(accesskit::Action::Decrement)
+                .with_action(accesskit::Action::Focus),
+        );
+
         SliderElement {
             container_node,
             track_node,
@@ -163,10 +179,27 @@ where
             element.fill_node.update_constraints(ctx, |c| {
                 c.width = Size::Percent(pct);
             });
+
+            ctx.set_accessible(
+                element.container_node,
+                AccessibleInfo::new(accesskit::Role::Slider)
+                    .with_numeric_range(
+                        self.value as f64,
+                        self.min as f64,
+                        self.max as f64,
+                        self.step.map(|s| s as f64),
+                    )
+                    .with_disabled(self.disabled)
+                    .with_action(accesskit::Action::SetValue)
+                    .with_action(accesskit::Action::Increment)
+                    .with_action(accesskit::Action::Decrement)
+                    .with_action(accesskit::Action::Focus),
+            );
         }
     }
 
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
+        ctx.remove_accessible(element.container_node);
         ctx.unregister_focusable(element.container_node);
         element.fill_node.remove(ctx);
         ctx.destroy_node(element.fill_node);
@@ -266,6 +299,39 @@ where
                             let val = (self.value + delta).clamp(self.min, self.max);
                             let msg = self.on_change.as_ref().map(|f| f(val));
                             (EventResult::Handled, msg)
+                        }
+                        _ => (EventResult::Ignored, None),
+                    }
+                } else {
+                    (EventResult::Ignored, None)
+                }
+            }
+            Event::Action { node, action, data } => {
+                if node == element.container_node {
+                    let step = self.step.unwrap_or((self.max - self.min) * 0.05);
+                    match action {
+                        accesskit::Action::SetValue => {
+                            if let Some(accesskit::ActionData::NumericValue(val)) = data {
+                                let clamped = (val as f32).clamp(self.min, self.max);
+                                let msg = self.on_change.as_ref().map(|f| f(clamped));
+                                (EventResult::Handled, msg)
+                            } else {
+                                (EventResult::Ignored, None)
+                            }
+                        }
+                        accesskit::Action::Increment => {
+                            let val = (self.value + step).clamp(self.min, self.max);
+                            let msg = self.on_change.as_ref().map(|f| f(val));
+                            (EventResult::Handled, msg)
+                        }
+                        accesskit::Action::Decrement => {
+                            let val = (self.value - step).clamp(self.min, self.max);
+                            let msg = self.on_change.as_ref().map(|f| f(val));
+                            (EventResult::Handled, msg)
+                        }
+                        accesskit::Action::Focus => {
+                            ctx.request_focus(element.container_node);
+                            (EventResult::Handled, None)
                         }
                         _ => (EventResult::Ignored, None),
                     }
