@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 
+pub mod accessibility;
 pub mod animation;
 pub mod colors;
 pub mod command;
@@ -19,6 +20,7 @@ use ::winit::keyboard::ModifiersState;
 use ::winit::window::Window;
 pub use mtk_macro::Lens;
 
+pub use crate::accessibility::{AccessibleInfo, AccessibleView, AccessibleViewExt};
 pub use crate::colors::Color;
 pub use crate::command::{Command, IntoCommand};
 pub use crate::debugger::{LayoutSnapshot, NodeDebugInfo, SourceLocation};
@@ -38,6 +40,7 @@ pub use crate::ui::{
     DragContext, DragPhase, Focusable, FocusableExt, KeyEvent, KeyEventContext, Keyed,
     KeyedViewSequence, keyed, keyed_sequence,
 };
+pub use accesskit::{Action, ActionData, ActionRequest, Role, TreeUpdate};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -101,6 +104,8 @@ pub struct Context {
     >,
     pub effects: HashMap<Node, Effects>,
     pub dirty_effects: HashSet<Node>,
+    pub accessibility_nodes: HashMap<Node, AccessibleInfo>,
+    pub dirty_accessibility: HashSet<Node>,
     pub scrollbars: HashMap<Node, ScrollbarStyle>,
     pub text_context: SharedTextContext,
     pub focused_node: Option<Node>,
@@ -159,6 +164,8 @@ impl Context {
             text_sizing_func: None,
             effects: HashMap::new(),
             dirty_effects: HashSet::new(),
+            accessibility_nodes: HashMap::new(),
+            dirty_accessibility: HashSet::new(),
             scrollbars: HashMap::new(),
             text_context: Arc::new(Mutex::new(TextContext::new())),
             focused_node: None,
@@ -296,11 +303,15 @@ impl Context {
     /// Sets the focused node to `node` and requests a window redraw.
     pub fn request_focus(&mut self, node: Node) {
         self.focused_node = Some(node);
+        self.dirty_accessibility.insert(node);
         self.request_frame();
     }
 
     /// Clears the currently focused node and requests a window redraw.
     pub fn clear_focus(&mut self) {
+        if let Some(focused) = self.focused_node {
+            self.dirty_accessibility.insert(focused);
+        }
         self.focused_node = None;
         self.request_frame();
     }
@@ -551,10 +562,34 @@ impl Context {
 
     /// Destroys a node and all of its recursive children from the layout engine and cleans up associated text/effect state.
     pub fn destroy_node(&mut self, node: Node) {
+        self.accessibility_nodes.remove(&node);
+        self.dirty_accessibility.remove(&node);
         self.effects.remove(&node);
         self.dirty_effects.remove(&node);
         self.canvases.borrow_mut().remove(&node);
         self.layout.destroy_node(node.0);
+    }
+
+    /// Attaches or updates semantic accessibility metadata for `node`.
+    pub fn set_accessible(&mut self, node: Node, info: AccessibleInfo) {
+        self.dirty_accessibility.insert(node);
+        self.accessibility_nodes.insert(node, info);
+    }
+
+    /// Retrieves semantic accessibility metadata for `node`, if any.
+    pub fn get_accessible(&self, node: Node) -> Option<&AccessibleInfo> {
+        self.accessibility_nodes.get(&node)
+    }
+
+    /// Removes semantic accessibility metadata for `node`, if any.
+    pub fn remove_accessible(&mut self, node: Node) -> Option<AccessibleInfo> {
+        self.dirty_accessibility.insert(node);
+        self.accessibility_nodes.remove(&node)
+    }
+
+    /// Generates an `accesskit::TreeUpdate` snapshot from the current UI layout tree.
+    pub fn build_accesskit_tree_update(&mut self, is_full: bool) -> accesskit::TreeUpdate {
+        crate::accessibility::build_tree_update(self, is_full)
     }
 
     /// Attaches `node` as the root node of the layout tree.
@@ -889,6 +924,10 @@ pub mod winit {
 
 pub mod wgpu {
     pub use wgpu::*;
+}
+
+pub mod accesskit {
+    pub use accesskit::*;
 }
 
 pub mod bytemuck {

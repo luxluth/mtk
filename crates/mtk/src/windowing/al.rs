@@ -91,6 +91,13 @@ where
     debug_tx: Option<std::sync::mpsc::Sender<crate::debugger::DebugEvent>>,
     debug_rx_cmd: Option<std::sync::mpsc::Receiver<crate::debugger::DebugCommand>>,
     hovered_node: Option<Node>,
+
+    #[cfg(feature = "accessibility")]
+    a11y_adapter: Option<crate::accessibility::adapter::A11yAdapter>,
+    #[cfg(feature = "accessibility")]
+    a11y_tx: Sender<crate::accessibility::adapter::A11yEvent>,
+    #[cfg(feature = "accessibility")]
+    a11y_rx: Receiver<crate::accessibility::adapter::A11yEvent>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -222,6 +229,9 @@ where
         let (msg_tx, msg_rx) = channel();
         let event_proxy = Arc::new(Mutex::new(None));
 
+        #[cfg(feature = "accessibility")]
+        let (a11y_tx, a11y_rx) = channel();
+
         let mut ctx = Context::new();
 
         let view = view_fn(&state);
@@ -268,6 +278,13 @@ where
             debug_tx: None,
             debug_rx_cmd: None,
             hovered_node: None,
+
+            #[cfg(feature = "accessibility")]
+            a11y_adapter: None,
+            #[cfg(feature = "accessibility")]
+            a11y_tx,
+            #[cfg(feature = "accessibility")]
+            a11y_rx,
         }
     }
 
@@ -1192,6 +1209,42 @@ where
             }
         }
     }
+
+    #[cfg(feature = "accessibility")]
+    fn process_a11y_events(&mut self) {
+        while let Ok(event) = self.a11y_rx.try_recv() {
+            match event {
+                crate::accessibility::adapter::A11yEvent::InitialTreeRequested => {
+                    if let Some(adapter) = &mut self.a11y_adapter {
+                        adapter
+                            .update_if_active(|_| self.context.build_accesskit_tree_update(true));
+                    }
+                }
+                crate::accessibility::adapter::A11yEvent::ActionRequested(req) => {
+                    let node = crate::Node::from_accesskit_id(req.target_node);
+                    let mtk_event = crate::ui::Event::Action {
+                        node,
+                        action: req.action,
+                        data: req.data,
+                    };
+                    self.dispatch_and_rebuild(mtk_event);
+                    if let Some(adapter) = &mut self.a11y_adapter {
+                        adapter.update_if_active(|is_full| {
+                            self.context.build_accesskit_tree_update(is_full)
+                        });
+                    }
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                }
+                crate::accessibility::adapter::A11yEvent::AccessibilityDeactivated => {
+                    if let Some(adapter) = &mut self.a11y_adapter {
+                        adapter.deactivate();
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl<S: 'static, V: 'static> ApplicationHandler for Window<S, V>
@@ -1201,6 +1254,8 @@ where
 {
     fn proxy_wake_up(&mut self, _event_loop: &dyn ActiveEventLoop) {
         self.process_pending_messages();
+        #[cfg(feature = "accessibility")]
+        self.process_a11y_events();
     }
 
     fn can_create_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
@@ -1273,11 +1328,27 @@ where
             window.clone(),
         ));
         self.renderer = Some(renderer);
+
+        #[cfg(feature = "accessibility")]
+        {
+            use winit::raw_window_handle::HasWindowHandle;
+            if let Ok(handle) = window.window_handle() {
+                let adapter = crate::accessibility::adapter::A11yAdapter::new(
+                    handle.as_raw(),
+                    self.a11y_tx.clone(),
+                    self.event_proxy.clone(),
+                );
+                self.a11y_adapter = Some(adapter);
+            }
+        }
+
         window.request_redraw();
     }
 
     fn about_to_wait(&mut self, _event_loop: &dyn ActiveEventLoop) {
         self.process_pending_messages();
+        #[cfg(feature = "accessibility")]
+        self.process_a11y_events();
         if self.debug_tx.is_some() {
             if let Some(window) = &self.window {
                 window.request_redraw();
@@ -1343,12 +1414,30 @@ where
                 let mtk_event = Event::Ime(ime);
                 self.dispatch_and_rebuild(mtk_event);
             }
+            WindowEvent::Focused(_is_focused) =>
+            {
+                #[cfg(feature = "accessibility")]
+                if let Some(adapter) = &mut self.a11y_adapter {
+                    adapter.set_focus(_is_focused);
+                }
+            }
             WindowEvent::SurfaceResized(size) => {
                 let scale_factor = window.scale_factor() as f32;
                 self.context.scale_factor = scale_factor;
 
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize(size);
+                }
+
+                #[cfg(feature = "accessibility")]
+                if let Some(adapter) = &mut self.a11y_adapter {
+                    let outer = accesskit::Rect {
+                        x0: 0.0,
+                        y0: 0.0,
+                        x1: size.width as f64,
+                        y1: size.height as f64,
+                    };
+                    adapter.set_window_bounds(outer, outer);
                 }
 
                 if let (Some(view), Some(element)) = (&self.view, &self.element) {
@@ -1604,6 +1693,13 @@ where
                             ));
                         }
                     }
+                }
+
+                #[cfg(feature = "accessibility")]
+                if let Some(adapter) = &mut self.a11y_adapter {
+                    adapter.update_if_active(|is_full| {
+                        self.context.build_accesskit_tree_update(is_full)
+                    });
                 }
             }
             _ => {}
