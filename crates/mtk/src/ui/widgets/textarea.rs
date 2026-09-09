@@ -5,7 +5,7 @@ use crate::style::Overflow;
 use crate::ui::event::EventResult;
 use crate::ui::widgets::editor::Editor;
 use crate::ui::{Event, View};
-use crate::{Context, Node, TextRenderInfo, TextStyle};
+use crate::{AccessibleInfo, Context, Node, TextRenderInfo, TextStyle};
 use winit::event::Ime;
 use winit::keyboard::{Key, NamedKey};
 
@@ -103,6 +103,14 @@ impl TextArea {
         element
             .node
             .set_text_with_userdata(ctx, &element.editor.display_text(), render_info);
+
+        let a11y_info = AccessibleInfo::new(accesskit::Role::MultilineTextInput)
+            .with_value(element.editor.text())
+            .with_action(accesskit::Action::Focus)
+            .with_action(accesskit::Action::SetValue);
+        if ctx.get_accessible(element.node) != Some(&a11y_info) {
+            ctx.set_accessible(element.node, a11y_info);
+        }
     }
 }
 
@@ -162,6 +170,7 @@ impl View<String> for TextArea {
     }
 
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
+        ctx.remove_accessible(element.node);
         ctx.unregister_focusable(element.node);
         element.caret.remove(ctx);
         ctx.destroy_node(element.caret);
@@ -550,6 +559,25 @@ impl View<String> for TextArea {
                     self.apply_custom_style(ctx, element.node);
                     ctx.request_frame();
                     handled = EventResult::Handled;
+                }
+            }
+            Event::Action { node, action, data } => {
+                if node == element.node {
+                    match action {
+                        accesskit::Action::Focus => {
+                            ctx.request_focus(element.node.clone());
+                            handled = EventResult::Handled;
+                        }
+                        accesskit::Action::SetValue => {
+                            if let Some(accesskit::ActionData::Value(val)) = data {
+                                element.editor.set_text(&val);
+                                emitted_msg = Some(val.to_string());
+                                ctx.request_frame();
+                                handled = EventResult::Handled;
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             }
             _ => {}

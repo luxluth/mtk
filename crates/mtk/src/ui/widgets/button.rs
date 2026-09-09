@@ -7,7 +7,7 @@ use crate::style::{Style, TextStyle, VerticalAlignment};
 use crate::text_property::{Alignment, FontWeight};
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
-use crate::{Context, Node, rgb};
+use crate::{AccessibleInfo, Context, Node, rgb};
 
 /// A clickable button widget with built-in hover, focus, and press feedback.
 pub struct Button<Msg> {
@@ -152,6 +152,15 @@ impl<State, Msg: Clone> View<State> for Button<Msg> {
             ctx.register_focusable(node);
         }
 
+        ctx.set_accessible(
+            node,
+            AccessibleInfo::new(accesskit::Role::Button)
+                .with_label(&self.label)
+                .with_disabled(self.disabled)
+                .with_action(accesskit::Action::Click)
+                .with_action(accesskit::Action::Focus),
+        );
+
         ButtonElement {
             node,
             is_pressed: false,
@@ -213,9 +222,21 @@ impl<State, Msg: Clone> View<State> for Button<Msg> {
                 element.node.set_text(ctx, &self.label);
             }
         }
+
+        if self.label != prev.label || self.disabled != prev.disabled {
+            ctx.set_accessible(
+                element.node,
+                AccessibleInfo::new(accesskit::Role::Button)
+                    .with_label(&self.label)
+                    .with_disabled(self.disabled)
+                    .with_action(accesskit::Action::Click)
+                    .with_action(accesskit::Action::Focus),
+            );
+        }
     }
 
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
+        ctx.remove_accessible(element.node);
         ctx.unregister_focusable(element.node);
         element.node.remove(ctx);
         ctx.destroy_node(element.node);
@@ -290,6 +311,20 @@ impl<State, Msg: Clone> View<State> for Button<Msg> {
                         }
                         Key::Character(ref s) if s == " " => {
                             (EventResult::Handled, self.on_click.clone())
+                        }
+                        _ => (EventResult::Ignored, None),
+                    }
+                } else {
+                    (EventResult::Ignored, None)
+                }
+            }
+            Event::Action { node, action, .. } => {
+                if node == element.node {
+                    match action {
+                        accesskit::Action::Click => (EventResult::Handled, self.on_click.clone()),
+                        accesskit::Action::Focus => {
+                            ctx.request_focus(element.node);
+                            (EventResult::Handled, None)
                         }
                         _ => (EventResult::Ignored, None),
                     }

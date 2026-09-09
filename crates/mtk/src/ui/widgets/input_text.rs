@@ -1,10 +1,11 @@
 use std::time::Instant;
 
+use crate::accessibility::AccessibleInfo;
 use crate::debugger::SourceLocation;
 use crate::ui::event::EventResult;
 use crate::ui::widgets::editor::Editor;
 use crate::ui::{Event, View};
-use crate::{Context, Node, TextRenderInfo, TextStyle};
+use crate::{Context, Node, TextRenderInfo, TextStyle, rgb};
 use winit::keyboard::{Key, NamedKey};
 
 /// A single-line text input widget with built-in cursor, selection, and auto-scroll support.
@@ -86,7 +87,13 @@ impl InputText {
         let display_text = element.editor.display_text();
         let show_placeholder = display_text.is_empty() && self.placeholder.is_some();
 
-        let mut base_text_style = element.base_text_style.clone();
+        let mut base_text_style = TextStyle {
+            vertical_alignment: crate::style::VerticalAlignment::Center,
+            font_size: 14.0,
+            color: rgb!(15, 23, 42),
+            wrap: false,
+            ..Default::default()
+        };
         if let Some(ref style) = self.custom_style {
             let is_focused = Some(element.node.clone()) == ctx.focused_node();
             let custom_text_style = if is_focused && let Some(focus) = &style.focus {
@@ -94,9 +101,14 @@ impl InputText {
             } else {
                 &style.base_text_style
             };
-            base_text_style.merge(custom_text_style);
-        } else if let Some(ref style) = self.text_style {
+            if custom_text_style != &TextStyle::default() {
+                base_text_style.merge(custom_text_style);
+                base_text_style.color = custom_text_style.color;
+            }
+        }
+        if let Some(ref style) = self.text_style {
             base_text_style.merge(style);
+            base_text_style.color = style.color;
         }
         element.base_text_style = base_text_style.clone();
 
@@ -148,6 +160,17 @@ impl InputText {
             element
                 .node
                 .set_text_with_userdata(ctx, &text_to_render, render_info);
+        }
+
+        let mut a11y_info = AccessibleInfo::new(accesskit::Role::TextInput)
+            .with_value(element.editor.text())
+            .with_action(accesskit::Action::Focus)
+            .with_action(accesskit::Action::SetValue);
+        if let Some(ref ph) = self.placeholder {
+            a11y_info = a11y_info.with_description(ph);
+        }
+        if ctx.get_accessible(element.node) != Some(&a11y_info) {
+            ctx.set_accessible(element.node, a11y_info);
         }
     }
 }
@@ -226,6 +249,7 @@ impl View<String> for InputText {
     }
 
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
+        ctx.remove_accessible(element.node.clone());
         ctx.unregister_focusable(element.node.clone());
         element.caret.remove(ctx);
         ctx.destroy_node(element.caret.clone());
@@ -582,6 +606,25 @@ impl View<String> for InputText {
                     self.apply_custom_style(ctx, element.node);
                     ctx.request_frame();
                     handled = EventResult::Handled;
+                }
+            }
+            Event::Action { node, action, data } => {
+                if node == element.node {
+                    match action {
+                        accesskit::Action::Focus => {
+                            ctx.request_focus(element.node.clone());
+                            handled = EventResult::Handled;
+                        }
+                        accesskit::Action::SetValue => {
+                            if let Some(accesskit::ActionData::Value(val)) = data {
+                                element.editor.set_text(&val);
+                                emitted_msg = Some(val.to_string());
+                                ctx.request_frame();
+                                handled = EventResult::Handled;
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             }
             _ => {}
