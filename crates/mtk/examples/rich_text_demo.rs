@@ -41,37 +41,53 @@ fn calculate_area(radius: f64) -> f64 {
         TextSpan::new(0..2)
             .color(rgb!(86, 156, 214))
             .bold()
+            .hover_underline()
+            .hover_color(rgb!(120, 180, 255))
             .id(TokenKind::Keyword("fn: declares a function")),
         TextSpan::new(3..17)
             .color(rgb!(220, 220, 170))
+            .hover_underline()
+            .hover_color(rgb!(255, 255, 180))
             .id(TokenKind::FunctionName),
         TextSpan::new(18..24)
             .color(rgb!(156, 220, 254))
+            .hover_underline()
             .id(TokenKind::Parameter("radius: input argument")),
         TextSpan::new(26..29)
             .color(rgb!(78, 201, 176))
+            .hover_underline()
             .id(TokenKind::TypeName),
         TextSpan::new(34..37)
             .color(rgb!(78, 201, 176))
+            .hover_underline()
             .id(TokenKind::TypeName),
         TextSpan::new(44..47)
             .color(rgb!(86, 156, 214))
             .bold()
+            .hover_underline()
+            .hover_color(rgb!(120, 180, 255))
             .id(TokenKind::Keyword("let: binds a local variable")),
         TextSpan::new(48..50)
             .color(rgb!(156, 220, 254))
+            .hover_underline()
+            .hover_color(rgb!(200, 235, 255))
             .id(TokenKind::Variable("pi: local constant")),
         TextSpan::new(53..60)
             .color(rgb!(181, 206, 168))
+            .hover_underline()
             .id(TokenKind::Number),
         TextSpan::new(66..68)
             .color(rgb!(156, 220, 254))
+            .hover_underline()
+            .hover_color(rgb!(200, 235, 255))
             .id(TokenKind::Variable("pi: local constant")),
         TextSpan::new(71..77)
             .color(rgb!(156, 220, 254))
+            .hover_underline()
             .id(TokenKind::Parameter("radius: input argument")),
         TextSpan::new(80..86)
             .color(rgb!(156, 220, 254))
+            .hover_underline()
             .id(TokenKind::Parameter("radius: input argument")),
     ];
 
@@ -194,6 +210,7 @@ fn calculate_area(radius: f64) -> f64 {
                 .style(
                     Style::new()
                         .width(Size::Fixed(500))
+                        .height(Size::Fit)
                         .bg_color(if state.hovered_token.is_some() {
                             rgb!(239, 246, 255)
                         } else {

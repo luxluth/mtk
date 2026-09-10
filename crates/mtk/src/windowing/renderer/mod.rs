@@ -1497,11 +1497,11 @@ fn prepare_command_slice<'a, I>(
                     push_solid_quad(quad_instances, draw_batches, c_quad);
                 }
 
-                for st_rect in &range.strikethroughs {
+                for st in &range.strikethroughs {
                     let st_quad = QuadInstance {
-                        pos: [st_rect[0] * scale_factor, st_rect[1] * scale_factor],
-                        quad_size: [st_rect[2] * scale_factor, st_rect[3] * scale_factor],
-                        color: range.style.color.into(),
+                        pos: [st.rect[0] * scale_factor, st.rect[1] * scale_factor],
+                        quad_size: [st.rect[2] * scale_factor, st.rect[3] * scale_factor],
+                        color: st.color,
                         border_radii: [0.0; 4],
                         border_color: [0.0; 4],
                         border_widths: [0.0; 4],
@@ -1513,11 +1513,11 @@ fn prepare_command_slice<'a, I>(
                     push_solid_quad(quad_instances, draw_batches, st_quad);
                 }
 
-                for un_rect in &range.underlines {
+                for un in &range.underlines {
                     let un_quad = QuadInstance {
-                        pos: [un_rect[0] * scale_factor, un_rect[1] * scale_factor],
-                        quad_size: [un_rect[2] * scale_factor, un_rect[3] * scale_factor],
-                        color: range.style.color.into(),
+                        pos: [un.rect[0] * scale_factor, un.rect[1] * scale_factor],
+                        quad_size: [un.rect[2] * scale_factor, un.rect[3] * scale_factor],
+                        color: un.color,
                         border_radii: [0.0; 4],
                         border_color: [0.0; 4],
                         border_widths: [0.0; 4],
@@ -2211,6 +2211,77 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn test_underline_decoration_quad_rendered_with_custom_color() {
+        use super::text_batch::DecorationLine;
+        let mut ctx = Context::new();
+        let text_node = ctx.create_node();
+        text_node.update_constraints(&mut ctx, |c| {
+            c.width = Size::Fixed(150);
+            c.height = Size::Fixed(30);
+        });
+        text_node.set_text(&mut ctx, "Underline Test");
+        ctx.root_attach(text_node);
+        ctx.compute_layout(800.0, 600.0);
+        ctx.build_render_list(crate::style::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 800.0,
+            h: 600.0,
+        });
+
+        let (cmd_idx, _) = ctx
+            .render_list()
+            .enumerate()
+            .find(|(_, cmd)| cmd.kind() == RenderCommandKind::Text)
+            .expect("Must have Text command");
+
+        let mut quad_instances = Vec::new();
+        let mut draw_batches = Vec::new();
+        let mut text_ranges = HashMap::new();
+
+        let expected_color = [0.2, 0.4, 0.8, 1.0];
+        text_ranges.insert(
+            cmd_idx,
+            RenderTextData {
+                glyphs: 0..14,
+                selections: Vec::new(),
+                strikethroughs: Vec::new(),
+                underlines: vec![DecorationLine {
+                    rect: [10.0, 20.0, 60.0, 2.0],
+                    color: expected_color,
+                }],
+                caret: None,
+                style: Default::default(),
+                alpha: 1.0,
+            },
+        );
+
+        let dummy_canvas = HashMap::new();
+        let dummy_images = HashMap::new();
+        let dummy_svgs = HashMap::new();
+
+        prepare_command_slice(
+            ctx.render_list().enumerate(),
+            800,
+            600,
+            &text_ranges,
+            &dummy_canvas,
+            &dummy_images,
+            &dummy_svgs,
+            &ctx,
+            &mut quad_instances,
+            &mut draw_batches,
+        );
+
+        // Verify that a quad was emitted for the underline with the expected custom color
+        let un_quad = quad_instances.iter().find(|q| q.color == expected_color);
+        assert!(
+            un_quad.is_some(),
+            "Must produce quad instance with decoration underline color"
+        );
     }
 
     #[test]

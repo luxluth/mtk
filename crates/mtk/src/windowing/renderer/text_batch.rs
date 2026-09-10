@@ -19,12 +19,19 @@ pub struct TextInstance {
     pub color: [f32; 4],
 }
 
+/// Position and color of a text decoration line (underline or strikethrough).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DecorationLine {
+    pub rect: [f32; 4],
+    pub color: [f32; 4],
+}
+
 /// Metadata and sub-rectangles for a single text command.
 pub struct RenderTextData {
     pub glyphs: std::ops::Range<usize>,
     pub selections: Vec<[f32; 4]>,
-    pub strikethroughs: Vec<[f32; 4]>,
-    pub underlines: Vec<[f32; 4]>,
+    pub strikethroughs: Vec<DecorationLine>,
+    pub underlines: Vec<DecorationLine>,
     pub caret: Option<[f32; 4]>,
     pub style: TextStyle,
     pub alpha: f32,
@@ -304,64 +311,79 @@ impl TextBatch {
                 }
 
                 // 4. Strikethrough geometry
-                let mut strikethroughs = Vec::new();
-                if text_style.strikethrough {
-                    for line in layout.lines() {
-                        let mut line_baseline: Option<f32> = None;
-                        let mut min_x: Option<f32> = None;
-                        let mut line_font_size = text_style.font_size;
+                let mut strikethroughs: Vec<DecorationLine> = Vec::new();
+                for line in layout.lines() {
+                    for item in line.items() {
+                        let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
+                            continue;
+                        };
 
-                        for item in line.items() {
-                            if let PositionedLayoutItem::GlyphRun(glyph_run) = item {
-                                line_font_size = glyph_run.run().font_size();
-                                for glyph in glyph_run.positioned_glyphs() {
-                                    if line_baseline.is_none() {
-                                        line_baseline = Some(glyph.y);
+                        if let Some(ref decor) = glyph_run.style().strikethrough {
+                            let font_size = glyph_run.run().font_size();
+                            let base_y = glyph_run.baseline();
+                            let thickness = decor.size.unwrap_or(font_size * 0.08).max(1.5);
+                            let offset = decor.offset.unwrap_or(font_size * 0.28);
+                            let line_y = text_y + base_y - offset - (thickness * 0.5);
+                            let run_x = text_x + glyph_run.offset();
+                            let run_w = glyph_run.advance();
+                            let color: [f32; 4] = decor.brush.into();
+
+                            if run_w > 0.0 {
+                                if let Some(last) = strikethroughs.last_mut() {
+                                    if (last.rect[1] - line_y).abs() < 0.2
+                                        && (last.rect[3] - thickness).abs() < 0.2
+                                        && last.color == color
+                                        && (last.rect[0] + last.rect[2] - run_x).abs() < 0.5
+                                    {
+                                        last.rect[2] = (run_x + run_w) - last.rect[0];
+                                        continue;
                                     }
-                                    let gx = glyph.x;
-                                    min_x = Some(min_x.map_or(gx, |m| m.min(gx)));
                                 }
-                            }
-                        }
 
-                        if let Some(base_y) = line_baseline {
-                            let thickness = (line_font_size * 0.08).max(1.5);
-                            let line_w = line.metrics().advance;
-                            let start_x = min_x.unwrap_or(0.0);
-                            let line_y =
-                                text_y + base_y - (line_font_size * 0.28) - (thickness * 0.5);
-                            strikethroughs.push([text_x + start_x, line_y, line_w, thickness]);
+                                strikethroughs.push(DecorationLine {
+                                    rect: [run_x, line_y, run_w, thickness],
+                                    color,
+                                });
+                            }
                         }
                     }
                 }
 
                 // 5. Underline geometry
-                let mut underlines = Vec::new();
-                if text_style.underline {
-                    for line in layout.lines() {
-                        let mut line_baseline: Option<f32> = None;
-                        let mut min_x: Option<f32> = None;
-                        let mut line_font_size = text_style.font_size;
+                let mut underlines: Vec<DecorationLine> = Vec::new();
+                for line in layout.lines() {
+                    for item in line.items() {
+                        let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
+                            continue;
+                        };
 
-                        for item in line.items() {
-                            if let PositionedLayoutItem::GlyphRun(glyph_run) = item {
-                                line_font_size = glyph_run.run().font_size();
-                                for glyph in glyph_run.positioned_glyphs() {
-                                    if line_baseline.is_none() {
-                                        line_baseline = Some(glyph.y);
+                        if let Some(ref decor) = glyph_run.style().underline {
+                            let font_size = glyph_run.run().font_size();
+                            let base_y = glyph_run.baseline();
+                            let thickness = decor.size.unwrap_or(font_size * 0.08).max(1.5);
+                            let offset = decor.offset.unwrap_or(font_size * 0.12);
+                            let line_y = text_y + base_y + offset;
+                            let run_x = text_x + glyph_run.offset();
+                            let run_w = glyph_run.advance();
+                            let color: [f32; 4] = decor.brush.into();
+
+                            if run_w > 0.0 {
+                                if let Some(last) = underlines.last_mut() {
+                                    if (last.rect[1] - line_y).abs() < 0.2
+                                        && (last.rect[3] - thickness).abs() < 0.2
+                                        && last.color == color
+                                        && (last.rect[0] + last.rect[2] - run_x).abs() < 0.5
+                                    {
+                                        last.rect[2] = (run_x + run_w) - last.rect[0];
+                                        continue;
                                     }
-                                    let gx = glyph.x;
-                                    min_x = Some(min_x.map_or(gx, |m| m.min(gx)));
                                 }
-                            }
-                        }
 
-                        if let Some(base_y) = line_baseline {
-                            let thickness = (line_font_size * 0.08).max(1.5);
-                            let line_w = line.metrics().advance;
-                            let start_x = min_x.unwrap_or(0.0);
-                            let line_y = text_y + base_y + (line_font_size * 0.12);
-                            underlines.push([text_x + start_x, line_y, line_w, thickness]);
+                                underlines.push(DecorationLine {
+                                    rect: [run_x, line_y, run_w, thickness],
+                                    color,
+                                });
+                            }
                         }
                     }
                 }
@@ -369,6 +391,7 @@ impl TextBatch {
                 // 6. Preedit underline geometry
                 if let Some((start, end)) = preedit_range
                     && start < end
+                    && underlines.is_empty()
                 {
                     let start_cursor = Cursor::from_byte_index(layout, start, Affinity::Downstream);
                     let end_cursor = Cursor::from_byte_index(layout, end, Affinity::Upstream);
@@ -380,7 +403,10 @@ impl TextBatch {
                         let u_y = text_y + rect.0.y1 as f32 - (thickness * 0.5);
                         let u_w = (rect.0.x1 - rect.0.x0) as f32;
                         let u_h = thickness;
-                        underlines.push([u_x, u_y, u_w, u_h]);
+                        underlines.push(DecorationLine {
+                            rect: [u_x, u_y, u_w, u_h],
+                            color: text_style.color.into(),
+                        });
                     }
                 }
 

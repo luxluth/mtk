@@ -65,6 +65,23 @@ impl SpanStyle {
         self.strikethrough = strikethrough;
         self
     }
+
+    /// Overlays another `SpanStyle` onto `self`, preferring non-None and true values from `other`.
+    pub fn merge(&self, other: &SpanStyle) -> SpanStyle {
+        SpanStyle {
+            color: other.color.or(self.color),
+            font_weight: other.font_weight.or(self.font_weight),
+            font_style: other.font_style.or(self.font_style),
+            font_size: other.font_size.or(self.font_size),
+            underline: other.underline || self.underline,
+            strikethrough: other.strikethrough || self.strikethrough,
+        }
+    }
+
+    /// Returns `true` if applying this style could alter character advances, line breaks, or text bounds.
+    pub fn affects_geometry(&self) -> bool {
+        self.font_weight.is_some() || self.font_style.is_some() || self.font_size.is_some()
+    }
 }
 
 /// A styled range of text with an optional identifier tag for interactivity.
@@ -72,6 +89,7 @@ impl SpanStyle {
 pub struct TextSpan<Id = ()> {
     pub range: Range<usize>,
     pub style: SpanStyle,
+    pub hover_style: Option<SpanStyle>,
     pub id: Option<Id>,
 }
 
@@ -80,6 +98,7 @@ impl<Id> TextSpan<Id> {
         Self {
             range,
             style: SpanStyle::default(),
+            hover_style: None,
             id: None,
         }
     }
@@ -134,11 +153,82 @@ impl<Id> TextSpan<Id> {
         self
     }
 
+    /// Configures a full hover style to apply when the mouse cursor hovers over this span.
+    pub fn hover_style(mut self, style: SpanStyle) -> Self {
+        self.hover_style = Some(style);
+        self
+    }
+
+    /// Convenience builder to override text color on hover.
+    pub fn hover_color(mut self, color: Color) -> Self {
+        let mut h = self.hover_style.unwrap_or_default();
+        h.color = Some(color);
+        self.hover_style = Some(h);
+        self
+    }
+
+    /// Convenience builder to add an underline on hover.
+    pub fn hover_underline(mut self) -> Self {
+        let mut h = self.hover_style.unwrap_or_default();
+        h.underline = true;
+        self.hover_style = Some(h);
+        self
+    }
+
+    /// Convenience builder to make text bold on hover.
+    pub fn hover_bold(mut self) -> Self {
+        let mut h = self.hover_style.unwrap_or_default();
+        h.font_weight = Some(parley::style::FontWeight::BOLD);
+        self.hover_style = Some(h);
+        self
+    }
+
+    /// Convenience builder to set a specific font weight on hover.
+    pub fn hover_weight(mut self, weight: parley::style::FontWeight) -> Self {
+        let mut h = self.hover_style.unwrap_or_default();
+        h.font_weight = Some(weight);
+        self.hover_style = Some(h);
+        self
+    }
+
+    /// Convenience builder to make text italic on hover.
+    pub fn hover_italic(mut self) -> Self {
+        let mut h = self.hover_style.unwrap_or_default();
+        h.font_style = Some(FontStyle::Italic);
+        self.hover_style = Some(h);
+        self
+    }
+
+    /// Convenience builder to set font style on hover.
+    pub fn hover_font_style(mut self, style: FontStyle) -> Self {
+        let mut h = self.hover_style.unwrap_or_default();
+        h.font_style = Some(style);
+        self.hover_style = Some(h);
+        self
+    }
+
+    /// Convenience builder to set font size on hover.
+    pub fn hover_font_size(mut self, size: f32) -> Self {
+        let mut h = self.hover_style.unwrap_or_default();
+        h.font_size = Some(size);
+        self.hover_style = Some(h);
+        self
+    }
+
+    /// Convenience builder to add strikethrough on hover.
+    pub fn hover_strikethrough(mut self) -> Self {
+        let mut h = self.hover_style.unwrap_or_default();
+        h.strikethrough = true;
+        self.hover_style = Some(h);
+        self
+    }
+
     /// Converts this span to an untyped span for layout and rendering.
     pub fn to_untyped(&self) -> TextSpan<()> {
         TextSpan {
             range: self.range.clone(),
             style: self.style.clone(),
+            hover_style: self.hover_style.clone(),
             id: None,
         }
     }
@@ -675,5 +765,63 @@ impl TextRenderInfo {
             preedit_range: None,
             spans: Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::clr;
+    use parley::layout::PositionedLayoutItem;
+
+    #[test]
+    fn test_layout_span_underline_and_brush() {
+        let mut text_cx = TextContext::new();
+        let text_style = TextStyle::default();
+        let spans = vec![
+            TextSpan::new(0..2).color(clr!(blue)).underline(),
+            TextSpan::new(3..12).color(clr!(red)),
+        ];
+
+        let entry = text_cx.get_or_create_layout(
+            "fn calculate",
+            &text_style,
+            f32::INFINITY,
+            None,
+            None,
+            &spans,
+        );
+
+        let line = entry
+            .layout
+            .lines()
+            .next()
+            .expect("Expected at least one line");
+        let items: Vec<_> = line.items().collect();
+        assert!(!items.is_empty());
+
+        let mut found_underlined_blue = false;
+        let mut found_non_underlined_red = false;
+
+        for item in items {
+            if let PositionedLayoutItem::GlyphRun(glyph_run) = item {
+                if glyph_run.style().underline.is_some() {
+                    assert_eq!(glyph_run.style().brush, clr!(blue));
+                    found_underlined_blue = true;
+                } else if glyph_run.style().brush == clr!(red) {
+                    assert!(glyph_run.style().underline.is_none());
+                    found_non_underlined_red = true;
+                }
+            }
+        }
+
+        assert!(
+            found_underlined_blue,
+            "Must find an underlined run with blue brush"
+        );
+        assert!(
+            found_non_underlined_red,
+            "Must find a non-underlined run with red brush"
+        );
     }
 }

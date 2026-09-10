@@ -119,8 +119,27 @@ pub struct RichTextElement<Id> {
     pub(crate) node: Node,
     pub(crate) current_text: String,
     pub(crate) current_spans: Vec<TextSpan<Id>>,
+    pub(crate) hovered_span_idx: Option<usize>,
     pub(crate) hovered_span: Option<Id>,
     pub(crate) hovered_span_geom: Option<SpanGeometry>,
+}
+
+impl<Id> RichTextElement<Id> {
+    pub(crate) fn compute_effective_untyped_spans(&self) -> Vec<TextSpan<()>> {
+        self.current_spans
+            .iter()
+            .enumerate()
+            .map(|(idx, s)| {
+                let mut untyped = s.to_untyped();
+                if Some(idx) == self.hovered_span_idx {
+                    if let Some(ref hover) = s.hover_style {
+                        untyped.style = untyped.style.merge(hover);
+                    }
+                }
+                untyped
+            })
+            .collect()
+    }
 }
 
 fn compute_span_geometry(
@@ -203,6 +222,7 @@ impl<State, Msg: 'static, Id: Clone + PartialEq + 'static> View<State> for RichT
             node,
             current_text: self.text.clone(),
             current_spans: self.spans.clone(),
+            hovered_span_idx: None,
             hovered_span: None,
             hovered_span_geom: None,
         }
@@ -217,8 +237,14 @@ impl<State, Msg: 'static, Id: Clone + PartialEq + 'static> View<State> for RichT
         }
 
         if spans_changed || self.text_style.is_some() || text_changed {
-            let untyped_spans: Vec<TextSpan<()>> =
-                self.spans.iter().map(|s| s.to_untyped()).collect();
+            if spans_changed || text_changed {
+                element.current_spans = self.spans.clone();
+                element.hovered_span_idx = None;
+                element.hovered_span = None;
+                element.hovered_span_geom = None;
+            }
+
+            let untyped_spans = element.compute_effective_untyped_spans();
             let base_style = self.text_style.clone().unwrap_or_else(|| {
                 element
                     .node
@@ -237,7 +263,6 @@ impl<State, Msg: 'static, Id: Clone + PartialEq + 'static> View<State> for RichT
             element
                 .node
                 .set_text_with_userdata(ctx, &element.current_text, render_info);
-            element.current_spans = self.spans.clone();
         }
 
         if text_changed || spans_changed {
@@ -280,9 +305,12 @@ impl<State, Msg: 'static, Id: Clone + PartialEq + 'static> View<State> for RichT
                             (computed.h - constraints.padding.top - constraints.padding.bottom)
                                 .max(0.0);
 
-                        let info = element.node.get_text_userdata::<TextRenderInfo>(ctx);
-                        let text_style = info.map(|i| &i.style).cloned().unwrap_or_default();
-                        let spans = info.map(|i| &i.spans[..]).unwrap_or(&[]);
+                        let text_style = element
+                            .node
+                            .get_text_userdata::<TextRenderInfo>(ctx)
+                            .map(|i| i.style.clone())
+                            .unwrap_or_default();
+                        let initial_untyped = element.compute_effective_untyped_spans();
 
                         let offset = crate::text::hit_test_text(
                             &element.current_text,
@@ -292,16 +320,66 @@ impl<State, Msg: 'static, Id: Clone + PartialEq + 'static> View<State> for RichT
                             rel_x,
                             rel_y,
                             &ctx.text_context,
-                            spans,
+                            &initial_untyped,
                         );
 
-                        let matched_span = element
+                        let matched_idx = element
                             .current_spans
                             .iter()
-                            .find(|s| s.range.contains(&offset));
+                            .position(|s| s.range.contains(&offset));
+                        let matched_span =
+                            matched_idx.and_then(|idx| element.current_spans.get(idx));
                         let new_hover_id = matched_span.and_then(|s| s.id.clone());
 
-                        if new_hover_id != element.hovered_span {
+                        if matched_idx != element.hovered_span_idx {
+                            let old_idx = element.hovered_span_idx;
+                            let old_span_has_hover = old_idx
+                                .and_then(|i| element.current_spans.get(i))
+                                .map_or(false, |s| s.hover_style.is_some());
+
+                            let new_span_has_hover = matched_idx
+                                .and_then(|i| element.current_spans.get(i))
+                                .map_or(false, |s| s.hover_style.is_some());
+
+                            let old_affects_geom = old_idx
+                                .and_then(|i| element.current_spans.get(i))
+                                .and_then(|s| s.hover_style.as_ref())
+                                .map_or(false, |h| h.affects_geometry());
+
+                            let new_affects_geom = matched_idx
+                                .and_then(|i| element.current_spans.get(i))
+                                .and_then(|s| s.hover_style.as_ref())
+                                .map_or(false, |h| h.affects_geometry());
+
+                            element.hovered_span_idx = matched_idx;
+
+                            let effective_spans = if old_span_has_hover || new_span_has_hover {
+                                let untyped = element.compute_effective_untyped_spans();
+                                let render_info = TextRenderInfo {
+                                    style: text_style.clone(),
+                                    cursor: None,
+                                    selection: None,
+                                    preedit_range: None,
+                                    spans: untyped.clone(),
+                                };
+                                element.node.set_text_with_userdata(
+                                    ctx,
+                                    &element.current_text,
+                                    render_info,
+                                );
+
+                                if old_affects_geom || new_affects_geom {
+                                    element.node.set_dirty(ctx);
+                                }
+                                ctx.request_frame();
+                                Some(untyped)
+                            } else {
+                                None
+                            };
+
+                            let active_spans =
+                                effective_spans.as_deref().unwrap_or(&initial_untyped);
+
                             let old_id = element.hovered_span.take();
                             let old_geom = element.hovered_span_geom.take().unwrap_or_default();
 
@@ -315,7 +393,7 @@ impl<State, Msg: 'static, Id: Clone + PartialEq + 'static> View<State> for RichT
                                     &constraints.padding,
                                     s.range.clone(),
                                     &ctx.text_context,
-                                    spans,
+                                    active_spans,
                                 )
                             });
 
@@ -336,12 +414,52 @@ impl<State, Msg: 'static, Id: Clone + PartialEq + 'static> View<State> for RichT
                             }
                         }
                     }
-                } else if element.hovered_span.is_some() {
-                    let old_id = element.hovered_span.take().unwrap();
+                } else if element.hovered_span_idx.is_some() || element.hovered_span.is_some() {
+                    let had_hover_style = element
+                        .hovered_span_idx
+                        .and_then(|i| element.current_spans.get(i))
+                        .map_or(false, |s| s.hover_style.is_some());
+                    let had_geom_affect = element
+                        .hovered_span_idx
+                        .and_then(|i| element.current_spans.get(i))
+                        .and_then(|s| s.hover_style.as_ref())
+                        .map_or(false, |h| h.affects_geometry());
+
+                    element.hovered_span_idx = None;
+
+                    if had_hover_style {
+                        let untyped_spans = element.compute_effective_untyped_spans();
+                        let base_style = element
+                            .node
+                            .get_text_userdata::<TextRenderInfo>(ctx)
+                            .map(|i| i.style.clone())
+                            .unwrap_or_default();
+                        let render_info = TextRenderInfo {
+                            style: base_style,
+                            cursor: None,
+                            selection: None,
+                            preedit_range: None,
+                            spans: untyped_spans,
+                        };
+                        element.node.set_text_with_userdata(
+                            ctx,
+                            &element.current_text,
+                            render_info,
+                        );
+
+                        if had_geom_affect {
+                            element.node.set_dirty(ctx);
+                        }
+                        ctx.request_frame();
+                    }
+
+                    let old_id = element.hovered_span.take();
                     let old_geom = element.hovered_span_geom.take().unwrap_or_default();
                     if let Some(ref on_hover) = self.on_span_hover {
-                        if let Some(msg) = on_hover(old_id, false, old_geom) {
-                            return (EventResult::Handled, Some(msg));
+                        if let Some(old_id) = old_id {
+                            if let Some(msg) = on_hover(old_id, false, old_geom) {
+                                return (EventResult::Handled, Some(msg));
+                            }
                         }
                     }
                 }
@@ -440,5 +558,155 @@ mod tests {
         );
         assert!(rects[0][2] > 0.0, "Width of token must be positive");
         assert!(rects[0][3] > 0.0, "Height of token must be positive");
+    }
+
+    #[test]
+    fn test_span_style_merge() {
+        use crate::text::SpanStyle;
+        use crate::text_property::{FontStyle, FontWeight};
+
+        let base = SpanStyle::default().color(clr!(blue));
+        assert!(!base.affects_geometry());
+
+        let hover = SpanStyle::default().color(clr!(red)).underline(true);
+        let merged = base.merge(&hover);
+        assert_eq!(merged.color, Some(clr!(red)));
+        assert!(merged.underline);
+        assert!(!merged.affects_geometry());
+
+        let font_hover = SpanStyle::default()
+            .font_size(24.0)
+            .weight(FontWeight::BOLD)
+            .font_style(FontStyle::Italic);
+        assert!(font_hover.affects_geometry());
+
+        let merged_font = base.merge(&font_hover);
+        assert_eq!(merged_font.color, Some(clr!(blue)));
+        assert_eq!(merged_font.font_size, Some(24.0));
+        assert_eq!(merged_font.font_weight, Some(FontWeight::BOLD));
+        assert_eq!(merged_font.font_style, Some(FontStyle::Italic));
+        assert!(merged_font.affects_geometry());
+    }
+
+    #[test]
+    fn test_text_span_hover_builder() {
+        use crate::text_property::{FontStyle, FontWeight};
+
+        let span = TextSpan::new(0..5)
+            .color(clr!(blue))
+            .hover_color(clr!(red))
+            .hover_underline()
+            .hover_bold()
+            .hover_italic()
+            .hover_font_size(18.0)
+            .hover_strikethrough()
+            .id(Token::Keyword);
+
+        assert!(span.hover_style.is_some());
+        let hover = span.hover_style.as_ref().unwrap();
+        assert_eq!(hover.color, Some(clr!(red)));
+        assert!(hover.underline);
+        assert!(hover.strikethrough);
+        assert_eq!(hover.font_weight, Some(FontWeight::BOLD));
+        assert_eq!(hover.font_style, Some(FontStyle::Italic));
+        assert_eq!(hover.font_size, Some(18.0));
+
+        let untyped = span.to_untyped();
+        assert_eq!(untyped.range, 0..5);
+        assert!(untyped.hover_style.is_some());
+        assert_eq!(untyped.hover_style.as_ref().unwrap().color, Some(clr!(red)));
+    }
+
+    #[test]
+    fn test_rich_text_hover_style_lifecycle() {
+        let mut ctx = Context::new();
+        let widget = rich_text("fn calculate()")
+            .spans(vec![
+                TextSpan::new(0..2)
+                    .color(clr!(blue))
+                    .hover_underline()
+                    .hover_color(clr!(red))
+                    .id(Token::Keyword),
+                TextSpan::new(3..12).bold().id(Token::FunctionName),
+            ])
+            .on_span_hover(|id, h, geom| Some(TestMsg::Hovered(id, h, geom)));
+
+        let mut element = View::<()>::build(&widget, &mut ctx);
+        ctx.root_attach(element.node);
+        ctx.compute_layout(800.0, 600.0);
+
+        // Before hover: base styles
+        let info = element
+            .node
+            .get_text_userdata::<TextRenderInfo>(&ctx)
+            .unwrap();
+        assert_eq!(info.spans[0].style.underline, false);
+        assert_eq!(info.spans[0].style.color, Some(clr!(blue)));
+        assert_eq!(element.hovered_span_idx, None);
+
+        // Query geometry of span 0 ("fn")
+        let rects = element.node.get_text_range_geometry(&ctx, 0..2);
+        assert!(!rects.is_empty());
+        let target_x = rects[0][0] + rects[0][2] * 0.5;
+        let target_y = rects[0][1] + rects[0][3] * 0.5;
+
+        // Move cursor over span 0
+        let target_node = element.node;
+        let (res, msg) = widget.handle_event(
+            &mut element,
+            &(),
+            Event::CursorMoved {
+                x: target_x,
+                y: target_y,
+                delta_x: 0.0,
+                delta_y: 0.0,
+                hit_nodes: vec![target_node],
+            },
+            &mut ctx,
+        );
+
+        assert_eq!(res, EventResult::Handled);
+        assert!(matches!(
+            msg,
+            Some(TestMsg::Hovered(Token::Keyword, true, _))
+        ));
+        assert_eq!(element.hovered_span_idx, Some(0));
+
+        // After hover: effective hover styles applied to TextRenderInfo
+        let info_hover = element
+            .node
+            .get_text_userdata::<TextRenderInfo>(&ctx)
+            .unwrap();
+        assert_eq!(info_hover.spans[0].style.underline, true);
+        assert_eq!(info_hover.spans[0].style.color, Some(clr!(red)));
+
+        // Move cursor outside the widget node
+        let (res_leave, msg_leave) = widget.handle_event(
+            &mut element,
+            &(),
+            Event::CursorMoved {
+                x: 900.0,
+                y: 900.0,
+                delta_x: 0.0,
+                delta_y: 0.0,
+                hit_nodes: vec![],
+            },
+            &mut ctx,
+        );
+
+        assert_eq!(res_leave, EventResult::Handled);
+        assert!(matches!(
+            msg_leave,
+            Some(TestMsg::Hovered(Token::Keyword, false, _))
+        ));
+        assert_eq!(element.hovered_span_idx, None);
+
+        // After leave: styles restored to default
+        let info_restored = element
+            .node
+            .get_text_userdata::<TextRenderInfo>(&ctx)
+            .unwrap();
+        assert_eq!(info_restored.spans[0].style.underline, false);
+        assert_eq!(info_restored.spans[0].style.color, Some(clr!(blue)));
     }
 }
