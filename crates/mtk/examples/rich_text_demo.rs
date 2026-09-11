@@ -173,16 +173,16 @@ fn calculate_area(radius: f64) -> f64 {
                                 .font_size(15.0)
                                 .color(rgb!(212, 212, 212)),
                         )
+                        .on_span_hover(|token, hovered, geom| {
+                            Some(DemoMsg::TokenHovered(token, hovered, geom))
+                        })
+                        .on_span_click(|token, geom| Some(DemoMsg::TokenClicked(token, geom)))
                         .style(
                             Style::new()
                                 .width(Size::Percent(1.0))
                                 .padding(16.0)
                                 .corner_radius_bottom(8.0),
-                        )
-                        .on_span_hover(|token, hovered, geom| {
-                            Some(DemoMsg::TokenHovered(token, hovered, geom))
-                        })
-                        .on_span_click(|token, geom| Some(DemoMsg::TokenClicked(token, geom))),
+                        ),
                 ))
                 .style(
                     Style::new()

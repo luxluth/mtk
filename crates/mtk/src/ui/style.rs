@@ -10,7 +10,7 @@ use crate::animation::{AnimatedValue, Curve, Keyframes};
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
 use crate::{
-    Context, Node, Overflow, ScrollbarVisibility, Style, TextRenderInfo, TextStyle,
+    Context, Node, Overflow, ScrollbarVisibility, Size, Style, TextRenderInfo, TextStyle,
     TransitionProperty,
 };
 
@@ -107,8 +107,23 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
             let overflow = c.overflow;
             let scroll = c.scroll;
             let flex_dir = self.style.flex_direction.unwrap_or(c.flex_direction);
+            let is_both_fixed = matches!(
+                self.style.base_constraints.width,
+                Size::Fixed(_) | Size::Percent(_)
+            ) && matches!(
+                self.style.base_constraints.height,
+                Size::Fixed(_) | Size::Percent(_)
+            );
+            let aspect_ratio = if self.style.base_constraints.aspect_ratio > 0.0 {
+                self.style.base_constraints.aspect_ratio
+            } else if is_both_fixed {
+                0.0
+            } else {
+                c.aspect_ratio
+            };
             *c = self.style.base_constraints;
             c.flex_direction = flex_dir;
+            c.aspect_ratio = aspect_ratio;
 
             if self.style.base_constraints.overflow == Overflow::Visible
                 && overflow != Overflow::Visible
@@ -315,8 +330,23 @@ impl<V> StyledView<V> {
             let overflow = c.overflow;
             let scroll = c.scroll;
             let flex_dir = active_style.flex_direction.unwrap_or(c.flex_direction);
+            let is_both_fixed = matches!(
+                active_style.base_constraints.width,
+                Size::Fixed(_) | Size::Percent(_)
+            ) && matches!(
+                active_style.base_constraints.height,
+                Size::Fixed(_) | Size::Percent(_)
+            );
+            let aspect_ratio = if active_style.base_constraints.aspect_ratio > 0.0 {
+                active_style.base_constraints.aspect_ratio
+            } else if is_both_fixed {
+                0.0
+            } else {
+                c.aspect_ratio
+            };
             *c = active_style.base_constraints;
             c.flex_direction = flex_dir;
+            c.aspect_ratio = aspect_ratio;
 
             if active_style.base_constraints.overflow == Overflow::Visible
                 && overflow != Overflow::Visible

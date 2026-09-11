@@ -3,7 +3,6 @@ use std::path::PathBuf;
 
 use crate::debugger::SourceLocation;
 use crate::image::{CacheKey, ImageCache, ObjectFit};
-use crate::style::Style;
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
 use crate::{Context, Node};
@@ -14,7 +13,6 @@ use crate::{Context, Node};
 pub struct AsyncImage<Msg> {
     pub(crate) path: PathBuf,
     pub(crate) fit: ObjectFit,
-    pub(crate) style: Option<Style>,
     pub(crate) max_dim: Option<(u32, u32)>,
     pub(crate) source_loc: Option<SourceLocation>,
     _marker: PhantomData<Msg>,
@@ -26,7 +24,6 @@ pub fn async_image<Msg>(path: impl Into<PathBuf>) -> AsyncImage<Msg> {
     AsyncImage {
         path: path.into(),
         fit: ObjectFit::default(),
-        style: None,
         max_dim: None,
         source_loc: Some(SourceLocation::here("AsyncImage")),
         _marker: PhantomData,
@@ -37,12 +34,6 @@ impl<Msg> AsyncImage<Msg> {
     /// Sets the object-fit mode (how the image scales to fit layout constraints).
     pub fn fit(mut self, fit: ObjectFit) -> Self {
         self.fit = fit;
-        self
-    }
-
-    /// Sets custom styles (width, height, corner radius, borders, shadows) for the image container.
-    pub fn style(mut self, style: Style) -> Self {
-        self.style = Some(style);
         self
     }
 
@@ -112,10 +103,6 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
             ctx.set_node_source(node, loc);
         }
 
-        if let Some(ref style) = self.style {
-            style.apply_to_node(ctx, node);
-        }
-
         let target_dim = self.resolve_target_dim(ctx, node);
         let key = CacheKey {
             path: self.path.clone(),
@@ -158,12 +145,8 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
     }
 
     fn rebuild(&self, _prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
-        if let Some(ref style) = self.style {
-            style.apply_to_node(ctx, element.node);
-        }
-
         let target_dim = self.resolve_target_dim(ctx, element.node);
-        let path_changed = element.current_path != self.path || element.target_dim != target_dim;
+        let path_changed = element.current_path != self.path;
         if path_changed {
             element.current_path = self.path.clone();
             element.target_dim = target_dim;
@@ -175,7 +158,11 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
             max_dim: target_dim,
         };
 
-        if let Some(data) = ImageCache::global().get_keyed(&key) {
+        let cached = ImageCache::global()
+            .get_keyed(&key)
+            .or_else(|| ImageCache::global().get(&self.path));
+
+        if let Some(data) = cached {
             let needs_update = element.attached_image_id != Some(data.id);
             if needs_update {
                 if data.height > 0 && data.width > 0 {
@@ -190,9 +177,12 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
                     .borrow_mut()
                     .insert(element.node, (data.clone(), self.fit));
                 element.attached_image_id = Some(data.id);
+                element.target_dim = target_dim;
                 element.node.set_dirty(ctx);
             }
-        } else if !ImageCache::global().is_loading_keyed(&key) {
+        } else if !ImageCache::global().is_loading_keyed(&key)
+            && !ImageCache::global().is_loading(&self.path)
+        {
             let window = ctx.window();
             ImageCache::global().load_async_keyed(
                 key,
@@ -229,7 +219,19 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
                     path: element.current_path.clone(),
                     max_dim: target_dim,
                 };
-                if let Some(data) = ImageCache::global().get_keyed(&key) {
+                let cached = ImageCache::global()
+                    .get_keyed(&key)
+                    .or_else(|| {
+                        element.target_dim.and_then(|td| {
+                            ImageCache::global().get_keyed(&CacheKey {
+                                path: element.current_path.clone(),
+                                max_dim: Some(td),
+                            })
+                        })
+                    })
+                    .or_else(|| ImageCache::global().get(&element.current_path));
+
+                if let Some(data) = cached {
                     if data.height > 0 && data.width > 0 {
                         let intrinsic_ar = data.width as f32 / data.height as f32;
                         element.node.update_constraints(ctx, |c| {
@@ -242,8 +244,21 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
                         .borrow_mut()
                         .insert(element.node, (data.clone(), self.fit));
                     element.attached_image_id = Some(data.id);
+                    element.target_dim = target_dim;
                     element.node.set_dirty(ctx);
                     ctx.request_frame();
+                } else if !ImageCache::global().is_loading_keyed(&key)
+                    && !ImageCache::global().is_loading(&element.current_path)
+                {
+                    let window = ctx.window();
+                    ImageCache::global().load_async_keyed(
+                        key,
+                        Some(move |_result| {
+                            if let Some(win) = window {
+                                win.request_redraw();
+                            }
+                        }),
+                    );
                 }
             }
         }

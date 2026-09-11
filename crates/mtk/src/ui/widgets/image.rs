@@ -4,7 +4,6 @@ use std::marker::PhantomData;
 
 use crate::debugger::SourceLocation;
 use crate::image::{ImageData, ObjectFit};
-use crate::style::Style;
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
 use crate::{Context, Node};
@@ -13,7 +12,6 @@ use crate::{Context, Node};
 pub struct Image<Msg> {
     pub(crate) data: ImageData,
     pub(crate) fit: ObjectFit,
-    pub(crate) style: Option<Style>,
     pub(crate) source_loc: Option<SourceLocation>,
     _marker: PhantomData<Msg>,
 }
@@ -24,7 +22,6 @@ pub fn image<Msg>(data: ImageData) -> Image<Msg> {
     Image {
         data,
         fit: ObjectFit::default(),
-        style: None,
         source_loc: Some(SourceLocation::here("Image")),
         _marker: PhantomData,
     }
@@ -34,12 +31,6 @@ impl<Msg> Image<Msg> {
     /// Sets the object-fit mode (how the image scales to fit layout constraints).
     pub fn fit(mut self, fit: ObjectFit) -> Self {
         self.fit = fit;
-        self
-    }
-
-    /// Sets custom styles (width, height, corner radius, borders, shadows) for the image container.
-    pub fn style(mut self, style: Style) -> Self {
-        self.style = Some(style);
         self
     }
 }
@@ -56,10 +47,6 @@ impl<State, Msg> View<State> for Image<Msg> {
         let node = ctx.create_node();
         if let Some(loc) = self.source_loc {
             ctx.set_node_source(node, loc);
-        }
-
-        if let Some(ref style) = self.style {
-            style.apply_to_node(ctx, node);
         }
 
         if self.data.height > 0 && self.data.width > 0 {
@@ -84,10 +71,6 @@ impl<State, Msg> View<State> for Image<Msg> {
                 .borrow_mut()
                 .insert(element.node, (self.data.clone(), self.fit));
             element.node.set_dirty(ctx);
-        }
-
-        if let Some(ref style) = self.style {
-            style.apply_to_node(ctx, element.node);
         }
 
         if self.data.height > 0 && self.data.width > 0 {

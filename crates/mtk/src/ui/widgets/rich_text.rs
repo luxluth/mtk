@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use crate::debugger::SourceLocation;
-use crate::style::{Rect, Style, TextStyle};
+use crate::style::{Rect, TextStyle};
 use crate::text::{TextRenderInfo, TextSpan};
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
@@ -29,7 +29,6 @@ impl std::ops::Deref for SpanGeometry {
 pub struct RichText<Msg, Id = ()> {
     pub(crate) text: String,
     pub(crate) spans: Vec<TextSpan<Id>>,
-    pub(crate) style: Option<Style>,
     pub(crate) text_style: Option<TextStyle>,
     pub(crate) on_span_click: Option<Box<dyn Fn(Id, SpanGeometry) -> Option<Msg>>>,
     pub(crate) on_span_hover: Option<Box<dyn Fn(Id, bool, SpanGeometry) -> Option<Msg>>>,
@@ -43,7 +42,6 @@ pub fn rich_text<S: Into<String>, Msg>(text: S) -> RichText<Msg, ()> {
     RichText {
         text: text.into(),
         spans: Vec::new(),
-        style: None,
         text_style: None,
         on_span_click: None,
         on_span_hover: None,
@@ -61,7 +59,6 @@ impl<Msg> RichText<Msg, ()> {
         RichText {
             text: self.text,
             spans,
-            style: self.style,
             text_style: self.text_style,
             on_span_click: None,
             on_span_hover: None,
@@ -81,12 +78,6 @@ impl<Msg, Id: Clone + PartialEq + 'static> RichText<Msg, Id> {
     /// Adds a single styled span over the text buffer.
     pub fn span(mut self, span: TextSpan<Id>) -> Self {
         self.spans.push(span);
-        self
-    }
-
-    /// Sets the box layout and container style.
-    pub fn style(mut self, style: Style) -> Self {
-        self.style = Some(style);
         self
     }
 
@@ -214,10 +205,6 @@ impl<State, Msg: 'static, Id: Clone + PartialEq + 'static> View<State> for RichT
         };
         node.set_text_with_userdata(ctx, &self.text, render_info);
 
-        if let Some(ref style) = self.style {
-            style.apply_to_node(ctx, node);
-        }
-
         RichTextElement {
             node,
             current_text: self.text.clone(),
@@ -267,10 +254,6 @@ impl<State, Msg: 'static, Id: Clone + PartialEq + 'static> View<State> for RichT
 
         if text_changed || spans_changed {
             element.node.set_dirty(ctx);
-        }
-
-        if let Some(ref style) = self.style {
-            style.apply_to_node(ctx, element.node);
         }
     }
 

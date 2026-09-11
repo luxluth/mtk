@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use mtk::animation::Curve;
 use mtk::clr;
 use mtk::image::ObjectFit;
 use mtk::rgb;
@@ -15,7 +16,8 @@ fn main() {
         "/examples/assets/Lenna_(test_image).png"
     ));
 
-    let window = Window::with(
+    #[allow(unused_mut)]
+    let mut window = Window::with(
         (),
         |_state, _msg: ()| {},
         move |_state| {
@@ -28,7 +30,9 @@ fn main() {
                             .height(Size::Fixed(400))
                             .corner_radius(12.0)
                             .border(1.0, rgb!(226, 232, 240))
-                            .shadow(rgb!(0, 0, 0), 20.0, 0.25),
+                            .shadow(rgb!(0, 0, 0), 20.0, 0.25)
+                            .on_active(|s| s.scale(0.96))
+                            .transition_all(100.0, Curve::ease_in_out()),
                     ),
                 text("Image of Lena Forsén used in many image processing experiments.").style(
                     Style::new().set_text_style(
@@ -55,6 +59,9 @@ fn main() {
     let attrs = WindowAttributes::new()
         .with_title("Lenna Image Example")
         .with_size((640, 640).into());
+
+    #[cfg(feature = "debugger")]
+    window.enable_terminal_debugger();
 
     window.present_with(attrs);
 }

@@ -5,7 +5,6 @@ use std::marker::PhantomData;
 use crate::colors::Color;
 use crate::debugger::SourceLocation;
 use crate::image::{ObjectFit, SvgData, SvgStyle};
-use crate::style::Style;
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
 use crate::{Context, Node};
@@ -15,7 +14,6 @@ pub struct Svg<Msg> {
     pub(crate) data: SvgData,
     pub(crate) fit: ObjectFit,
     pub(crate) style_opts: SvgStyle,
-    pub(crate) style: Option<Style>,
     pub(crate) source_loc: Option<SourceLocation>,
     _marker: PhantomData<Msg>,
 }
@@ -27,7 +25,6 @@ pub fn svg<Msg>(data: SvgData) -> Svg<Msg> {
         data,
         fit: ObjectFit::default(),
         style_opts: SvgStyle::default(),
-        style: None,
         source_loc: Some(SourceLocation::here("Svg")),
         _marker: PhantomData,
     }
@@ -75,12 +72,6 @@ impl<Msg> Svg<Msg> {
         self.style_opts = style;
         self
     }
-
-    /// Sets custom layout styles (width, height, corner radius, borders, shadows) for the SVG container.
-    pub fn style(mut self, style: Style) -> Self {
-        self.style = Some(style);
-        self
-    }
 }
 
 pub struct SvgElement {
@@ -95,10 +86,6 @@ impl<State, Msg> View<State> for Svg<Msg> {
         let node = ctx.create_node();
         if let Some(loc) = self.source_loc {
             ctx.set_node_source(node, loc);
-        }
-
-        if let Some(ref style) = self.style {
-            style.apply_to_node(ctx, node);
         }
 
         if self.data.height > 0.0 && self.data.width > 0.0 {
@@ -138,10 +125,6 @@ impl<State, Msg> View<State> for Svg<Msg> {
         {
             ctx.svgs.borrow_mut().insert(element.node, (data, self.fit));
             element.node.set_dirty(ctx);
-        }
-
-        if let Some(ref style) = self.style {
-            style.apply_to_node(ctx, element.node);
         }
 
         if self.data.height > 0.0 && self.data.width > 0.0 {

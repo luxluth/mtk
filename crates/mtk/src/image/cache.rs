@@ -107,13 +107,27 @@ impl ImageCache {
             return Some(entry.data.clone());
         }
 
-        // Fallback: If unscaled original is in cache, return it
+        // Fallback 1: If unscaled original is in cache, return it
         if key.max_dim.is_some() {
             let unscaled_key = CacheKey {
                 path: key.path.clone(),
                 max_dim: None,
             };
             if let Some(entry) = entries.get_mut(&unscaled_key) {
+                let access_id = self.access_counter.fetch_add(1, Ordering::Relaxed);
+                entry.last_accessed = access_id;
+                return Some(entry.data.clone());
+            }
+        }
+
+        // Fallback 2: If any version of this image path is in cache, return the best match
+        if let Some(best_key) = entries
+            .keys()
+            .filter(|k| k.path == key.path)
+            .cloned()
+            .max_by_key(|k| k.max_dim.map(|(w, h)| w * h).unwrap_or(u32::MAX))
+        {
+            if let Some(entry) = entries.get_mut(&best_key) {
                 let access_id = self.access_counter.fetch_add(1, Ordering::Relaxed);
                 entry.last_accessed = access_id;
                 return Some(entry.data.clone());

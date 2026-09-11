@@ -1658,7 +1658,9 @@ impl LayoutEngine {
                                 any_cross_changed = true;
                             }
                         }
-                    } else if c_cons.aspect_ratio > 0.0 {
+                    } else if c_cons.aspect_ratio > 0.0
+                        && !matches!(c_cons.height, Size::Fixed(_) | Size::Percent(_))
+                    {
                         if let Some(c_comp) = self.computed.get_mut(item.node) {
                             let needed_h = c_comp.w / c_cons.aspect_ratio;
                             if (needed_h - c_comp.h).abs() > 1e-3 {
@@ -1703,7 +1705,9 @@ impl LayoutEngine {
                     let Some(c_cons) = self.constraints.get(item.node).cloned() else {
                         continue;
                     };
-                    if c_cons.aspect_ratio > 0.0 {
+                    if c_cons.aspect_ratio > 0.0
+                        && !matches!(c_cons.width, Size::Fixed(_) | Size::Percent(_))
+                    {
                         if let Some(c_comp) = self.computed.get_mut(item.node) {
                             let needed_w = c_comp.h * c_cons.aspect_ratio;
                             if (needed_w - c_comp.w).abs() > 1e-3 {
