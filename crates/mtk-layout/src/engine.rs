@@ -599,6 +599,142 @@ impl LayoutEngine {
         }
     }
 
+    fn bubble_up_fit_size(&mut self, node: NodeId) {
+        let mut curr = self.parent(node);
+        while let Some(parent) = curr {
+            let Some(p_cons) = self.constraints.get(parent).cloned() else {
+                break;
+            };
+            if p_cons.width != Size::Fit && p_cons.height != Size::Fit {
+                break;
+            }
+
+            let p_off_w = p_cons.padding.left
+                + p_cons.border.left
+                + p_cons.padding.right
+                + p_cons.border.right;
+            let p_off_h = p_cons.padding.top
+                + p_cons.border.top
+                + p_cons.padding.bottom
+                + p_cons.border.bottom;
+
+            let is_p_row = Self::is_row(p_cons.flex_direction);
+            let is_p_wrap = matches!(p_cons.flex_wrap, FlexWrap::Wrap | FlexWrap::WrapReverse);
+
+            let mut changed = false;
+
+            if !is_p_wrap {
+                let mut sum_main = 0.0;
+                let mut max_cross = 0.0f32;
+                let mut child_count = 0;
+
+                let mut ch = self.first_child(parent);
+                while let Some(c) = ch {
+                    let c_cons = self.constraints.get(c);
+                    let is_abs = c_cons.is_some_and(|c| {
+                        matches!(c.positioning, PositionStrategy::Absolute { .. })
+                    });
+                    if !is_abs {
+                        if let Some(c_comp) = self.computed.get(c) {
+                            child_count += 1;
+                            if is_p_row {
+                                sum_main += c_comp.w;
+                                if c_comp.h > max_cross {
+                                    max_cross = c_comp.h;
+                                }
+                            } else {
+                                sum_main += c_comp.h;
+                                if c_comp.w > max_cross {
+                                    max_cross = c_comp.w;
+                                }
+                            }
+                        }
+                    }
+                    ch = self.next_sibling(c);
+                }
+
+                if child_count > 1 {
+                    sum_main += p_cons.gap * (child_count - 1) as f32;
+                }
+
+                let needed_w = if is_p_row { sum_main } else { max_cross } + p_off_w;
+                let needed_h = if !is_p_row { sum_main } else { max_cross } + p_off_h;
+
+                if let Some(p_comp) = self.computed.get_mut(parent) {
+                    if p_cons.width == Size::Fit && (needed_w - p_comp.w).abs() > 1e-3 {
+                        p_comp.w = needed_w;
+                        Self::clamp_min_max(p_comp, &p_cons);
+                        changed = true;
+                    }
+                    if p_cons.height == Size::Fit && (needed_h - p_comp.h).abs() > 1e-3 {
+                        p_comp.h = needed_h;
+                        Self::clamp_min_max(p_comp, &p_cons);
+                        changed = true;
+                    }
+                }
+            } else {
+                let p_comp_w = self.computed.get(parent).map_or(0.0, |c| c.w);
+                let p_inner_w = (p_comp_w - p_off_w).max(0.0);
+                if is_p_row && p_cons.height == Size::Fit && p_inner_w > 0.0 {
+                    let mut line_w = 0.0;
+                    let mut line_max_h = 0.0f32;
+                    let mut total_wrap_h = 0.0;
+                    let mut line_items = 0;
+                    let mut lines = 0;
+
+                    let mut ch = self.first_child(parent);
+                    while let Some(c) = ch {
+                        let is_abs = self.constraints.get(c).is_some_and(|c| {
+                            matches!(c.positioning, PositionStrategy::Absolute { .. })
+                        });
+                        if !is_abs {
+                            if let Some(c_comp) = self.computed.get(c) {
+                                let needed =
+                                    c_comp.w + if line_items > 0 { p_cons.gap } else { 0.0 };
+                                if line_items > 0 && line_w + needed > p_inner_w {
+                                    total_wrap_h += line_max_h;
+                                    lines += 1;
+                                    line_w = c_comp.w;
+                                    line_max_h = c_comp.h;
+                                    line_items = 1;
+                                } else {
+                                    line_w += needed;
+                                    if c_comp.h > line_max_h {
+                                        line_max_h = c_comp.h;
+                                    }
+                                    line_items += 1;
+                                }
+                            }
+                        }
+                        ch = self.next_sibling(c);
+                    }
+
+                    if line_items > 0 {
+                        total_wrap_h += line_max_h;
+                        lines += 1;
+                    }
+                    if lines > 1 {
+                        total_wrap_h += p_cons.gap * (lines - 1) as f32;
+                    }
+
+                    let needed_h = total_wrap_h + p_off_h;
+                    if let Some(p_comp) = self.computed.get_mut(parent) {
+                        if (needed_h - p_comp.h).abs() > 1e-3 {
+                            p_comp.h = needed_h;
+                            Self::clamp_min_max(p_comp, &p_cons);
+                            changed = true;
+                        }
+                    }
+                }
+            }
+
+            if !changed {
+                break;
+            }
+            curr = self.parent(parent);
+        }
+    }
+
     pub fn compute_layout<F>(
         &mut self,
         viewport_width: f32,
@@ -1191,6 +1327,7 @@ impl LayoutEngine {
                             available_main = inner_h;
                         }
                     }
+                    self.bubble_up_fit_size(node);
                 }
             }
 
@@ -1235,6 +1372,7 @@ impl LayoutEngine {
                             available_main = inner_w;
                         }
                     }
+                    self.bubble_up_fit_size(node);
                 }
             }
 
@@ -1464,6 +1602,149 @@ impl LayoutEngine {
                 }
             }
 
+            // C3) Post-Flex Cross-Axis Re-measurement (W3C Flexbox Step 9.4)
+            let mut any_cross_changed = false;
+            if is_row_dir {
+                for item in &self.scratch_flex_items {
+                    let Some(c_cons) = self.constraints.get(item.node).cloned() else {
+                        continue;
+                    };
+                    if self.texts.has(item.node) {
+                        let c_comp_copied =
+                            self.computed.get(item.node).copied().unwrap_or_default();
+                        let c_off_w = c_cons.padding.left
+                            + c_cons.border.left
+                            + c_cons.padding.right
+                            + c_cons.border.right;
+                        let c_off_h = c_cons.padding.top
+                            + c_cons.border.top
+                            + c_cons.padding.bottom
+                            + c_cons.border.bottom;
+                        let c_avail_w = if c_comp_copied.w > c_off_w {
+                            c_comp_copied.w - c_off_w
+                        } else {
+                            f32::INFINITY
+                        };
+                        let c_avail_h = if c_comp_copied.h > c_off_h {
+                            c_comp_copied.h - c_off_h
+                        } else {
+                            f32::INFINITY
+                        };
+
+                        let text_metrics = {
+                            let text_node = self.texts.get_mut(item.node).unwrap();
+                            let m = measure_text(
+                                item.node,
+                                &text_node.content,
+                                text_node.userdata.as_deref(),
+                                c_avail_w,
+                                c_avail_h,
+                            );
+                            text_node.cache = Some(CachedTextMeasurement {
+                                avail_w: c_avail_w,
+                                avail_h: c_avail_h,
+                                metrics: m,
+                            });
+                            m
+                        };
+
+                        let needed_h = text_metrics.height + c_off_h;
+                        if let Some(c_comp) = self.computed.get_mut(item.node) {
+                            if (c_cons.height == Size::Fit || needed_h > c_comp.h)
+                                && (needed_h - c_comp.h).abs() > 1e-3
+                            {
+                                c_comp.h = needed_h;
+                                Self::clamp_min_max(c_comp, &c_cons);
+                                any_cross_changed = true;
+                            }
+                        }
+                    } else if c_cons.aspect_ratio > 0.0 {
+                        if let Some(c_comp) = self.computed.get_mut(item.node) {
+                            let needed_h = c_comp.w / c_cons.aspect_ratio;
+                            if (needed_h - c_comp.h).abs() > 1e-3 {
+                                c_comp.h = needed_h;
+                                Self::clamp_min_max(c_comp, &c_cons);
+                                any_cross_changed = true;
+                            }
+                        }
+                    }
+                }
+
+                if any_cross_changed
+                    && cons.height == Size::Fit
+                    && !matches!(cons.overflow, Overflow::Scroll | Overflow::Hidden)
+                {
+                    let mut max_cross_h = 0.0f32;
+                    let mut curr_ch = self.first_child(node);
+                    while let Some(ch) = curr_ch {
+                        let is_ch_abs = self.constraints.get(ch).is_some_and(|c| {
+                            matches!(c.positioning, PositionStrategy::Absolute { .. })
+                        });
+                        if !is_ch_abs {
+                            if let Some(ch_comp) = self.computed.get(ch) {
+                                if ch_comp.h > max_cross_h {
+                                    max_cross_h = ch_comp.h;
+                                }
+                            }
+                        }
+                        curr_ch = self.next_sibling(ch);
+                    }
+                    let needed_parent_h = max_cross_h + off_h;
+                    if (needed_parent_h - comp.h).abs() > 1e-3 {
+                        if let Some(comp_mut) = self.computed.get_mut(node) {
+                            comp_mut.h = needed_parent_h;
+                            Self::clamp_min_max(comp_mut, &cons);
+                        }
+                        self.bubble_up_fit_size(node);
+                    }
+                }
+            } else {
+                for item in &self.scratch_flex_items {
+                    let Some(c_cons) = self.constraints.get(item.node).cloned() else {
+                        continue;
+                    };
+                    if c_cons.aspect_ratio > 0.0 {
+                        if let Some(c_comp) = self.computed.get_mut(item.node) {
+                            let needed_w = c_comp.h * c_cons.aspect_ratio;
+                            if (needed_w - c_comp.w).abs() > 1e-3 {
+                                c_comp.w = needed_w;
+                                Self::clamp_min_max(c_comp, &c_cons);
+                                any_cross_changed = true;
+                            }
+                        }
+                    }
+                }
+
+                if any_cross_changed
+                    && cons.width == Size::Fit
+                    && !matches!(cons.overflow, Overflow::Scroll | Overflow::Hidden)
+                {
+                    let mut max_cross_w = 0.0f32;
+                    let mut curr_ch = self.first_child(node);
+                    while let Some(ch) = curr_ch {
+                        let is_ch_abs = self.constraints.get(ch).is_some_and(|c| {
+                            matches!(c.positioning, PositionStrategy::Absolute { .. })
+                        });
+                        if !is_ch_abs {
+                            if let Some(ch_comp) = self.computed.get(ch) {
+                                if ch_comp.w > max_cross_w {
+                                    max_cross_w = ch_comp.w;
+                                }
+                            }
+                        }
+                        curr_ch = self.next_sibling(ch);
+                    }
+                    let needed_parent_w = max_cross_w + off_w;
+                    if (needed_parent_w - comp.w).abs() > 1e-3 {
+                        if let Some(comp_mut) = self.computed.get_mut(node) {
+                            comp_mut.w = needed_parent_w;
+                            Self::clamp_min_max(comp_mut, &cons);
+                        }
+                        self.bubble_up_fit_size(node);
+                    }
+                }
+            }
+
             // D) Absolute children percent and fill
             let mut curr = self.first_child(node);
             while let Some(child) = curr {
@@ -1536,8 +1817,12 @@ impl LayoutEngine {
                 }
 
                 if let Some(comp_mut) = self.computed.get_mut(node) {
-                    comp_mut.h = total_wrap_h + off_h;
-                    Self::clamp_min_max(comp_mut, &cons);
+                    let new_h = total_wrap_h + off_h;
+                    if (new_h - comp_mut.h).abs() > 1e-3 {
+                        comp_mut.h = new_h;
+                        Self::clamp_min_max(comp_mut, &cons);
+                        self.bubble_up_fit_size(node);
+                    }
                 }
             }
         }
@@ -2541,5 +2826,174 @@ mod tests {
             !has_h_disabled,
             "Horizontal scrollbar should NOT be present when scrollbar_visible is false"
         );
+    }
+
+    #[test]
+    fn test_flex_row_wrapped_text_expands_fit_row_and_parent_column() {
+        let mut engine = LayoutEngine::new();
+
+        // Root container: 400 x 600 fixed
+        let root = engine.create_node();
+        let mut root_cons = Constraints::default();
+        root_cons.width = Size::Fixed(400);
+        root_cons.height = Size::Fixed(600);
+        root_cons.flex_direction = FlexDirection::Column;
+        engine.set_constraints(root, root_cons);
+
+        // Outer column: width Fill (400), height Fit, padding 10 on all sides
+        let column = engine.create_node();
+        let mut col_cons = Constraints::default();
+        col_cons.width = Size::Fill;
+        col_cons.height = Size::Fit;
+        col_cons.flex_direction = FlexDirection::Column;
+        col_cons.padding = crate::Edges {
+            top: 10.0,
+            bottom: 10.0,
+            left: 10.0,
+            right: 10.0,
+        };
+        engine.set_constraints(column, col_cons);
+
+        // Inner row: width Fill (380), height Fit, gap 4, align_items Center
+        let row = engine.create_node();
+        let mut row_cons = Constraints::default();
+        row_cons.width = Size::Fill;
+        row_cons.height = Size::Fit;
+        row_cons.flex_direction = FlexDirection::Row;
+        row_cons.gap = 4.0;
+        row_cons.align_items = AlignItems::Center;
+        engine.set_constraints(row, row_cons);
+
+        // Svg icon: fixed 18 x 18
+        let svg = engine.create_node();
+        let mut svg_cons = Constraints::default();
+        svg_cons.width = Size::Fixed(18);
+        svg_cons.height = Size::Fixed(18);
+        engine.set_constraints(svg, svg_cons);
+
+        // Text child: flex_grow 1.0, width Fill, height Fit
+        let text_child = engine.create_node();
+        let mut text_cons = Constraints::default();
+        text_cons.flex_grow = 1.0;
+        text_cons.width = Size::Fill;
+        text_cons.height = Size::Fit;
+        engine.set_constraints(text_child, text_cons);
+        engine.set_text(text_child, "Album name that wraps".to_string(), None);
+
+        engine.append(row, svg);
+        engine.append(row, text_child);
+        engine.append(column, row);
+        engine.append(root, column);
+        engine.root_attach(root);
+
+        // Available width inside row is 380 - 18 (svg) - 4 (gap) = 358.
+        // When avail_w <= 360, text wraps into 3 lines (height 54.0).
+        // Otherwise on single line, height is 18.0.
+        let wrapping_measure = |_node: NodeId,
+                                _text: &str,
+                                _userdata: Option<&dyn std::any::Any>,
+                                avail_w: f32,
+                                _avail_h: f32| {
+            if avail_w <= 360.0 && avail_w > 0.0 {
+                TextMetrics {
+                    width: 358.0,
+                    height: 54.0,
+                    baseline_offset: 14.0,
+                }
+            } else {
+                TextMetrics {
+                    width: 500.0,
+                    height: 18.0,
+                    baseline_offset: 14.0,
+                }
+            }
+        };
+
+        engine.compute_layout(400.0, 600.0, wrapping_measure);
+
+        let text_comp = engine.get_computed(text_child).unwrap();
+        let row_comp = engine.get_computed(row).unwrap();
+        let col_comp = engine.get_computed(column).unwrap();
+        let svg_comp = engine.get_computed(svg).unwrap();
+
+        // text width is 380 - 18 - 4 = 358
+        assert_eq!(text_comp.w, 358.0);
+        // text height expanded to 54.0 because it wrapped
+        assert_eq!(text_comp.h, 54.0);
+        // row height expanded to fit the 54.0 text
+        assert_eq!(row_comp.h, 54.0);
+        // column height expanded to row height (54.0) + padding top (10.0) + padding bottom (10.0) = 74.0
+        assert_eq!(col_comp.h, 74.0);
+        // svg icon should be vertically centered: (54.0 - 18.0) / 2 = 18.0 offset within row
+        assert_eq!(svg_comp.y - row_comp.y, 18.0);
+    }
+
+    #[test]
+    fn test_flex_row_with_nested_column_wrapped_text() {
+        let mut engine = LayoutEngine::new();
+
+        let root = engine.create_node();
+        let mut root_cons = Constraints::default();
+        root_cons.width = Size::Fixed(300);
+        root_cons.height = Size::Fixed(400);
+        root_cons.flex_direction = FlexDirection::Column;
+        engine.set_constraints(root, root_cons);
+
+        let row = engine.create_node();
+        let mut row_cons = Constraints::default();
+        row_cons.width = Size::Fill;
+        row_cons.height = Size::Fit;
+        row_cons.flex_direction = FlexDirection::Row;
+        engine.set_constraints(row, row_cons);
+
+        let inner_col = engine.create_node();
+        let mut inner_col_cons = Constraints::default();
+        inner_col_cons.flex_grow = 1.0;
+        inner_col_cons.width = Size::Fill;
+        inner_col_cons.height = Size::Fit;
+        inner_col_cons.flex_direction = FlexDirection::Column;
+        engine.set_constraints(inner_col, inner_col_cons);
+
+        let text_child = engine.create_node();
+        let mut text_cons = Constraints::default();
+        text_cons.width = Size::Fill;
+        text_cons.height = Size::Fit;
+        engine.set_constraints(text_child, text_cons);
+        engine.set_text(text_child, "Nested text".to_string(), None);
+
+        engine.append(inner_col, text_child);
+        engine.append(row, inner_col);
+        engine.append(root, row);
+        engine.root_attach(root);
+
+        let wrapping_measure = |_node: NodeId,
+                                _text: &str,
+                                _userdata: Option<&dyn std::any::Any>,
+                                avail_w: f32,
+                                _avail_h: f32| {
+            if avail_w <= 300.0 && avail_w > 0.0 {
+                TextMetrics {
+                    width: 300.0,
+                    height: 70.0,
+                    baseline_offset: 14.0,
+                }
+            } else {
+                TextMetrics {
+                    width: 500.0,
+                    height: 20.0,
+                    baseline_offset: 14.0,
+                }
+            }
+        };
+
+        engine.compute_layout(300.0, 400.0, wrapping_measure);
+
+        let text_comp = engine.get_computed(text_child).unwrap();
+        let inner_col_comp = engine.get_computed(inner_col).unwrap();
+        let row_comp = engine.get_computed(row).unwrap();
+
+        assert_eq!(text_comp.h, 70.0);
+        assert_eq!(inner_col_comp.h, 70.0);
+        assert_eq!(row_comp.h, 70.0);
     }
 }
