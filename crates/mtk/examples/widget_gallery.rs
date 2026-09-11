@@ -9,7 +9,7 @@ use mtk::ui::widgets::{
 };
 use mtk::ui::{View, ViewLayerExt, ViewStyleExt};
 use mtk::windowing::{Window, WindowAttributes, WindowDimension};
-use mtk::{Lens, clr, rgb, rgba};
+use mtk::{Lens, TooltipAnimation, TooltipPlacement, clr, rgb, rgba};
 
 #[derive(Clone, Debug, Lens)]
 pub struct GalleryState {
@@ -229,7 +229,10 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
             button("Danger Reset")
                 .danger()
                 .on_click(GalleryMsg::ResetCounter)
-                .tooltip("Resets counter to zero"),
+                .tooltip("Resets counter to zero")
+                .placement(TooltipPlacement::Bottom)
+                .animation(TooltipAnimation::FadeAndScale)
+                .delay_ms(500),
             button("Disabled")
                 .disabled(true)
                 .tooltip("Action is disabled"),
