@@ -634,19 +634,17 @@ impl LayoutEngine {
                     let is_abs = c_cons.is_some_and(|c| {
                         matches!(c.positioning, PositionStrategy::Absolute { .. })
                     });
-                    if !is_abs {
-                        if let Some(c_comp) = self.computed.get(c) {
-                            child_count += 1;
-                            if is_p_row {
-                                sum_main += c_comp.w;
-                                if c_comp.h > max_cross {
-                                    max_cross = c_comp.h;
-                                }
-                            } else {
-                                sum_main += c_comp.h;
-                                if c_comp.w > max_cross {
-                                    max_cross = c_comp.w;
-                                }
+                    if !is_abs && let Some(c_comp) = self.computed.get(c) {
+                        child_count += 1;
+                        if is_p_row {
+                            sum_main += c_comp.w;
+                            if c_comp.h > max_cross {
+                                max_cross = c_comp.h;
+                            }
+                        } else {
+                            sum_main += c_comp.h;
+                            if c_comp.w > max_cross {
+                                max_cross = c_comp.w;
                             }
                         }
                     }
@@ -687,23 +685,20 @@ impl LayoutEngine {
                         let is_abs = self.constraints.get(c).is_some_and(|c| {
                             matches!(c.positioning, PositionStrategy::Absolute { .. })
                         });
-                        if !is_abs {
-                            if let Some(c_comp) = self.computed.get(c) {
-                                let needed =
-                                    c_comp.w + if line_items > 0 { p_cons.gap } else { 0.0 };
-                                if line_items > 0 && line_w + needed > p_inner_w {
-                                    total_wrap_h += line_max_h;
-                                    lines += 1;
-                                    line_w = c_comp.w;
+                        if !is_abs && let Some(c_comp) = self.computed.get(c) {
+                            let needed = c_comp.w + if line_items > 0 { p_cons.gap } else { 0.0 };
+                            if line_items > 0 && line_w + needed > p_inner_w {
+                                total_wrap_h += line_max_h;
+                                lines += 1;
+                                line_w = c_comp.w;
+                                line_max_h = c_comp.h;
+                                line_items = 1;
+                            } else {
+                                line_w += needed;
+                                if c_comp.h > line_max_h {
                                     line_max_h = c_comp.h;
-                                    line_items = 1;
-                                } else {
-                                    line_w += needed;
-                                    if c_comp.h > line_max_h {
-                                        line_max_h = c_comp.h;
-                                    }
-                                    line_items += 1;
                                 }
+                                line_items += 1;
                             }
                         }
                         ch = self.next_sibling(c);
@@ -718,12 +713,12 @@ impl LayoutEngine {
                     }
 
                     let needed_h = total_wrap_h + p_off_h;
-                    if let Some(p_comp) = self.computed.get_mut(parent) {
-                        if (needed_h - p_comp.h).abs() > 1e-3 {
-                            p_comp.h = needed_h;
-                            Self::clamp_min_max(p_comp, &p_cons);
-                            changed = true;
-                        }
+                    if let Some(p_comp) = self.computed.get_mut(parent)
+                        && (needed_h - p_comp.h).abs() > 1e-3
+                    {
+                        p_comp.h = needed_h;
+                        Self::clamp_min_max(p_comp, &p_cons);
+                        changed = true;
                     }
                 }
             }
@@ -821,94 +816,92 @@ impl LayoutEngine {
             let parent_node = self.parent(node);
             let mut parent_bounds = viewport_bounds;
 
-            if let Some(parent) = parent_node {
-                if let Some(p_comp) = self.computed.get(parent) {
-                    let p_cons = self.constraints.get(parent);
-                    let off_l = p_cons.map_or(0.0, |c| c.padding.left + c.border.left);
-                    let off_t = p_cons.map_or(0.0, |c| c.padding.top + c.border.top);
-                    let off_r = p_cons.map_or(0.0, |c| c.padding.right + c.border.right);
-                    let off_b = p_cons.map_or(0.0, |c| c.padding.bottom + c.border.bottom);
+            if let Some(parent) = parent_node
+                && let Some(p_comp) = self.computed.get(parent)
+            {
+                let p_cons = self.constraints.get(parent);
+                let off_l = p_cons.map_or(0.0, |c| c.padding.left + c.border.left);
+                let off_t = p_cons.map_or(0.0, |c| c.padding.top + c.border.top);
+                let off_r = p_cons.map_or(0.0, |c| c.padding.right + c.border.right);
+                let off_b = p_cons.map_or(0.0, |c| c.padding.bottom + c.border.bottom);
 
-                    parent_bounds.x = p_comp.x + off_l;
-                    parent_bounds.y = p_comp.y + off_t;
-                    parent_bounds.w = (p_comp.w - (off_l + off_r)).max(0.0);
-                    parent_bounds.h = (p_comp.h - (off_t + off_b)).max(0.0);
-                }
+                parent_bounds.x = p_comp.x + off_l;
+                parent_bounds.y = p_comp.y + off_t;
+                parent_bounds.w = (p_comp.w - (off_l + off_r)).max(0.0);
+                parent_bounds.h = (p_comp.h - (off_t + off_b)).max(0.0);
             }
 
             let is_root = node == root;
-            if let Some(cons) = self.constraints.get(node).cloned() {
-                if let Some(comp) = self.computed.get_mut(node) {
-                    let parent_cons = parent_node.and_then(|p| self.constraints.get(p));
-                    let parent_is_column =
-                        parent_cons.map_or(true, |c| !Self::is_row(c.flex_direction));
-                    let parent_is_row =
-                        parent_cons.map_or(false, |c| Self::is_row(c.flex_direction));
-                    let is_abs = matches!(cons.positioning, PositionStrategy::Absolute { .. });
+            if let Some(cons) = self.constraints.get(node).cloned()
+                && let Some(comp) = self.computed.get_mut(node)
+            {
+                let parent_cons = parent_node.and_then(|p| self.constraints.get(p));
+                let parent_is_column = parent_cons.is_none_or(|c| !Self::is_row(c.flex_direction));
+                let parent_is_row = parent_cons.is_some_and(|c| Self::is_row(c.flex_direction));
+                let is_abs = matches!(cons.positioning, PositionStrategy::Absolute { .. });
 
-                    // WIDTH
-                    comp.w = match cons.width {
-                        Size::Fixed(px) => px as f32,
-                        Size::Percent(p) => parent_bounds.w * p,
-                        Size::Fill if is_root => parent_bounds.w,
-                        Size::Fill if (parent_is_column || is_abs) && parent_bounds.w > 0.0 => {
-                            parent_bounds.w
-                        }
-                        _ => 0.0,
-                    };
+                // WIDTH
+                comp.w = match cons.width {
+                    Size::Fixed(px) => px as f32,
+                    Size::Percent(p) => parent_bounds.w * p,
+                    Size::Fill if is_root => parent_bounds.w,
+                    Size::Fill if (parent_is_column || is_abs) && parent_bounds.w > 0.0 => {
+                        parent_bounds.w
+                    }
+                    _ => 0.0,
+                };
 
-                    // HEIGHT
-                    comp.h = match cons.height {
-                        Size::Fixed(px) => px as f32,
-                        Size::Percent(p) => parent_bounds.h * p,
-                        Size::Fill if is_root => parent_bounds.h,
-                        Size::Fill if (parent_is_row || is_abs) && parent_bounds.h > 0.0 => {
-                            parent_bounds.h
-                        }
-                        _ => 0.0,
-                    };
+                // HEIGHT
+                comp.h = match cons.height {
+                    Size::Fixed(px) => px as f32,
+                    Size::Percent(p) => parent_bounds.h * p,
+                    Size::Fill if is_root => parent_bounds.h,
+                    Size::Fill if (parent_is_row || is_abs) && parent_bounds.h > 0.0 => {
+                        parent_bounds.h
+                    }
+                    _ => 0.0,
+                };
 
-                    Self::clamp_min_max(comp, &cons);
-                    Self::apply_aspect_ratio(comp, &cons);
+                Self::clamp_min_max(comp, &cons);
+                Self::apply_aspect_ratio(comp, &cons);
 
-                    // ABSOLUTE POSITIONING
-                    if let PositionStrategy::Absolute {
-                        top,
-                        left,
-                        bottom,
-                        right,
-                    } = cons.positioning
-                    {
-                        let has_left = left.is_finite();
-                        let has_right = right.is_finite();
-                        let has_top = top.is_finite();
-                        let has_bottom = bottom.is_finite();
+                // ABSOLUTE POSITIONING
+                if let PositionStrategy::Absolute {
+                    top,
+                    left,
+                    bottom,
+                    right,
+                } = cons.positioning
+                {
+                    let has_left = left.is_finite();
+                    let has_right = right.is_finite();
+                    let has_top = top.is_finite();
+                    let has_bottom = bottom.is_finite();
 
-                        if has_left && has_right {
-                            if matches!(cons.width, Size::Fit | Size::Fill) {
-                                comp.w = parent_bounds.w - left - right;
-                                comp.x = parent_bounds.x + left;
-                            } else {
-                                comp.x = parent_bounds.x + left;
-                            }
-                        } else if has_left {
+                    if has_left && has_right {
+                        if matches!(cons.width, Size::Fit | Size::Fill) {
+                            comp.w = parent_bounds.w - left - right;
                             comp.x = parent_bounds.x + left;
-                        } else if has_right {
-                            comp.x = parent_bounds.x + parent_bounds.w - right - comp.w;
+                        } else {
+                            comp.x = parent_bounds.x + left;
                         }
+                    } else if has_left {
+                        comp.x = parent_bounds.x + left;
+                    } else if has_right {
+                        comp.x = parent_bounds.x + parent_bounds.w - right - comp.w;
+                    }
 
-                        if has_top && has_bottom {
-                            if matches!(cons.height, Size::Fit | Size::Fill) {
-                                comp.h = parent_bounds.h - top - bottom;
-                                comp.y = parent_bounds.y + top;
-                            } else {
-                                comp.y = parent_bounds.y + top;
-                            }
-                        } else if has_top {
+                    if has_top && has_bottom {
+                        if matches!(cons.height, Size::Fit | Size::Fill) {
+                            comp.h = parent_bounds.h - top - bottom;
                             comp.y = parent_bounds.y + top;
-                        } else if has_bottom {
-                            comp.y = parent_bounds.y + parent_bounds.h - bottom - comp.h;
+                        } else {
+                            comp.y = parent_bounds.y + top;
                         }
+                    } else if has_top {
+                        comp.y = parent_bounds.y + top;
+                    } else if has_bottom {
+                        comp.y = parent_bounds.y + parent_bounds.h - bottom - comp.h;
                     }
                 }
             }
@@ -1014,19 +1007,17 @@ impl LayoutEngine {
                             let is_abs = c_cons.is_some_and(|c| {
                                 matches!(c.positioning, PositionStrategy::Absolute { .. })
                             });
-                            if !is_abs {
-                                if let Some(c_comp) = self.computed.get(child) {
-                                    child_count += 1;
-                                    if is_row_dir {
-                                        sum_main += c_comp.w;
-                                        if c_comp.h > max_cross {
-                                            max_cross = c_comp.h;
-                                        }
-                                    } else {
-                                        sum_main += c_comp.h;
-                                        if c_comp.w > max_cross {
-                                            max_cross = c_comp.w;
-                                        }
+                            if !is_abs && let Some(c_comp) = self.computed.get(child) {
+                                child_count += 1;
+                                if is_row_dir {
+                                    sum_main += c_comp.w;
+                                    if c_comp.h > max_cross {
+                                        max_cross = c_comp.h;
+                                    }
+                                } else {
+                                    sum_main += c_comp.h;
+                                    if c_comp.w > max_cross {
+                                        max_cross = c_comp.w;
                                     }
                                 }
                             }
@@ -1070,30 +1061,27 @@ impl LayoutEngine {
                             let is_abs = c_cons.is_some_and(|c| {
                                 matches!(c.positioning, PositionStrategy::Absolute { .. })
                             });
-                            if !is_abs {
-                                if let Some(c_comp) = self.computed.get(child) {
-                                    let child_main = if is_row_dir { c_comp.w } else { c_comp.h };
-                                    let child_cross = if is_row_dir { c_comp.h } else { c_comp.w };
-                                    let needed = child_main
-                                        + if cur_line_count > 0 { cons.gap } else { 0.0 };
+                            if !is_abs && let Some(c_comp) = self.computed.get(child) {
+                                let child_main = if is_row_dir { c_comp.w } else { c_comp.h };
+                                let child_cross = if is_row_dir { c_comp.h } else { c_comp.w };
+                                let needed =
+                                    child_main + if cur_line_count > 0 { cons.gap } else { 0.0 };
 
-                                    if cur_line_count > 0 && cur_line_main + needed > max_line_main
-                                    {
-                                        total_cross += cur_line_cross;
-                                        line_count += 1;
-                                        if cur_line_main > max_main_used {
-                                            max_main_used = cur_line_main;
-                                        }
-                                        cur_line_main = child_main;
-                                        cur_line_cross = child_cross;
-                                        cur_line_count = 1;
-                                    } else {
-                                        cur_line_main += needed;
-                                        if child_cross > cur_line_cross {
-                                            cur_line_cross = child_cross;
-                                        }
-                                        cur_line_count += 1;
+                                if cur_line_count > 0 && cur_line_main + needed > max_line_main {
+                                    total_cross += cur_line_cross;
+                                    line_count += 1;
+                                    if cur_line_main > max_main_used {
+                                        max_main_used = cur_line_main;
                                     }
+                                    cur_line_main = child_main;
+                                    cur_line_cross = child_cross;
+                                    cur_line_count = 1;
+                                } else {
+                                    cur_line_main += needed;
+                                    if child_cross > cur_line_cross {
+                                        cur_line_cross = child_cross;
+                                    }
+                                    cur_line_count += 1;
                                 }
                             }
                             curr = self.next_sibling(child);
@@ -1298,16 +1286,14 @@ impl LayoutEngine {
                     let is_ch_abs = self.constraints.get(ch).is_some_and(|c| {
                         matches!(c.positioning, PositionStrategy::Absolute { .. })
                     });
-                    if !is_ch_abs {
-                        if let Some(ch_comp) = self.computed.get(ch) {
-                            in_flow_items += 1;
-                            if is_row_dir {
-                                if ch_comp.h > max_cross_h {
-                                    max_cross_h = ch_comp.h;
-                                }
-                            } else {
-                                fit_h += ch_comp.h;
+                    if !is_ch_abs && let Some(ch_comp) = self.computed.get(ch) {
+                        in_flow_items += 1;
+                        if is_row_dir {
+                            if ch_comp.h > max_cross_h {
+                                max_cross_h = ch_comp.h;
                             }
+                        } else {
+                            fit_h += ch_comp.h;
                         }
                     }
                     curr_ch = self.next_sibling(ch);
@@ -1343,15 +1329,13 @@ impl LayoutEngine {
                     let is_ch_abs = self.constraints.get(ch).is_some_and(|c| {
                         matches!(c.positioning, PositionStrategy::Absolute { .. })
                     });
-                    if !is_ch_abs {
-                        if let Some(ch_comp) = self.computed.get(ch) {
-                            in_flow_items += 1;
-                            if is_row_dir {
-                                fit_w += ch_comp.w;
-                            } else {
-                                if ch_comp.w > max_cross_w {
-                                    max_cross_w = ch_comp.w;
-                                }
+                    if !is_ch_abs && let Some(ch_comp) = self.computed.get(ch) {
+                        in_flow_items += 1;
+                        if is_row_dir {
+                            fit_w += ch_comp.w;
+                        } else {
+                            if ch_comp.w > max_cross_w {
+                                max_cross_w = ch_comp.w;
                             }
                         }
                     }
@@ -1385,43 +1369,41 @@ impl LayoutEngine {
             while let Some(child) = curr {
                 if let (Some(c_cons), Some(c_comp)) =
                     (self.constraints.get(child), self.computed.get(child))
+                    && !matches!(c_cons.positioning, PositionStrategy::Absolute { .. })
                 {
-                    if !matches!(c_cons.positioning, PositionStrategy::Absolute { .. }) {
-                        in_flow_count += 1;
-                        let basis =
-                            Self::get_flex_basis(c_cons, c_comp, is_row_dir, available_main);
-                        total_basis += basis;
+                    in_flow_count += 1;
+                    let basis = Self::get_flex_basis(c_cons, c_comp, is_row_dir, available_main);
+                    total_basis += basis;
 
-                        let is_main_fill = if is_row_dir {
-                            c_cons.width == Size::Fill
-                        } else {
-                            c_cons.height == Size::Fill
-                        };
-                        let grow = if c_cons.flex_grow > 0.0 {
-                            c_cons.flex_grow
-                        } else if is_main_fill {
-                            1.0
-                        } else {
-                            0.0
-                        };
-                        let shrink = c_cons.flex_shrink;
-                        let (min_size, max_size) = if is_row_dir {
-                            (c_cons.min_width, c_cons.max_width)
-                        } else {
-                            (c_cons.min_height, c_cons.max_height)
-                        };
+                    let is_main_fill = if is_row_dir {
+                        c_cons.width == Size::Fill
+                    } else {
+                        c_cons.height == Size::Fill
+                    };
+                    let grow = if c_cons.flex_grow > 0.0 {
+                        c_cons.flex_grow
+                    } else if is_main_fill {
+                        1.0
+                    } else {
+                        0.0
+                    };
+                    let shrink = c_cons.flex_shrink;
+                    let (min_size, max_size) = if is_row_dir {
+                        (c_cons.min_width, c_cons.max_width)
+                    } else {
+                        (c_cons.min_height, c_cons.max_height)
+                    };
 
-                        self.scratch_flex_items.push(FlexItemScratch {
-                            node: child,
-                            basis,
-                            min_size,
-                            max_size,
-                            flex_grow: grow,
-                            flex_shrink: shrink,
-                            target_size: basis,
-                            frozen: false,
-                        });
-                    }
+                    self.scratch_flex_items.push(FlexItemScratch {
+                        node: child,
+                        basis,
+                        min_size,
+                        max_size,
+                        flex_grow: grow,
+                        flex_shrink: shrink,
+                        target_size: basis,
+                        frozen: false,
+                    });
                 }
                 curr = self.next_sibling(child);
             }
@@ -1498,17 +1480,17 @@ impl LayoutEngine {
                 }
 
                 for item in &self.scratch_flex_items {
-                    if item.flex_grow > 0.0 {
-                        if let Some(c_comp) = self.computed.get_mut(item.node) {
-                            if is_row_dir {
-                                c_comp.w = item.target_size;
-                            } else {
-                                c_comp.h = item.target_size;
-                            }
-                            if let Some(c_cons) = self.constraints.get(item.node) {
-                                Self::clamp_min_max(c_comp, c_cons);
-                                Self::apply_aspect_ratio(c_comp, c_cons);
-                            }
+                    if item.flex_grow > 0.0
+                        && let Some(c_comp) = self.computed.get_mut(item.node)
+                    {
+                        if is_row_dir {
+                            c_comp.w = item.target_size;
+                        } else {
+                            c_comp.h = item.target_size;
+                        }
+                        if let Some(c_cons) = self.constraints.get(item.node) {
+                            Self::clamp_min_max(c_comp, c_cons);
+                            Self::apply_aspect_ratio(c_comp, c_cons);
                         }
                     }
                 }
@@ -1586,17 +1568,18 @@ impl LayoutEngine {
                 }
 
                 for item in &self.scratch_flex_items {
-                    if item.flex_shrink > 0.0 && item.basis > 0.0 {
-                        if let Some(c_comp) = self.computed.get_mut(item.node) {
-                            if is_row_dir {
-                                c_comp.w = item.target_size;
-                            } else {
-                                c_comp.h = item.target_size;
-                            }
-                            if let Some(c_cons) = self.constraints.get(item.node) {
-                                Self::clamp_min_max(c_comp, c_cons);
-                                Self::apply_aspect_ratio(c_comp, c_cons);
-                            }
+                    if item.flex_shrink > 0.0
+                        && item.basis > 0.0
+                        && let Some(c_comp) = self.computed.get_mut(item.node)
+                    {
+                        if is_row_dir {
+                            c_comp.w = item.target_size;
+                        } else {
+                            c_comp.h = item.target_size;
+                        }
+                        if let Some(c_cons) = self.constraints.get(item.node) {
+                            Self::clamp_min_max(c_comp, c_cons);
+                            Self::apply_aspect_ratio(c_comp, c_cons);
                         }
                     }
                 }
@@ -1649,25 +1632,23 @@ impl LayoutEngine {
                         };
 
                         let needed_h = text_metrics.height + c_off_h;
-                        if let Some(c_comp) = self.computed.get_mut(item.node) {
-                            if (c_cons.height == Size::Fit || needed_h > c_comp.h)
-                                && (needed_h - c_comp.h).abs() > 1e-3
-                            {
-                                c_comp.h = needed_h;
-                                Self::clamp_min_max(c_comp, &c_cons);
-                                any_cross_changed = true;
-                            }
+                        if let Some(c_comp) = self.computed.get_mut(item.node)
+                            && (c_cons.height == Size::Fit || needed_h > c_comp.h)
+                            && (needed_h - c_comp.h).abs() > 1e-3
+                        {
+                            c_comp.h = needed_h;
+                            Self::clamp_min_max(c_comp, &c_cons);
+                            any_cross_changed = true;
                         }
                     } else if c_cons.aspect_ratio > 0.0
                         && !matches!(c_cons.height, Size::Fixed(_) | Size::Percent(_))
+                        && let Some(c_comp) = self.computed.get_mut(item.node)
                     {
-                        if let Some(c_comp) = self.computed.get_mut(item.node) {
-                            let needed_h = c_comp.w / c_cons.aspect_ratio;
-                            if (needed_h - c_comp.h).abs() > 1e-3 {
-                                c_comp.h = needed_h;
-                                Self::clamp_min_max(c_comp, &c_cons);
-                                any_cross_changed = true;
-                            }
+                        let needed_h = c_comp.w / c_cons.aspect_ratio;
+                        if (needed_h - c_comp.h).abs() > 1e-3 {
+                            c_comp.h = needed_h;
+                            Self::clamp_min_max(c_comp, &c_cons);
+                            any_cross_changed = true;
                         }
                     }
                 }
@@ -1682,12 +1663,11 @@ impl LayoutEngine {
                         let is_ch_abs = self.constraints.get(ch).is_some_and(|c| {
                             matches!(c.positioning, PositionStrategy::Absolute { .. })
                         });
-                        if !is_ch_abs {
-                            if let Some(ch_comp) = self.computed.get(ch) {
-                                if ch_comp.h > max_cross_h {
-                                    max_cross_h = ch_comp.h;
-                                }
-                            }
+                        if !is_ch_abs
+                            && let Some(ch_comp) = self.computed.get(ch)
+                            && ch_comp.h > max_cross_h
+                        {
+                            max_cross_h = ch_comp.h;
                         }
                         curr_ch = self.next_sibling(ch);
                     }
@@ -1707,14 +1687,13 @@ impl LayoutEngine {
                     };
                     if c_cons.aspect_ratio > 0.0
                         && !matches!(c_cons.width, Size::Fixed(_) | Size::Percent(_))
+                        && let Some(c_comp) = self.computed.get_mut(item.node)
                     {
-                        if let Some(c_comp) = self.computed.get_mut(item.node) {
-                            let needed_w = c_comp.h * c_cons.aspect_ratio;
-                            if (needed_w - c_comp.w).abs() > 1e-3 {
-                                c_comp.w = needed_w;
-                                Self::clamp_min_max(c_comp, &c_cons);
-                                any_cross_changed = true;
-                            }
+                        let needed_w = c_comp.h * c_cons.aspect_ratio;
+                        if (needed_w - c_comp.w).abs() > 1e-3 {
+                            c_comp.w = needed_w;
+                            Self::clamp_min_max(c_comp, &c_cons);
+                            any_cross_changed = true;
                         }
                     }
                 }
@@ -1729,12 +1708,11 @@ impl LayoutEngine {
                         let is_ch_abs = self.constraints.get(ch).is_some_and(|c| {
                             matches!(c.positioning, PositionStrategy::Absolute { .. })
                         });
-                        if !is_ch_abs {
-                            if let Some(ch_comp) = self.computed.get(ch) {
-                                if ch_comp.w > max_cross_w {
-                                    max_cross_w = ch_comp.w;
-                                }
-                            }
+                        if !is_ch_abs
+                            && let Some(ch_comp) = self.computed.get(ch)
+                            && ch_comp.w > max_cross_w
+                        {
+                            max_cross_w = ch_comp.w;
                         }
                         curr_ch = self.next_sibling(ch);
                     }
@@ -1753,23 +1731,22 @@ impl LayoutEngine {
             let mut curr = self.first_child(node);
             while let Some(child) = curr {
                 let c_cons_opt = self.constraints.get(child).cloned();
-                if let Some(c_cons) = c_cons_opt {
-                    if matches!(c_cons.positioning, PositionStrategy::Absolute { .. }) {
-                        if let Some(c_comp) = self.computed.get_mut(child) {
-                            match c_cons.width {
-                                Size::Percent(p) => c_comp.w = inner_w * p,
-                                Size::Fill => c_comp.w = inner_w,
-                                _ => {}
-                            }
-                            match c_cons.height {
-                                Size::Percent(p) => c_comp.h = inner_h * p,
-                                Size::Fill => c_comp.h = inner_h,
-                                _ => {}
-                            }
-                            Self::clamp_min_max(c_comp, &c_cons);
-                            Self::apply_aspect_ratio(c_comp, &c_cons);
-                        }
+                if let Some(c_cons) = c_cons_opt
+                    && matches!(c_cons.positioning, PositionStrategy::Absolute { .. })
+                    && let Some(c_comp) = self.computed.get_mut(child)
+                {
+                    match c_cons.width {
+                        Size::Percent(p) => c_comp.w = inner_w * p,
+                        Size::Fill => c_comp.w = inner_w,
+                        _ => {}
                     }
+                    match c_cons.height {
+                        Size::Percent(p) => c_comp.h = inner_h * p,
+                        Size::Fill => c_comp.h = inner_h,
+                        _ => {}
+                    }
+                    Self::clamp_min_max(c_comp, &c_cons);
+                    Self::apply_aspect_ratio(c_comp, &c_cons);
                 }
                 curr = self.next_sibling(child);
             }
@@ -1791,22 +1768,20 @@ impl LayoutEngine {
                     let is_abs = self.constraints.get(c).is_some_and(|c| {
                         matches!(c.positioning, PositionStrategy::Absolute { .. })
                     });
-                    if !is_abs {
-                        if let Some(c_comp) = self.computed.get(c) {
-                            let needed = c_comp.w + if line_items > 0 { cons.gap } else { 0.0 };
-                            if line_items > 0 && line_w + needed > inner_w {
-                                total_wrap_h += line_max_h;
-                                lines += 1;
-                                line_w = c_comp.w;
+                    if !is_abs && let Some(c_comp) = self.computed.get(c) {
+                        let needed = c_comp.w + if line_items > 0 { cons.gap } else { 0.0 };
+                        if line_items > 0 && line_w + needed > inner_w {
+                            total_wrap_h += line_max_h;
+                            lines += 1;
+                            line_w = c_comp.w;
+                            line_max_h = c_comp.h;
+                            line_items = 1;
+                        } else {
+                            line_w += needed;
+                            if c_comp.h > line_max_h {
                                 line_max_h = c_comp.h;
-                                line_items = 1;
-                            } else {
-                                line_w += needed;
-                                if c_comp.h > line_max_h {
-                                    line_max_h = c_comp.h;
-                                }
-                                line_items += 1;
                             }
+                            line_items += 1;
                         }
                     }
                     curr = self.next_sibling(c);
@@ -1888,33 +1863,32 @@ impl LayoutEngine {
                 let mut curr = self.first_child(node);
                 while let Some(c) = curr {
                     let c_cons_opt = self.constraints.get(c).cloned();
-                    if let Some(c_cons) = c_cons_opt {
-                        if let PositionStrategy::Absolute {
+                    if let Some(c_cons) = c_cons_opt
+                        && let PositionStrategy::Absolute {
                             top,
                             left,
                             bottom,
                             right,
                         } = c_cons.positioning
-                        {
-                            if let Some(c_comp) = self.computed.get_mut(c) {
-                                let mut abs_x = base_x;
-                                let mut abs_y = base_y;
-                                if left.is_finite() {
-                                    abs_x = base_x + left;
-                                } else if right.is_finite() {
-                                    abs_x = base_x + comp.w - c_comp.w - right;
-                                }
-                                if top.is_finite() {
-                                    abs_y = base_y + top;
-                                } else if bottom.is_finite() {
-                                    abs_y = base_y + comp.h - c_comp.h - bottom;
-                                }
-                                c_comp.x = abs_x;
-                                c_comp.y = abs_y;
+                    {
+                        if let Some(c_comp) = self.computed.get_mut(c) {
+                            let mut abs_x = base_x;
+                            let mut abs_y = base_y;
+                            if left.is_finite() {
+                                abs_x = base_x + left;
+                            } else if right.is_finite() {
+                                abs_x = base_x + comp.w - c_comp.w - right;
                             }
-                            curr = self.next_sibling(c);
-                            continue;
+                            if top.is_finite() {
+                                abs_y = base_y + top;
+                            } else if bottom.is_finite() {
+                                abs_y = base_y + comp.h - c_comp.h - bottom;
+                            }
+                            c_comp.x = abs_x;
+                            c_comp.y = abs_y;
                         }
+                        curr = self.next_sibling(c);
+                        continue;
                     }
                     self.scratch_children.push(c);
                     curr = self.next_sibling(c);
@@ -2070,11 +2044,9 @@ impl LayoutEngine {
                     .constraints
                     .get(child)
                     .is_some_and(|c| matches!(c.positioning, PositionStrategy::Absolute { .. }));
-                if !is_abs {
-                    if let Some(c_comp) = self.computed.get(child) {
-                        total_main += if is_row_dir { c_comp.w } else { c_comp.h };
-                        child_count += 1;
-                    }
+                if !is_abs && let Some(c_comp) = self.computed.get(child) {
+                    total_main += if is_row_dir { c_comp.w } else { c_comp.h };
+                    child_count += 1;
                 }
                 curr = self.next_sibling(child);
             }
@@ -2362,44 +2334,43 @@ impl LayoutEngine {
         let mut new_clip = current_clip;
         let mut new_has_clip = has_clip;
 
-        if let Some(c) = cons {
-            if matches!(c.overflow, Overflow::Hidden | Overflow::Scroll) {
-                let cx = comp.x + c.border.left;
-                let cy = comp.y + c.border.top;
-                let cw = comp.w - c.border.left - c.border.right;
-                let ch = comp.h - c.border.top - c.border.bottom;
+        if let Some(c) = cons
+            && matches!(c.overflow, Overflow::Hidden | Overflow::Scroll)
+        {
+            let cx = comp.x + c.border.left;
+            let cy = comp.y + c.border.top;
+            let cw = comp.w - c.border.left - c.border.right;
+            let ch = comp.h - c.border.top - c.border.bottom;
 
-                if has_clip {
-                    let x1 = current_clip.x.max(cx);
-                    let y1 = current_clip.y.max(cy);
-                    let x2 = (current_clip.x + current_clip.w).min(cx + cw);
-                    let y2 = (current_clip.y + current_clip.h).min(cy + ch);
+            if has_clip {
+                let x1 = current_clip.x.max(cx);
+                let y1 = current_clip.y.max(cy);
+                let x2 = (current_clip.x + current_clip.w).min(cx + cw);
+                let y2 = (current_clip.y + current_clip.h).min(cy + ch);
 
-                    new_clip.x = x1;
-                    new_clip.y = y1;
-                    new_clip.w = (x2 - x1).max(0.0);
-                    new_clip.h = (y2 - y1).max(0.0);
-                } else {
-                    new_clip = Rect {
-                        x: cx,
-                        y: cy,
-                        w: cw,
-                        h: ch,
-                    };
-                    new_has_clip = true;
-                }
+                new_clip.x = x1;
+                new_clip.y = y1;
+                new_clip.w = (x2 - x1).max(0.0);
+                new_clip.h = (y2 - y1).max(0.0);
+            } else {
+                new_clip = Rect {
+                    x: cx,
+                    y: cy,
+                    w: cw,
+                    h: ch,
+                };
+                new_has_clip = true;
             }
         }
 
         let mut visible = true;
-        if has_clip {
-            if comp.x >= current_clip.x + current_clip.w
+        if has_clip
+            && (comp.x >= current_clip.x + current_clip.w
                 || comp.x + comp.w <= current_clip.x
                 || comp.y >= current_clip.y + current_clip.h
-                || comp.y + comp.h <= current_clip.y
-            {
-                visible = false;
-            }
+                || comp.y + comp.h <= current_clip.y)
+        {
+            visible = false;
         }
 
         if visible {
@@ -2459,42 +2430,43 @@ impl LayoutEngine {
         }
 
         // Scrollbars
-        if let Some(c) = cons {
-            if matches!(c.overflow, Overflow::Scroll | Overflow::Auto) && c.scrollbar_visible {
-                let inner_h = comp.h - c.padding.top - c.padding.bottom;
-                let inner_w = comp.w - c.padding.left - c.padding.right;
+        if let Some(c) = cons
+            && matches!(c.overflow, Overflow::Scroll | Overflow::Auto)
+            && c.scrollbar_visible
+        {
+            let inner_h = comp.h - c.padding.top - c.padding.bottom;
+            let inner_w = comp.w - c.padding.left - c.padding.right;
 
-                if comp.content_h > comp.h + 0.5 && inner_h > 0.0 {
-                    let sb_seq = *seq;
-                    *seq += 1;
-                    list.push((
-                        RenderCommand {
-                            node,
-                            kind: RenderCommandKind::ScrollbarV,
-                            computed: comp,
-                            clip: new_clip,
-                            z_index: z,
-                            has_clip: new_has_clip,
-                        },
-                        sb_seq,
-                    ));
-                }
+            if comp.content_h > comp.h + 0.5 && inner_h > 0.0 {
+                let sb_seq = *seq;
+                *seq += 1;
+                list.push((
+                    RenderCommand {
+                        node,
+                        kind: RenderCommandKind::ScrollbarV,
+                        computed: comp,
+                        clip: new_clip,
+                        z_index: z,
+                        has_clip: new_has_clip,
+                    },
+                    sb_seq,
+                ));
+            }
 
-                if comp.content_w > comp.w + 0.5 && inner_w > 0.0 {
-                    let sb_seq = *seq;
-                    *seq += 1;
-                    list.push((
-                        RenderCommand {
-                            node,
-                            kind: RenderCommandKind::ScrollbarH,
-                            computed: comp,
-                            clip: new_clip,
-                            z_index: z,
-                            has_clip: new_has_clip,
-                        },
-                        sb_seq,
-                    ));
-                }
+            if comp.content_w > comp.w + 0.5 && inner_w > 0.0 {
+                let sb_seq = *seq;
+                *seq += 1;
+                list.push((
+                    RenderCommand {
+                        node,
+                        kind: RenderCommandKind::ScrollbarH,
+                        computed: comp,
+                        clip: new_clip,
+                        z_index: z,
+                        has_clip: new_has_clip,
+                    },
+                    sb_seq,
+                ));
             }
         }
     }
@@ -2552,14 +2524,13 @@ impl LayoutEngine {
                 continue;
             }
 
-            if cmd.has_clip {
-                if x < cmd.clip.x
+            if cmd.has_clip
+                && (x < cmd.clip.x
                     || x > cmd.clip.x + cmd.clip.w
                     || y < cmd.clip.y
-                    || y > cmd.clip.y + cmd.clip.h
-                {
-                    continue;
-                }
+                    || y > cmd.clip.y + cmd.clip.h)
+            {
+                continue;
             }
 
             last_checked = Some(node);

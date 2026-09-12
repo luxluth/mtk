@@ -82,6 +82,8 @@ impl<T> SparseSet<T> {
         }
     }
 
+    /// # Safety
+    /// Will panic if the NodeId doesn't have component this component. Use [SparseSet::has] as a safety check
     #[inline(always)]
     pub unsafe fn get_unchecked(&self, id: NodeId) -> &T {
         debug_assert!(self.has(id));
@@ -91,6 +93,8 @@ impl<T> SparseSet<T> {
         }
     }
 
+    /// # Safety
+    /// Will panic if the NodeId doesn't have component this component. Use [SparseSet::has] as a safety check
     #[inline(always)]
     pub unsafe fn get_unchecked_mut(&mut self, id: NodeId) -> &mut T {
         debug_assert!(self.has(id));
