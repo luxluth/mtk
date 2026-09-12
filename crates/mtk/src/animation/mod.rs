@@ -201,12 +201,7 @@ impl Animatable for u32 {
 
 impl Animatable for Color {
     fn interpolate(start: &Self, end: &Self, t: f64) -> Self {
-        let t_f = t.clamp(0.0, 1.0) as f32;
-        let r = (start.r as f32 + (end.r as f32 - start.r as f32) * t_f).round() as u8;
-        let g = (start.g as f32 + (end.g as f32 - start.g as f32) * t_f).round() as u8;
-        let b = (start.b as f32 + (end.b as f32 - start.b as f32) * t_f).round() as u8;
-        let a = (start.a as f32 + (end.a as f32 - start.a as f32) * t_f).round() as u8;
-        Color { r, g, b, a }
+        start.lerp(end, t)
     }
     fn is_finished(&self, target: &Self) -> bool {
         self == target

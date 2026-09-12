@@ -40,6 +40,293 @@ impl Color {
     pub const fn as_u32(&self) -> u32 {
         self.to_rgba_u32()
     }
+
+    /// Linearly interpolates between `self` and `target` by factor `t`.
+    ///
+    /// Each channel (R, G, B, A) is interpolated independently:
+    ///
+    /// ```text
+    /// channel = self + (target - self) * t
+    /// ```
+    ///
+    /// ## Arguments
+    ///
+    /// * `target` - The destination color to interpolate toward.
+    /// * `t` - The interpolation parameter. Clamped to the range `[0.0, 1.0]`.
+    ///   A value of `0.0` yields `self`, while `1.0` yields `target`.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use mtk::Color;
+    ///
+    /// let black = Color::black;
+    /// let white = Color::white;
+    /// let mid_gray = black.lerp(&white, 0.5);
+    ///
+    /// assert_eq!(mid_gray.r, 128);
+    /// assert_eq!(mid_gray.g, 128);
+    /// assert_eq!(mid_gray.b, 128);
+    /// ```
+    pub fn lerp(&self, target: &Color, t: f64) -> Color {
+        let t_f = t.clamp(0.0, 1.0) as f32;
+        let r = (self.r as f32 + (target.r as f32 - self.r as f32) * t_f).round() as u8;
+        let g = (self.g as f32 + (target.g as f32 - self.g as f32) * t_f).round() as u8;
+        let b = (self.b as f32 + (target.b as f32 - self.b as f32) * t_f).round() as u8;
+        let a = (self.a as f32 + (target.a as f32 - self.a as f32) * t_f).round() as u8;
+
+        Color { r, g, b, a }
+    }
+
+    /// Computes the relative luminance of the color according to the WCAG 2.1 standard.
+    ///
+    /// Relative luminance represents the perceived brightness of any color,
+    /// normalized from `0.0` (pure black) to `1.0` (pure white).
+    ///
+    /// ## Algorithm
+    ///
+    /// 1. Converts non-linear sRGB channels (`0` to `255`) to linear light (`0.0` to `1.0`):
+    ///
+    ///    ```text
+    ///    c = channel / 255.0
+    ///
+    ///    linear = if c <= 0.04045 {
+    ///        c / 12.92
+    ///    } else {
+    ///        ((c + 0.055) / 1.055) ^ 2.4
+    ///    }
+    ///    ```
+    ///
+    /// 2. Applies ITU-R BT.709 spectral sensitivity weights:
+    ///
+    ///    ```text
+    ///    luminance = 0.2126 * r_linear + 0.7152 * g_linear + 0.0722 * b_linear
+    ///    ```
+    ///
+    /// ## Notes
+    ///
+    /// * Operates only on RGB channels and ignores alpha transparency.
+    /// * Translucent colors should be composited over an opaque surface first.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use mtk::Color;
+    ///
+    /// assert_eq!(Color::black.relative_luminance(), 0.0);
+    /// assert_eq!(Color::white.relative_luminance(), 1.0);
+    /// ```
+    pub fn relative_luminance(&self) -> f64 {
+        let to_linear = |channel: u8| -> f64 {
+            let c = channel as f64 / 255.0;
+            if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        };
+
+        let r_lin = to_linear(self.r);
+        let g_lin = to_linear(self.g);
+        let b_lin = to_linear(self.b);
+
+        0.2126 * r_lin + 0.7152 * g_lin + 0.0722 * b_lin
+    }
+
+    /// Computes the WCAG 2.1 contrast ratio between this color and another.
+    ///
+    /// Returns a value ranging from `1.0` (no contrast) up to `21.0`
+    /// (maximum contrast, such as black against white).
+    ///
+    /// ## Formula
+    ///
+    /// ```text
+    /// ratio = (lighter_luminance + 0.05) / (darker_luminance + 0.05)
+    /// ```
+    ///
+    /// ### WCAG 2.1 Standards
+    ///
+    /// * `3.0:1` - Minimum for large text (18pt+ or 14pt+ bold) and UI components (AA).
+    /// * `4.5:1` - Minimum for regular body text (AA).
+    /// * `7.0:1` - Enhanced contrast for regular body text (AAA).
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use mtk::Color;
+    ///
+    /// let ratio = Color::white.contrast_ratio(&Color::black);
+    /// assert!((ratio - 21.0).abs() < 0.01);
+    /// ```
+    pub fn contrast_ratio(&self, other: &Color) -> f64 {
+        let l1 = self.relative_luminance();
+        let l2 = other.relative_luminance();
+
+        let lighter = l1.max(l2);
+        let darker = l1.min(l2);
+
+        (lighter + 0.05) / (darker + 0.05)
+    }
+
+    /// Selects pure white or pure black to maximize contrast against this background.
+    ///
+    /// Matches standard design system utilities (such as Material UI `getContrastText`).
+    /// Computes contrast against both [`Color::white`] and [`Color::black`],
+    /// returning the one with the higher ratio.
+    ///
+    /// Due to the `+ 0.05` offset in the WCAG contrast formula, the crossover
+    /// point is roughly `0.179` relative luminance rather than `0.5`.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use mtk::Color;
+    ///
+    /// assert_eq!(Color::black.get_contrast_text(), Color::white);
+    /// assert_eq!(Color::white.get_contrast_text(), Color::black);
+    /// ```
+    pub fn get_contrast_text(&self) -> Color {
+        let white_ratio = self.contrast_ratio(&Self::white);
+        let black_ratio = self.contrast_ratio(&Self::black);
+
+        if white_ratio >= black_ratio {
+            Self::white
+        } else {
+            Self::black
+        }
+    }
+
+    /// Generates a softened, tinted text color derived from this background
+    /// while guaranteeing a minimum WCAG contrast ratio.
+    ///
+    /// Instead of returning pure black or white, this method blends a fraction
+    /// of the background color into an off-white ([`Color::off_white`]) or
+    /// off-black ([`Color::off_black`]) base tone.
+    ///
+    /// ## Selection Logic
+    ///
+    /// 1. Picks [`Color::off_white`] or [`Color::off_black`] based on which gives
+    ///    higher contrast.
+    /// 2. If the chosen base cannot reach `min_contrast` even without tinting,
+    ///    falls back directly to pure [`Color::white`] or [`Color::black`].
+    /// 3. Tests candidate colors by stepping down the tint factor from `max_tint`
+    ///    to `0.0` until the contrast ratio meets or exceeds `min_contrast`.
+    ///
+    /// ## Arguments
+    ///
+    /// * `min_contrast` - Minimum contrast ratio to satisfy (for example, `4.5` for AA body text).
+    /// * `max_tint` - Maximum background blend factor in the range `[0.0, 1.0]`.
+    ///   Values between `0.08` and `0.15` (8% to 15%) provide subtle tinting without
+    ///   breaking accessibility.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use mtk::Color;
+    ///
+    /// let navy = Color::Hex(0x0a192fff);
+    /// let text_color = navy.get_tinted_contrast_text(4.5, 0.12);
+    ///
+    /// assert!(navy.contrast_ratio(&text_color) >= 4.5);
+    /// ```
+    pub fn get_tinted_contrast_text(&self, min_contrast: f64, max_tint: f64) -> Color {
+        let white_ratio = self.contrast_ratio(&Self::off_white);
+        let black_ratio = self.contrast_ratio(&Self::off_black);
+
+        let base_text = if white_ratio >= black_ratio {
+            Self::off_white
+        } else {
+            Self::off_black
+        };
+
+        // If the base color cannot hit the target, return untinted pure fallback
+        if self.contrast_ratio(&base_text) < min_contrast {
+            return if white_ratio >= black_ratio {
+                Self::white
+            } else {
+                Self::black
+            };
+        }
+
+        let steps = 15;
+        for step in (0..=steps).rev() {
+            let current_tint = (step as f64 / steps as f64) * max_tint;
+            let candidate = base_text.lerp(self, current_tint);
+
+            if self.contrast_ratio(&candidate) >= min_contrast {
+                return candidate;
+            }
+        }
+
+        base_text
+    }
+}
+
+impl Color {
+    /// Composites this color over an opaque backdrop using standard alpha blending.
+    pub fn over(&self, backdrop: &Color) -> Color {
+        if self.a == 255 {
+            return *self;
+        }
+        if self.a == 0 {
+            return *backdrop;
+        }
+
+        let alpha = self.a as f32 / 255.0;
+        let blend = |fg: u8, bg: u8| -> u8 {
+            ((fg as f32 * alpha) + (bg as f32 * (1.0 - alpha))).round() as u8
+        };
+
+        Color {
+            r: blend(self.r, backdrop.r),
+            g: blend(self.g, backdrop.g),
+            b: blend(self.b, backdrop.b),
+            a: 255,
+        }
+    }
+}
+
+impl Color {
+    /// Determines an accessible, tinted text color for this background.
+    /// `backdrop` is the surface behind this color (used if `self.a < 255`).
+    pub fn get_tinted_contrast_text_on(
+        &self,
+        backdrop: &Color,
+        min_contrast: f64,
+        max_tint: f64,
+    ) -> Color {
+        let effective_bg = self.over(backdrop);
+
+        let white_ratio = effective_bg.contrast_ratio(&Self::off_white);
+        let black_ratio = effective_bg.contrast_ratio(&Self::off_black);
+
+        let base_text = if white_ratio >= black_ratio {
+            Self::off_white
+        } else {
+            Self::off_black
+        };
+
+        if effective_bg.contrast_ratio(&base_text) < min_contrast {
+            return if white_ratio >= black_ratio {
+                Self::white
+            } else {
+                Self::black
+            };
+        }
+
+        let steps = 15;
+        for step in (0..=steps).rev() {
+            let current_tint = (step as f64 / steps as f64) * max_tint;
+            let mut candidate = base_text.lerp(&effective_bg, current_tint);
+            candidate.a = 255;
+
+            if effective_bg.contrast_ratio(&candidate) >= min_contrast {
+                return candidate;
+            }
+        }
+
+        base_text
+    }
 }
 
 impl From<Color> for u32 {
@@ -94,6 +381,22 @@ impl Color {
         r: 0,
         g: 0,
         b: 0,
+        a: 255,
+    };
+
+    // Off Black Color
+    pub const off_black: Color = Color {
+        r: 18,
+        g: 18,
+        b: 24,
+        a: 255,
+    };
+
+    // Off White Color
+    pub const off_white: Color = Color {
+        r: 248,
+        g: 249,
+        b: 250,
         a: 255,
     };
 
