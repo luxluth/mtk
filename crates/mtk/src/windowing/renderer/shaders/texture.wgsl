@@ -115,5 +115,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let final_rgb = outColor.rgb * outColor.a + shadowColor.rgb * shadowColor.a * (1.0 - outColor.a);
     let final_a = outColor.a + shadowColor.a * (1.0 - outColor.a);
 
-    return vec4<f32>(final_rgb, final_a) * in.fragAlpha;
+    var finalColor = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    if final_a > 0.001 {
+        finalColor = vec4<f32>(final_rgb / final_a, final_a);
+    }
+
+    finalColor.a = finalColor.a * in.fragAlpha;
+    return finalColor;
 }

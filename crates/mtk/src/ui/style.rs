@@ -257,6 +257,43 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
     }
 }
 
+fn property_changed(prop: TransitionProperty, a: &Style, b: &Style) -> bool {
+    match prop {
+        TransitionProperty::All => true,
+        TransitionProperty::Opacity => {
+            (a.base_effects.opacity - b.base_effects.opacity).abs() > 1e-4
+        }
+        TransitionProperty::Scale => (a.base_effects.scale - b.base_effects.scale).abs() > 1e-4,
+        TransitionProperty::BackgroundColor => {
+            a.base_effects.background_color != b.base_effects.background_color
+        }
+        TransitionProperty::BorderColor => {
+            a.base_effects.border.color != b.base_effects.border.color
+        }
+        TransitionProperty::CornerRadius => {
+            a.base_effects.border.radius != b.base_effects.border.radius
+        }
+        TransitionProperty::Border => {
+            a.base_constraints.border != b.base_constraints.border
+                || a.base_effects.border.color != b.base_effects.border.color
+        }
+        TransitionProperty::Shadow => a.base_effects.shadow != b.base_effects.shadow,
+        TransitionProperty::Padding => a.base_constraints.padding != b.base_constraints.padding,
+        TransitionProperty::Width => a.base_constraints.width != b.base_constraints.width,
+        TransitionProperty::Height => a.base_constraints.height != b.base_constraints.height,
+        TransitionProperty::Size => {
+            a.base_constraints.width != b.base_constraints.width
+                || a.base_constraints.height != b.base_constraints.height
+        }
+        TransitionProperty::Gap => (a.base_constraints.gap - b.base_constraints.gap).abs() > 1e-4,
+        TransitionProperty::TextColor => a.base_text_style.color != b.base_text_style.color,
+        TransitionProperty::FontSize => {
+            (a.base_text_style.font_size - b.base_text_style.font_size).abs() > 1e-4
+        }
+        TransitionProperty::Scrollbar => a.scrollbar != b.scrollbar,
+    }
+}
+
 impl<V> StyledView<V> {
     fn compute_target_style(&self, view_state: &StyledViewState) -> Style {
         let mut target = self.style.clone();
@@ -293,15 +330,38 @@ impl<V> StyledView<V> {
         let mut is_animating = false;
 
         let active_style = if !self.style.transitions.is_empty() {
-            let mut transition_duration = 200.0;
-            let mut transition_curve = Curve::ease_out();
+            let current_style = view_state
+                .style_anim
+                .as_ref()
+                .map(|a| &a.current)
+                .unwrap_or(&self.style);
+
+            let mut matching_transition = None;
 
             for t in &self.style.transitions {
-                if t.property == TransitionProperty::All || t.duration_ms > transition_duration {
-                    transition_duration = t.duration_ms;
-                    transition_curve = t.curve;
+                if t.property == TransitionProperty::All
+                    || property_changed(t.property, current_style, &target_style)
+                {
+                    match matching_transition {
+                        Some((dur, _)) if t.duration_ms > dur => {
+                            matching_transition = Some((t.duration_ms, t.curve));
+                        }
+                        None => {
+                            matching_transition = Some((t.duration_ms, t.curve));
+                        }
+                        _ => {}
+                    }
                 }
             }
+
+            let (transition_duration, transition_curve) =
+                matching_transition.unwrap_or_else(|| {
+                    self.style
+                        .transitions
+                        .first()
+                        .map(|t| (t.duration_ms, t.curve))
+                        .unwrap_or((200.0, Curve::ease_out()))
+                });
 
             if view_state.style_anim.is_none() {
                 view_state.style_anim = Some(AnimatedValue::new(target_style.clone()));
@@ -892,5 +952,159 @@ mod tests {
             "comp1_after2.w = {}",
             comp1_after2.w
         );
+    }
+
+    #[test]
+    fn test_effects_merge_explicit_opacity_one() {
+        let base = Style::new().opacity(0.7);
+        let hover = Style::new().opacity(1.0);
+        let merged = base.merge(hover);
+        assert_eq!(merged.base_effects.opacity, 1.0);
+
+        // When other did not explicitly set opacity, base opacity is preserved
+        let base2 = Style::new().opacity(0.7);
+        let active = Style::new().scale(0.95);
+        let merged2 = base2.merge(active);
+        assert_eq!(merged2.base_effects.opacity, 0.7);
+        assert_eq!(merged2.base_effects.scale, 0.95);
+    }
+
+    #[test]
+    fn test_opacity_hover_and_active_composition() {
+        let mut ctx = Context::new();
+        let styled = crate::ui::widgets::container((crate::ui::widgets::text::<_, ()>("test"),))
+            .style(
+                Style::new()
+                    .opacity(0.7)
+                    .on_hover(|s| s.opacity(1.0))
+                    .on_active(|s| s.scale(0.98))
+                    .transition(TransitionProperty::Opacity, 150.0, Curve::ease_in_out()),
+            );
+
+        let mut el = View::<()>::build(&styled, &mut ctx);
+        let node = View::<()>::get_node(&styled, &el);
+
+        // Initial state: opacity is 0.7
+        let initial_effects = node.get_effects(&ctx).unwrap();
+        assert_eq!(initial_effects.opacity, 0.7);
+        assert_eq!(initial_effects.scale, 1.0);
+
+        // Hover event
+        let _ = View::<()>::handle_event(
+            &styled,
+            &mut el,
+            &(),
+            Event::CursorMoved {
+                x: 0.0,
+                y: 0.0,
+                delta_x: 0.0,
+                delta_y: 0.0,
+                hit_nodes: vec![node],
+            },
+            &mut ctx,
+        );
+
+        assert!(el.1.is_hovered);
+        let target = styled.compute_target_style(&el.1);
+        assert_eq!(target.base_effects.opacity, 1.0);
+        assert_eq!(target.base_effects.scale, 1.0);
+
+        // Press down (Active + Hovered)
+        let _ = View::<()>::handle_event(
+            &styled,
+            &mut el,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Left,
+                pressed: true,
+                x: 0.0,
+                y: 0.0,
+                hit_nodes: vec![node],
+            },
+            &mut ctx,
+        );
+
+        assert!(el.1.is_hovered);
+        assert!(el.1.is_active);
+        let target_active = styled.compute_target_style(&el.1);
+        assert_eq!(target_active.base_effects.opacity, 1.0);
+        assert_eq!(target_active.base_effects.scale, 0.98);
+
+        // Release mouse (Hovered, no longer Active)
+        let _ = View::<()>::handle_event(
+            &styled,
+            &mut el,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Left,
+                pressed: false,
+                x: 0.0,
+                y: 0.0,
+                hit_nodes: vec![node],
+            },
+            &mut ctx,
+        );
+
+        assert!(el.1.is_hovered);
+        assert!(!el.1.is_active);
+        let target_hover_only = styled.compute_target_style(&el.1);
+        assert_eq!(target_hover_only.base_effects.opacity, 1.0);
+        assert_eq!(target_hover_only.base_effects.scale, 1.0);
+
+        // Move cursor away (neither Hovered nor Active)
+        let _ = View::<()>::handle_event(
+            &styled,
+            &mut el,
+            &(),
+            Event::CursorMoved {
+                x: 500.0,
+                y: 500.0,
+                delta_x: 0.0,
+                delta_y: 0.0,
+                hit_nodes: vec![],
+            },
+            &mut ctx,
+        );
+
+        assert!(!el.1.is_hovered);
+        assert!(!el.1.is_active);
+        let target_reset = styled.compute_target_style(&el.1);
+        assert_eq!(target_reset.base_effects.opacity, 0.7);
+        assert_eq!(target_reset.base_effects.scale, 1.0);
+    }
+
+    #[test]
+    fn test_property_specific_transition_matching() {
+        let mut ctx = Context::new();
+        let styled = crate::ui::widgets::container((crate::ui::widgets::text::<_, ()>("test"),))
+            .style(
+                Style::new()
+                    .opacity(0.7)
+                    .on_hover(|s| s.opacity(1.0))
+                    .transition(TransitionProperty::Opacity, 150.0, Curve::ease_in_out()),
+            );
+
+        let mut el = View::<()>::build(&styled, &mut ctx);
+        let node = View::<()>::get_node(&styled, &el);
+
+        let _ = View::<()>::handle_event(
+            &styled,
+            &mut el,
+            &(),
+            Event::CursorMoved {
+                x: 0.0,
+                y: 0.0,
+                delta_x: 0.0,
+                delta_y: 0.0,
+                hit_nodes: vec![node],
+            },
+            &mut ctx,
+        );
+
+        assert!(el.1.is_hovered);
+        assert!(el.1.style_anim.is_some());
+        let anim = el.1.style_anim.as_ref().unwrap();
+        assert_eq!(anim.duration, 150.0);
+        assert_eq!(anim.curve, Curve::ease_in_out());
     }
 }

@@ -306,6 +306,8 @@ impl Animatable for Effects {
             },
             opacity: start.opacity + (end.opacity - start.opacity) * t_f,
             scale: start.scale + (end.scale - start.scale) * t_f,
+            explicit_opacity: start.explicit_opacity || end.explicit_opacity,
+            explicit_scale: start.explicit_scale || end.explicit_scale,
         }
     }
     fn is_finished(&self, target: &Self) -> bool {

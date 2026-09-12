@@ -1249,7 +1249,7 @@ fn prepare_command_slice<'a, I>(
 
             if canvas_textures.contains_key(&node) {
                 let immediate = ImmediateData {
-                    color: [1.0, 1.0, 1.0, effective_alpha],
+                    color: [1.0, 1.0, 1.0, 1.0],
                     pos: [scaled_x, scaled_y],
                     screen_size: [screen_w_f32, screen_h_f32],
                     quad_size: [scaled_w, scaled_h],
@@ -1285,7 +1285,7 @@ fn prepare_command_slice<'a, I>(
                 });
             } else if image_textures.contains_key(&node) {
                 let immediate = ImmediateData {
-                    color: [1.0, 1.0, 1.0, effective_alpha],
+                    color: [1.0, 1.0, 1.0, 1.0],
                     pos: [scaled_x, scaled_y],
                     screen_size: [screen_w_f32, screen_h_f32],
                     quad_size: [scaled_w, scaled_h],
@@ -1321,7 +1321,7 @@ fn prepare_command_slice<'a, I>(
                 });
             } else if svg_textures.contains_key(&node) {
                 let immediate = ImmediateData {
-                    color: [1.0, 1.0, 1.0, effective_alpha],
+                    color: [1.0, 1.0, 1.0, 1.0],
                     pos: [scaled_x, scaled_y],
                     screen_size: [screen_w_f32, screen_h_f32],
                     quad_size: [scaled_w, scaled_h],

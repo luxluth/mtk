@@ -116,6 +116,8 @@ pub struct Effects {
     pub filters: Vec<Filter>,
     pub opacity: f32,
     pub scale: f32,
+    pub explicit_opacity: bool,
+    pub explicit_scale: bool,
 }
 
 impl Default for Effects {
@@ -127,7 +129,23 @@ impl Default for Effects {
             border: Border::default(),
             shadow: Shadow::default(),
             filters: Vec::new(),
+            explicit_opacity: false,
+            explicit_scale: false,
         }
+    }
+}
+
+impl Effects {
+    pub fn opacity(mut self, opacity: f32) -> Self {
+        self.opacity = opacity;
+        self.explicit_opacity = true;
+        self
+    }
+
+    pub fn scale(mut self, scale: f32) -> Self {
+        self.scale = scale;
+        self.explicit_scale = true;
+        self
     }
 }
 

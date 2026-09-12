@@ -136,11 +136,13 @@ impl Effects {
         if !other.filters.is_empty() {
             self.filters = other.filters.clone();
         }
-        if (other.opacity - 1.0).abs() > 1e-4 {
+        if other.explicit_opacity || (other.opacity - 1.0).abs() > 1e-4 {
             self.opacity = other.opacity;
+            self.explicit_opacity = true;
         }
-        if (other.scale - 1.0).abs() > 1e-4 {
+        if other.explicit_scale || (other.scale - 1.0).abs() > 1e-4 {
             self.scale = other.scale;
+            self.explicit_scale = true;
         }
     }
 }
@@ -598,6 +600,7 @@ impl Style {
 
     pub fn opacity(mut self, opacity: f32) -> Self {
         self.base_effects.opacity = opacity;
+        self.base_effects.explicit_opacity = true;
         self
     }
 
@@ -698,6 +701,7 @@ impl Style {
 
     pub fn scale(mut self, s: f32) -> Self {
         self.base_effects.scale = s;
+        self.base_effects.explicit_scale = true;
         self
     }
 
@@ -756,32 +760,28 @@ impl Style {
 
     /// Declares style overrides applied when the mouse cursor hovers over the element.
     pub fn on_hover(mut self, hover_fn: impl FnOnce(Style) -> Style) -> Self {
-        let base = self.clone();
-        let hover_style = hover_fn(base);
+        let hover_style = hover_fn(Style::new());
         self.hover = Some(Box::new(hover_style));
         self
     }
 
     /// Declares style overrides applied when the mouse button is pressed over the element (active state).
     pub fn on_active(mut self, active_fn: impl FnOnce(Style) -> Style) -> Self {
-        let base = self.clone();
-        let active_style = active_fn(base);
+        let active_style = active_fn(Style::new());
         self.active = Some(Box::new(active_style));
         self
     }
 
     /// Declares style overrides applied when the element receives focus.
     pub fn on_focus(mut self, focus_fn: impl FnOnce(Style) -> Style) -> Self {
-        let base = self.clone();
-        let focus_style = focus_fn(base);
+        let focus_style = focus_fn(Style::new());
         self.focus = Some(Box::new(focus_style));
         self
     }
 
     /// Declares style overrides applied when the element is disabled.
     pub fn on_disabled(mut self, disabled_fn: impl FnOnce(Style) -> Style) -> Self {
-        let base = self.clone();
-        let disabled_style = disabled_fn(base);
+        let disabled_style = disabled_fn(Style::new());
         self.disabled = Some(Box::new(disabled_style));
         self
     }
