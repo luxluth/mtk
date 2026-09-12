@@ -422,10 +422,10 @@ where
                         let max_scroll_x = (content_w - computed_w).max(0.0);
 
                         if let Some((dx, dy)) = tracker.update(dt) {
-                            let next_scroll_y =
-                                (constraints.scroll.y + dy).clamp(0.0, max_scroll_y);
-                            let next_scroll_x =
-                                (constraints.scroll.x + dx).clamp(0.0, max_scroll_x);
+                            let cur_y = constraints.resolved_scroll_y(max_scroll_y);
+                            let cur_x = constraints.resolved_scroll_x(max_scroll_x);
+                            let next_scroll_y = (cur_y + dy).clamp(0.0, max_scroll_y);
+                            let next_scroll_x = (cur_x + dx).clamp(0.0, max_scroll_x);
 
                             if next_scroll_y == 0.0 || next_scroll_y == max_scroll_y {
                                 tracker.set_velocity(tracker.velocity().0, 0.0);
@@ -434,11 +434,11 @@ where
                                 tracker.set_velocity(0.0, tracker.velocity().1);
                             }
 
-                            if (next_scroll_y - constraints.scroll.y).abs() > 0.001
-                                || (next_scroll_x - constraints.scroll.x).abs() > 0.001
+                            if (next_scroll_y - cur_y).abs() > 0.001
+                                || (next_scroll_x - cur_x).abs() > 0.001
                             {
-                                let prev_x = constraints.scroll.x;
-                                let prev_y = constraints.scroll.y;
+                                let prev_x = cur_x;
+                                let prev_y = cur_y;
                                 node.update_constraints(&mut self.context, |c| {
                                     c.scroll.y = next_scroll_y;
                                     c.scroll.x = next_scroll_x;
@@ -507,8 +507,8 @@ where
                                     if x >= computed.x + computed.w - hit_zone_w
                                         && x <= computed.x + computed.w
                                     {
-                                        self.drag_scroll_node =
-                                            Some((*node, y, constraints.scroll.y));
+                                        let cur_y = constraints.resolved_scroll_y(max_scroll_y);
+                                        self.drag_scroll_node = Some((*node, y, cur_y));
                                         let padding_top =
                                             constraints.padding.top + constraints.border.top;
                                         let padding_bottom =
@@ -518,8 +518,7 @@ where
                                         let ratio = (computed.h / content_h).clamp(0.0, 1.0);
                                         let thumb_h = (track_h * ratio)
                                             .clamp(sb_style.min_thumb_len.min(track_h), track_h);
-                                        let scroll_pct =
-                                            (constraints.scroll.y / max_scroll_y).clamp(0.0, 1.0);
+                                        let scroll_pct = (cur_y / max_scroll_y).clamp(0.0, 1.0);
                                         let thumb_x = computed.x + computed.w
                                             - constraints.border.right
                                             - sb_style.width
@@ -552,8 +551,8 @@ where
                                     if y >= computed.y + computed.h - hit_zone_h
                                         && y <= computed.y + computed.h
                                     {
-                                        self.drag_scroll_x_node =
-                                            Some((*node, x, constraints.scroll.x));
+                                        let cur_x = constraints.resolved_scroll_x(max_scroll_x);
+                                        self.drag_scroll_x_node = Some((*node, x, cur_x));
                                         let padding_left =
                                             constraints.padding.left + constraints.border.left;
                                         let padding_right =
@@ -563,8 +562,7 @@ where
                                         let ratio = (computed.w / content_w).clamp(0.0, 1.0);
                                         let thumb_w = (track_w * ratio)
                                             .clamp(sb_style.min_thumb_len.min(track_w), track_w);
-                                        let scroll_pct =
-                                            (constraints.scroll.x / max_scroll_x).clamp(0.0, 1.0);
+                                        let scroll_pct = (cur_x / max_scroll_x).clamp(0.0, 1.0);
                                         let thumb_x = computed.x
                                             + padding_left
                                             + scroll_pct * (track_w - thumb_w);
@@ -608,8 +606,9 @@ where
                             let ratio = (computed.h / content_h).clamp(0.0, 1.0);
                             let thumb_h = (track_h * ratio)
                                 .clamp(sb_style.min_thumb_len.min(track_h), track_h);
+                            let cur_y = constraints.resolved_scroll_y(max_scroll_y);
                             let scroll_pct = if max_scroll_y > 0.0 {
-                                (constraints.scroll.y / max_scroll_y).clamp(0.0, 1.0)
+                                (cur_y / max_scroll_y).clamp(0.0, 1.0)
                             } else {
                                 0.0
                             };
@@ -650,8 +649,9 @@ where
                             let ratio = (computed.w / content_w).clamp(0.0, 1.0);
                             let thumb_w = (track_w * ratio)
                                 .clamp(sb_style.min_thumb_len.min(track_w), track_w);
+                            let cur_x = constraints.resolved_scroll_x(max_scroll_x);
                             let scroll_pct = if max_scroll_x > 0.0 {
-                                (constraints.scroll.x / max_scroll_x).clamp(0.0, 1.0)
+                                (cur_x / max_scroll_x).clamp(0.0, 1.0)
                             } else {
                                 0.0
                             };
@@ -702,8 +702,10 @@ where
                             let scroll_delta = (delta_y / track_travel) * max_scroll_y;
                             let new_scroll_y =
                                 (drag_start_scroll_y + scroll_delta).clamp(0.0, max_scroll_y);
-                            let prev_x = constraints.scroll.x;
-                            let prev_y = constraints.scroll.y;
+                            let content_w = computed.content_w.max(computed.w);
+                            let max_scroll_x = (content_w - computed.w).max(0.0);
+                            let prev_x = constraints.resolved_scroll_x(max_scroll_x);
+                            let prev_y = constraints.resolved_scroll_y(max_scroll_y);
                             node.update_constraints(&mut self.context, |c| {
                                 c.scroll.y = new_scroll_y;
                             });
@@ -767,8 +769,10 @@ where
                             let scroll_delta = (delta_x / track_travel) * max_scroll_x;
                             let new_scroll_x =
                                 (drag_start_scroll_x + scroll_delta).clamp(0.0, max_scroll_x);
-                            let prev_x = constraints.scroll.x;
-                            let prev_y = constraints.scroll.y;
+                            let content_h = node.compute_content_height(&self.context);
+                            let max_scroll_y = (content_h - computed.h).max(0.0);
+                            let prev_x = constraints.resolved_scroll_x(max_scroll_x);
+                            let prev_y = constraints.resolved_scroll_y(max_scroll_y);
                             node.update_constraints(&mut self.context, |c| {
                                 c.scroll.x = new_scroll_x;
                             });
@@ -947,23 +951,25 @@ where
                                                     eff_delta_x = eff_delta_y;
                                                     eff_delta_y = 0.0;
                                                 }
+                                                let cur_y =
+                                                    constraints.resolved_scroll_y(max_scroll_y);
+                                                let cur_x =
+                                                    constraints.resolved_scroll_x(max_scroll_x);
                                                 let new_scroll_y = if is_scrollable_y {
-                                                    (constraints.scroll.y - eff_delta_y)
-                                                        .clamp(0.0, max_scroll_y)
+                                                    (cur_y - eff_delta_y).clamp(0.0, max_scroll_y)
                                                 } else {
-                                                    constraints.scroll.y
+                                                    cur_y
                                                 };
                                                 let new_scroll_x = if is_scrollable_x {
-                                                    (constraints.scroll.x - eff_delta_x)
-                                                        .clamp(0.0, max_scroll_x)
+                                                    (cur_x - eff_delta_x).clamp(0.0, max_scroll_x)
                                                 } else {
-                                                    constraints.scroll.x
+                                                    cur_x
                                                 };
-                                                if new_scroll_y != constraints.scroll.y
-                                                    || new_scroll_x != constraints.scroll.x
+                                                if (new_scroll_y - cur_y).abs() > 0.001
+                                                    || (new_scroll_x - cur_x).abs() > 0.001
                                                 {
-                                                    let prev_x = constraints.scroll.x;
-                                                    let prev_y = constraints.scroll.y;
+                                                    let prev_x = cur_x;
+                                                    let prev_y = cur_y;
                                                     node.update_constraints(
                                                         &mut self.context,
                                                         |c| {
@@ -1015,12 +1021,12 @@ where
                                                 }
                                             }
                                         } else {
+                                            let cur_y = constraints.resolved_scroll_y(max_scroll_y);
+                                            let cur_x = constraints.resolved_scroll_x(max_scroll_x);
                                             let can_scroll_y = is_scrollable_y
-                                                && (max_scroll_y > 0.0
-                                                    || constraints.scroll.y > max_scroll_y);
+                                                && (max_scroll_y > 0.0 || cur_y > max_scroll_y);
                                             let can_scroll_x = is_scrollable_x
-                                                && (max_scroll_x > 0.0
-                                                    || constraints.scroll.x > max_scroll_x);
+                                                && (max_scroll_x > 0.0 || cur_x > max_scroll_x);
 
                                             if !can_scroll_y && !can_scroll_x {
                                                 continue;
@@ -1040,25 +1046,25 @@ where
                                                 eff_delta_y = 0.0;
                                             }
 
-                                            let mut new_scroll_y = constraints.scroll.y;
-                                            let mut new_scroll_x = constraints.scroll.x;
+                                            let mut new_scroll_y = cur_y;
+                                            let mut new_scroll_x = cur_x;
 
                                             if can_scroll_y {
-                                                new_scroll_y = (constraints.scroll.y - eff_delta_y)
-                                                    .clamp(0.0, max_scroll_y);
+                                                new_scroll_y =
+                                                    (cur_y - eff_delta_y).clamp(0.0, max_scroll_y);
                                             }
                                             if can_scroll_x {
-                                                new_scroll_x = (constraints.scroll.x - eff_delta_x)
-                                                    .clamp(0.0, max_scroll_x);
+                                                new_scroll_x =
+                                                    (cur_x - eff_delta_x).clamp(0.0, max_scroll_x);
                                             }
 
-                                            let scroll_changed = new_scroll_y
-                                                != constraints.scroll.y
-                                                || new_scroll_x != constraints.scroll.x;
+                                            let scroll_changed = (new_scroll_y - cur_y).abs()
+                                                > 0.001
+                                                || (new_scroll_x - cur_x).abs() > 0.001;
 
                                             if scroll_changed {
-                                                let prev_x = constraints.scroll.x;
-                                                let prev_y = constraints.scroll.y;
+                                                let prev_x = cur_x;
+                                                let prev_y = cur_y;
                                                 node.update_constraints(&mut self.context, |c| {
                                                     c.scroll.y = new_scroll_y;
                                                     c.scroll.x = new_scroll_x;
@@ -1139,8 +1145,11 @@ where
                                 let mut new_vy = cur_vy;
                                 let mut new_vx = cur_vx;
 
+                                let cur_y = constraints.resolved_scroll_y(max_scroll_y);
+                                let cur_x = constraints.resolved_scroll_x(max_scroll_x);
+
                                 if is_scrollable_y
-                                    && (max_scroll_y > 0.0 || constraints.scroll.y > max_scroll_y)
+                                    && (max_scroll_y > 0.0 || cur_y > max_scroll_y)
                                     && delta_y.abs() > 0.0
                                 {
                                     let impulse_y = -delta_y * 45.0;
@@ -1163,7 +1172,7 @@ where
                                 };
 
                                 if is_scrollable_x
-                                    && (max_scroll_x > 0.0 || constraints.scroll.x > max_scroll_x)
+                                    && (max_scroll_x > 0.0 || cur_x > max_scroll_x)
                                     && scroll_delta_x.abs() > 0.0
                                 {
                                     let impulse_x = -scroll_delta_x * 45.0;

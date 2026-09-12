@@ -353,6 +353,26 @@ impl Default for Constraints {
 }
 
 impl Constraints {
+    /// Resolves the vertical scroll offset in pixels, decoding percentage-encoded values (`< 0.0`) against `max_scroll_y`.
+    pub fn resolved_scroll_y(&self, max_scroll_y: f32) -> f32 {
+        if self.scroll.y < 0.0 {
+            let pct = (-self.scroll.y - 0.0001).clamp(0.0, 1.0);
+            pct * max_scroll_y
+        } else {
+            self.scroll.y
+        }
+    }
+
+    /// Resolves the horizontal scroll offset in pixels, decoding percentage-encoded values (`< 0.0`) against `max_scroll_x`.
+    pub fn resolved_scroll_x(&self, max_scroll_x: f32) -> f32 {
+        if self.scroll.x < 0.0 {
+            let pct = (-self.scroll.x - 0.0001).clamp(0.0, 1.0);
+            pct * max_scroll_x
+        } else {
+            self.scroll.x
+        }
+    }
+
     /// Merges non-default properties from `other` into `self`.
     pub fn merge(&mut self, other: &Constraints) {
         if other.width != Size::Fit {

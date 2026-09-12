@@ -95,31 +95,16 @@ impl<T, F, V> VirtualList<T, F, V> {
         self
     }
 
-    /// Sets the initial or programmatic vertical scroll offset.
-    pub fn start_offset_y(mut self, offset: ScrollOffset) -> Self {
+    /// Sets the vertical scroll offset
+    pub fn scroll_offset(mut self, offset: ScrollOffset) -> Self {
         self.offset = Some(offset);
         self
-    }
-
-    /// Sets the initial or programmatic vertical scroll offset (alias for [`start_offset_y`](Self::start_offset_y)).
-    pub fn start_offset(self, offset: ScrollOffset) -> Self {
-        self.start_offset_y(offset)
-    }
-
-    /// Sets the vertical scroll offset (alias for [`start_offset_y`](Self::start_offset_y)).
-    pub fn scroll_offset_y(self, offset: ScrollOffset) -> Self {
-        self.start_offset_y(offset)
-    }
-
-    /// Sets the vertical scroll offset (alias for [`start_offset_y`](Self::start_offset_y)).
-    pub fn scroll_offset(self, offset: ScrollOffset) -> Self {
-        self.start_offset_y(offset)
     }
 
     /// Sets the initial or programmatic scroll offset to a specific item index.
     pub fn start_offset_index(self, index: usize) -> Self {
         let px = index as f32 * self.item_height;
-        self.start_offset_y(ScrollOffset::Pixel(px))
+        self.scroll_offset(ScrollOffset::Pixel(px))
     }
 
     /// Sets the scroll offset to a specific item index (alias for [`start_offset_index`](Self::start_offset_index)).
@@ -241,18 +226,53 @@ where
         }
 
         if self.offset != prev.offset {
-            match self.offset {
+            let total_h = (self.count as f32 * self.item_height).round();
+            let viewport_h = element
+                .container_node
+                .get_computed(ctx)
+                .map(|c| c.h)
+                .unwrap_or(0.0);
+            let max_scroll_y = (total_h - viewport_h).max(0.0);
+
+            let is_already_at_offset = match self.offset {
                 Some(ScrollOffset::Pixel(py)) => {
-                    element
+                    let cur_y = element
                         .container_node
-                        .update_constraints(ctx, |c| c.scroll.y = py);
+                        .get_constraints(ctx)
+                        .map(|c| c.resolved_scroll_y(max_scroll_y))
+                        .unwrap_or(0.0);
+                    (cur_y - py).abs() <= 1.0
                 }
                 Some(ScrollOffset::Percent(pct)) => {
-                    element
-                        .container_node
-                        .update_constraints(ctx, |c| c.scroll.y = -pct.abs() - 0.0001);
+                    if max_scroll_y > 0.0 {
+                        let cur_y = element
+                            .container_node
+                            .get_constraints(ctx)
+                            .map(|c| c.resolved_scroll_y(max_scroll_y))
+                            .unwrap_or(0.0);
+                        let target_y = pct.clamp(0.0, 1.0) * max_scroll_y;
+                        (cur_y - target_y).abs() <= 1.0
+                    } else {
+                        false
+                    }
                 }
-                None => {}
+                None => true,
+            };
+
+            if !is_already_at_offset {
+                match self.offset {
+                    Some(ScrollOffset::Pixel(py)) => {
+                        element
+                            .container_node
+                            .update_constraints(ctx, |c| c.scroll.y = py);
+                    }
+                    Some(ScrollOffset::Percent(pct)) => {
+                        element
+                            .container_node
+                            .update_constraints(ctx, |c| c.scroll.y = -pct.abs() - 0.0001);
+                    }
+                    None => {}
+                }
             }
         }
 
@@ -668,5 +688,51 @@ mod tests {
         assert!(end2 > 100);
 
         View::<()>::teardown(&widget_v2, &mut ctx, &mut element);
+    }
+
+    #[test]
+    fn test_virtual_list_percent_offset_resolved_scroll() {
+        let mut ctx = Context::new();
+        fn render_row(idx: usize) -> crate::ui::widgets::Text<()> {
+            text::<String, ()>(format!("Row {idx}"))
+        }
+
+        let widget =
+            virtual_list_count(1000, 30.0, render_row).scroll_offset(ScrollOffset::Percent(0.35));
+        let mut element = View::<()>::build(&widget, &mut ctx);
+
+        let constraints = element.container_node.get_constraints(&ctx).unwrap();
+        assert!(constraints.scroll.y < 0.0);
+
+        let total_h = 1000.0 * 30.0;
+        let viewport_h = 600.0;
+        let max_scroll_y = total_h - viewport_h;
+
+        let resolved = constraints.resolved_scroll_y(max_scroll_y);
+        assert!((resolved - 0.35 * max_scroll_y).abs() < 1.0);
+
+        ctx.root_attach(element.container_node);
+        ctx.compute_layout(800.0, 600.0);
+
+        let scroll_ctx = crate::ScrollContext::from_node(
+            element.container_node,
+            &ctx,
+            0.0,
+            0.0,
+            crate::ui::event::ScrollSource::Touchpad,
+        )
+        .unwrap();
+        assert!((scroll_ctx.scroll_pct_y - 0.35).abs() < 0.01);
+        assert!((scroll_ctx.scroll_y - 0.35 * scroll_ctx.max_scroll_y).abs() < 1.0);
+
+        let widget_same =
+            virtual_list_count(1000, 30.0, render_row).scroll_offset(ScrollOffset::Percent(0.35));
+        View::<()>::rebuild(&widget_same, &widget, &mut ctx, &mut element);
+
+        let cons_after = element.container_node.get_constraints(&ctx).unwrap();
+        let resolved_after = cons_after.resolved_scroll_y(max_scroll_y);
+        assert!((resolved_after - resolved).abs() < 1.0);
+
+        View::<()>::teardown(&widget, &mut ctx, &mut element);
     }
 }

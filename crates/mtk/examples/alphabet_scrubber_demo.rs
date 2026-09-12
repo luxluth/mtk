@@ -10,7 +10,7 @@ use mtk::ui::event::{ThumbScrollContext, ViewEventExt};
 use mtk::ui::style::StyledView;
 use mtk::ui::widgets::{Text, column, row, spacer, text, virtual_list};
 use mtk::windowing::{Window, WindowAttributes};
-use mtk::{clr, rgba};
+use mtk::{ScrollContext, ScrollOffset, clr, rgba};
 
 #[derive(Clone)]
 struct Contact {
@@ -32,6 +32,7 @@ struct AppState {
 #[derive(Clone, Debug)]
 enum AppMsg {
     ThumbScrolled(ThumbScrollContext),
+    Scrolled(ScrollContext),
 }
 
 fn update(state: &mut AppState, msg: AppMsg) {
@@ -43,6 +44,9 @@ fn update(state: &mut AppState, msg: AppMsg) {
 
             let letter_idx = ((ctx.scroll_pct * 25.99) as usize).clamp(0, 25);
             state.scrub_letter = (b'A' + letter_idx as u8) as char;
+        }
+        AppMsg::Scrolled(ctx) => {
+            state.scroll_pct = ctx.scroll_pct();
         }
     }
 }
@@ -651,6 +655,8 @@ fn main() {
                 .min_height(0.0)
                 .bg_color(clr!(0xffffffff)),
         )
+        .scroll_offset(ScrollOffset::Percent(0.5))
+        .on_scroll(|_state, ctx| Some(AppMsg::Scrolled(ctx)))
         .on_thumb_scroll(|_state, ctx| Some(AppMsg::ThumbScrolled(ctx)));
 
         // Floating alphabet scrubber badge (follows thumb during drag scrub)

@@ -584,8 +584,8 @@ impl ScrollContext {
         let max_scroll_x = (content_w - computed.w).max(0.0);
         let max_scroll_y = (content_h - computed.h).max(0.0);
 
-        let scroll_x = constraints.scroll.x;
-        let scroll_y = constraints.scroll.y;
+        let scroll_x = constraints.resolved_scroll_x(max_scroll_x);
+        let scroll_y = constraints.resolved_scroll_y(max_scroll_y);
 
         let scroll_pct_x = if max_scroll_x > 0.0 {
             (scroll_x / max_scroll_x).clamp(0.0, 1.0)
@@ -599,8 +599,21 @@ impl ScrollContext {
             0.0
         };
 
-        let delta_x = scroll_x - prev_scroll_x;
-        let delta_y = scroll_y - prev_scroll_y;
+        let prev_x = if prev_scroll_x < 0.0 {
+            let pct = (-prev_scroll_x - 0.0001).clamp(0.0, 1.0);
+            pct * max_scroll_x
+        } else {
+            prev_scroll_x
+        };
+        let prev_y = if prev_scroll_y < 0.0 {
+            let pct = (-prev_scroll_y - 0.0001).clamp(0.0, 1.0);
+            pct * max_scroll_y
+        } else {
+            prev_scroll_y
+        };
+
+        let delta_x = scroll_x - prev_x;
+        let delta_y = scroll_y - prev_y;
 
         Some(Self {
             scroll_x,

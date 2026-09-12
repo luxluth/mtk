@@ -199,32 +199,101 @@ where
         }
         if self.initial_x != prev.initial_x {
             if let Some(offset) = self.initial_x {
-                match offset {
+                let (computed_w, content_w) =
+                    if let Some(comp) = element.container_node.get_computed(ctx) {
+                        (comp.w, comp.content_w.max(comp.w))
+                    } else {
+                        (0.0, 0.0)
+                    };
+                let max_scroll_x = (content_w - computed_w).max(0.0);
+
+                let is_already_at = match offset {
                     ScrollOffset::Pixel(px) => {
-                        element
+                        let cur_x = element
                             .container_node
-                            .update_constraints(ctx, |c| c.scroll.x = px);
+                            .get_constraints(ctx)
+                            .map(|c| c.resolved_scroll_x(max_scroll_x))
+                            .unwrap_or(0.0);
+                        (cur_x - px).abs() <= 1.0
                     }
                     ScrollOffset::Percent(pct) => {
-                        element
-                            .container_node
-                            .update_constraints(ctx, |c| c.scroll.x = -pct.abs() - 0.0001);
+                        if max_scroll_x > 0.0 {
+                            let cur_x = element
+                                .container_node
+                                .get_constraints(ctx)
+                                .map(|c| c.resolved_scroll_x(max_scroll_x))
+                                .unwrap_or(0.0);
+                            let target_x = pct.clamp(0.0, 1.0) * max_scroll_x;
+                            (cur_x - target_x).abs() <= 1.0
+                        } else {
+                            false
+                        }
+                    }
+                };
+
+                if !is_already_at {
+                    match offset {
+                        ScrollOffset::Pixel(px) => {
+                            element
+                                .container_node
+                                .update_constraints(ctx, |c| c.scroll.x = px);
+                        }
+                        ScrollOffset::Percent(pct) => {
+                            element
+                                .container_node
+                                .update_constraints(ctx, |c| c.scroll.x = -pct.abs() - 0.0001);
+                        }
                     }
                 }
             }
         }
         if self.initial_y != prev.initial_y {
             if let Some(offset) = self.initial_y {
-                match offset {
+                let (computed_h, content_h) =
+                    if let Some(comp) = element.container_node.get_computed(ctx) {
+                        let ch = element.container_node.compute_content_height(ctx);
+                        (comp.h, ch)
+                    } else {
+                        (0.0, 0.0)
+                    };
+                let max_scroll_y = (content_h - computed_h).max(0.0);
+
+                let is_already_at = match offset {
                     ScrollOffset::Pixel(py) => {
-                        element
+                        let cur_y = element
                             .container_node
-                            .update_constraints(ctx, |c| c.scroll.y = py);
+                            .get_constraints(ctx)
+                            .map(|c| c.resolved_scroll_y(max_scroll_y))
+                            .unwrap_or(0.0);
+                        (cur_y - py).abs() <= 1.0
                     }
                     ScrollOffset::Percent(pct) => {
-                        element
-                            .container_node
-                            .update_constraints(ctx, |c| c.scroll.y = -pct.abs() - 0.0001);
+                        if max_scroll_y > 0.0 {
+                            let cur_y = element
+                                .container_node
+                                .get_constraints(ctx)
+                                .map(|c| c.resolved_scroll_y(max_scroll_y))
+                                .unwrap_or(0.0);
+                            let target_y = pct.clamp(0.0, 1.0) * max_scroll_y;
+                            (cur_y - target_y).abs() <= 1.0
+                        } else {
+                            false
+                        }
+                    }
+                };
+
+                if !is_already_at {
+                    match offset {
+                        ScrollOffset::Pixel(py) => {
+                            element
+                                .container_node
+                                .update_constraints(ctx, |c| c.scroll.y = py);
+                        }
+                        ScrollOffset::Percent(pct) => {
+                            element
+                                .container_node
+                                .update_constraints(ctx, |c| c.scroll.y = -pct.abs() - 0.0001);
+                        }
                     }
                 }
             }
