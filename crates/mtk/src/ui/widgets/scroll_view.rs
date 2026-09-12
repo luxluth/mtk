@@ -25,6 +25,34 @@ pub enum ScrollOffset {
     Pixel(f32),
 }
 
+impl ScrollOffset {
+    /// Constructs a percentage-based scroll offset (0.0 = top/left, 1.0 = bottom/right).
+    pub fn percent(p: f32) -> Self {
+        Self::Percent(p)
+    }
+
+    /// Constructs an absolute pixel-based scroll offset.
+    pub fn pixel(px: f32) -> Self {
+        Self::Pixel(px)
+    }
+
+    /// Shortcut for scrolling to the top or start (0% offset).
+    pub fn top() -> Self {
+        Self::Percent(0.0)
+    }
+
+    /// Shortcut for scrolling to the bottom or end (100% offset).
+    pub fn bottom() -> Self {
+        Self::Percent(1.0)
+    }
+}
+
+impl Default for ScrollOffset {
+    fn default() -> Self {
+        Self::Percent(0.0)
+    }
+}
+
 pub struct DefaultScrollBar;
 pub struct NoScrollBar;
 
@@ -75,6 +103,21 @@ impl<V> ScrollView<V> {
     pub fn start_offset_y(mut self, offset: ScrollOffset) -> Self {
         self.initial_y = Some(offset);
         self
+    }
+
+    /// Sets the horizontal scroll offset (alias for [`start_offset_x`](Self::start_offset_x)).
+    pub fn scroll_offset_x(self, offset: ScrollOffset) -> Self {
+        self.start_offset_x(offset)
+    }
+
+    /// Sets the vertical scroll offset (alias for [`start_offset_y`](Self::start_offset_y)).
+    pub fn scroll_offset_y(self, offset: ScrollOffset) -> Self {
+        self.start_offset_y(offset)
+    }
+
+    /// Sets the vertical scroll offset (alias for [`start_offset_y`](Self::start_offset_y)).
+    pub fn scroll_offset(self, offset: ScrollOffset) -> Self {
+        self.start_offset_y(offset)
     }
 
     pub fn scrollbar(mut self, scrollbar: ScrollbarStyle) -> Self {
@@ -153,6 +196,38 @@ where
         });
         if let Some(sb) = &self.scrollbar_style {
             element.container_node.set_scrollbar_style(ctx, sb.clone());
+        }
+        if self.initial_x != prev.initial_x {
+            if let Some(offset) = self.initial_x {
+                match offset {
+                    ScrollOffset::Pixel(px) => {
+                        element
+                            .container_node
+                            .update_constraints(ctx, |c| c.scroll.x = px);
+                    }
+                    ScrollOffset::Percent(pct) => {
+                        element
+                            .container_node
+                            .update_constraints(ctx, |c| c.scroll.x = -pct.abs() - 0.0001);
+                    }
+                }
+            }
+        }
+        if self.initial_y != prev.initial_y {
+            if let Some(offset) = self.initial_y {
+                match offset {
+                    ScrollOffset::Pixel(py) => {
+                        element
+                            .container_node
+                            .update_constraints(ctx, |c| c.scroll.y = py);
+                    }
+                    ScrollOffset::Percent(pct) => {
+                        element
+                            .container_node
+                            .update_constraints(ctx, |c| c.scroll.y = -pct.abs() - 0.0001);
+                    }
+                }
+            }
         }
         self.inner
             .rebuild(&prev.inner, ctx, &mut element.inner_element);

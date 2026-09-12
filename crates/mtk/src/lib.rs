@@ -37,7 +37,8 @@ pub use crate::ui::widgets::canvas::{
     CanvasData, CanvasEventDetails, CanvasPainterKind, PaintContext, PixelPainter, WgpuPainter,
 };
 pub use crate::ui::widgets::{
-    CheckboxStyle, RadioGroup, RadioStyle, SwitchStyle, TooltipAnimation, TooltipPlacement,
+    CheckboxStyle, RadioGroup, RadioStyle, ScrollAxis, ScrollOffset, SwitchStyle, TooltipAnimation,
+    TooltipPlacement,
 };
 pub use crate::ui::{
     DragContext, DragPhase, Focusable, FocusableExt, KeyEvent, KeyEventContext, Keyed,

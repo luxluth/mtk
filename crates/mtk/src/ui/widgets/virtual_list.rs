@@ -1,3 +1,4 @@
+use super::scroll_view::ScrollOffset;
 use crate::debugger::SourceLocation;
 use crate::{
     Context, Node,
@@ -16,6 +17,7 @@ pub struct VirtualList<T, F, V> {
     pub(crate) source_loc: Option<SourceLocation>,
     pub(crate) scrollbar_style: Option<ScrollbarStyle>,
     pub(crate) scrollbar_visible: bool,
+    pub(crate) offset: Option<ScrollOffset>,
     pub(crate) _marker: std::marker::PhantomData<V>,
 }
 
@@ -36,6 +38,7 @@ where
         source_loc: Some(SourceLocation::here("VirtualList")),
         scrollbar_style: None,
         scrollbar_visible: true,
+        offset: None,
         _marker: std::marker::PhantomData,
     }
 }
@@ -60,6 +63,7 @@ where
         source_loc: Some(SourceLocation::here("VirtualList")),
         scrollbar_style: None,
         scrollbar_visible: true,
+        offset: None,
         _marker: std::marker::PhantomData,
     }
 }
@@ -89,6 +93,38 @@ impl<T, F, V> VirtualList<T, F, V> {
             sb.visibility = ScrollbarVisibility::Never;
         }
         self
+    }
+
+    /// Sets the initial or programmatic vertical scroll offset.
+    pub fn start_offset_y(mut self, offset: ScrollOffset) -> Self {
+        self.offset = Some(offset);
+        self
+    }
+
+    /// Sets the initial or programmatic vertical scroll offset (alias for [`start_offset_y`](Self::start_offset_y)).
+    pub fn start_offset(self, offset: ScrollOffset) -> Self {
+        self.start_offset_y(offset)
+    }
+
+    /// Sets the vertical scroll offset (alias for [`start_offset_y`](Self::start_offset_y)).
+    pub fn scroll_offset_y(self, offset: ScrollOffset) -> Self {
+        self.start_offset_y(offset)
+    }
+
+    /// Sets the vertical scroll offset (alias for [`start_offset_y`](Self::start_offset_y)).
+    pub fn scroll_offset(self, offset: ScrollOffset) -> Self {
+        self.start_offset_y(offset)
+    }
+
+    /// Sets the initial or programmatic scroll offset to a specific item index.
+    pub fn start_offset_index(self, index: usize) -> Self {
+        let px = index as f32 * self.item_height;
+        self.start_offset_y(ScrollOffset::Pixel(px))
+    }
+
+    /// Sets the scroll offset to a specific item index (alias for [`start_offset_index`](Self::start_offset_index)).
+    pub fn scroll_to_index(self, index: usize) -> Self {
+        self.start_offset_index(index)
     }
 }
 
@@ -132,6 +168,16 @@ where
         });
         if let Some(sb) = &self.scrollbar_style {
             container_node.set_scrollbar_style(ctx, sb.clone());
+        }
+
+        match self.offset {
+            Some(ScrollOffset::Pixel(py)) => {
+                container_node.update_constraints(ctx, |c| c.scroll.y = py);
+            }
+            Some(ScrollOffset::Percent(pct)) => {
+                container_node.update_constraints(ctx, |c| c.scroll.y = -pct.abs() - 0.0001);
+            }
+            None => {}
         }
 
         let total_h = (self.count as f32 * self.item_height).round() as u32;
@@ -182,7 +228,7 @@ where
         element
     }
 
-    fn rebuild(&self, _prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
+    fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
         if let Some(style) = &self.custom_style {
             style.apply_to_node(ctx, element.container_node);
         }
@@ -192,6 +238,22 @@ where
         });
         if let Some(sb) = &self.scrollbar_style {
             element.container_node.set_scrollbar_style(ctx, sb.clone());
+        }
+
+        if self.offset != prev.offset {
+            match self.offset {
+                Some(ScrollOffset::Pixel(py)) => {
+                    element
+                        .container_node
+                        .update_constraints(ctx, |c| c.scroll.y = py);
+                }
+                Some(ScrollOffset::Percent(pct)) => {
+                    element
+                        .container_node
+                        .update_constraints(ctx, |c| c.scroll.y = -pct.abs() - 0.0001);
+                }
+                None => {}
+            }
         }
 
         let total_h = (self.count as f32 * self.item_height).round() as u32;
@@ -249,7 +311,9 @@ where
             Event::MouseWheel { .. }
                 | Event::Tick { .. }
                 | Event::ThumbScroll { .. }
+                | Event::Scroll { .. }
                 | Event::CursorMoved { .. }
+                | Event::WindowResized(..)
         ) {
             self.sync_visible_range(ctx, element, false);
         }
@@ -269,12 +333,11 @@ impl<T, F, V> VirtualList<T, F, V> {
         V: View<State, Message = Msg>,
         T: 'static,
     {
-        let scroll_y = element
+        let raw_scroll_y = element
             .container_node
             .get_constraints(ctx)
             .map(|c| c.scroll.y)
-            .unwrap_or(0.0)
-            .max(0.0);
+            .unwrap_or(0.0);
 
         let viewport_h = element
             .container_node
@@ -284,7 +347,19 @@ impl<T, F, V> VirtualList<T, F, V> {
             .max(50.0);
 
         let item_h = self.item_height.max(1.0);
-        let start_idx = ((scroll_y / item_h).floor() as usize).saturating_sub(self.buffer);
+        let total_h = self.count as f32 * item_h;
+
+        let scroll_y = if raw_scroll_y < 0.0 {
+            let pct = (-raw_scroll_y - 0.0001).clamp(0.0, 1.0);
+            let max_scroll = (total_h - viewport_h).max(0.0);
+            pct * max_scroll
+        } else {
+            raw_scroll_y
+        };
+
+        let start_idx = ((scroll_y / item_h).floor() as usize)
+            .saturating_sub(self.buffer)
+            .min(self.count);
         let visible_count = ((viewport_h / item_h).ceil() as usize) + (self.buffer * 2);
         let end_idx = (start_idx + visible_count).min(self.count);
 
@@ -510,5 +585,88 @@ mod tests {
         assert!(element.0.1.1.visible_elements.len() <= 30);
 
         View::<()>::teardown(&root_view, &mut ctx, &mut element);
+    }
+
+    #[test]
+    fn test_virtual_list_start_offset_pixel_and_index() {
+        let mut ctx = Context::new();
+        let items: Vec<String> = (0..1000).map(|i| format!("Row {i}")).collect();
+
+        // 1. start_offset_index(50) with item_height = 30.0 -> pixel offset 1500.0
+        let widget = virtual_list(items.clone(), 30.0, |_idx, item| {
+            text::<_, ()>(item.clone()).style(Style::new().height(Size::Fixed(30)))
+        })
+        .start_offset_index(50);
+
+        let mut element = View::<()>::build(&widget, &mut ctx);
+
+        let constraints = element.container_node.get_constraints(&ctx).unwrap();
+        assert_eq!(constraints.scroll.y, 1500.0);
+
+        let (start, end) = element.rendered_range;
+        assert!(start >= 46 && start <= 50);
+        assert!(end > 50);
+
+        View::<()>::teardown(&widget, &mut ctx, &mut element);
+    }
+
+    #[test]
+    fn test_virtual_list_start_offset_percent() {
+        let mut ctx = Context::new();
+        let items: Vec<String> = (0..1000).map(|i| format!("Row {i}")).collect();
+
+        // 50% scroll offset on 1000 items (total height 30,000px)
+        let widget = virtual_list(items, 30.0, |_idx, item| {
+            text::<_, ()>(item.clone()).style(Style::new().height(Size::Fixed(30)))
+        })
+        .scroll_offset(ScrollOffset::percent(0.5));
+
+        let mut element = View::<()>::build(&widget, &mut ctx);
+
+        // Pre-layout sync encodes negative percentage offset and translates to around 50%
+        let (start, end) = element.rendered_range;
+        assert!(start >= 450 && start <= 500, "start={start}");
+        assert!(end > start);
+
+        View::<()>::teardown(&widget, &mut ctx, &mut element);
+    }
+
+    #[test]
+    fn test_virtual_list_rebuild_offset_change() {
+        let mut ctx = Context::new();
+        fn render_row(idx: usize) -> crate::ui::widgets::Text<()> {
+            text::<String, ()>(format!("Row {idx}"))
+        }
+
+        let widget_v1 = virtual_list_count(1000, 30.0, render_row).scroll_to_index(10);
+
+        let mut element = View::<()>::build(&widget_v1, &mut ctx);
+        let (start1, _) = element.rendered_range;
+        assert!(start1 <= 10);
+
+        // Simulate manual user scrolling to item 30
+        element.container_node.update_constraints(&mut ctx, |c| {
+            c.scroll.y = 900.0;
+        });
+
+        // Rebuilding with SAME offset preserves user's manual scroll
+        let widget_v1_same = virtual_list_count(1000, 30.0, render_row).scroll_to_index(10);
+
+        View::<()>::rebuild(&widget_v1_same, &widget_v1, &mut ctx, &mut element);
+        let cons = element.container_node.get_constraints(&ctx).unwrap();
+        assert_eq!(cons.scroll.y, 900.0);
+
+        // Rebuilding with DIFFERENT offset triggers programmatic jump
+        let widget_v2 = virtual_list_count(1000, 30.0, render_row).scroll_to_index(100);
+
+        View::<()>::rebuild(&widget_v2, &widget_v1_same, &mut ctx, &mut element);
+        let cons2 = element.container_node.get_constraints(&ctx).unwrap();
+        assert_eq!(cons2.scroll.y, 3000.0);
+
+        let (start2, end2) = element.rendered_range;
+        assert!(start2 >= 96 && start2 <= 100);
+        assert!(end2 > 100);
+
+        View::<()>::teardown(&widget_v2, &mut ctx, &mut element);
     }
 }
