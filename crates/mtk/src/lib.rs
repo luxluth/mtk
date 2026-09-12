@@ -41,7 +41,8 @@ pub use crate::ui::widgets::{
 };
 pub use crate::ui::{
     DragContext, DragPhase, Focusable, FocusableExt, KeyEvent, KeyEventContext, Keyed,
-    KeyedViewSequence, ViewStyleExt, keyed, keyed_sequence,
+    KeyedViewSequence, ScrollContext, ScrollHandler, ScrollSource, ThumbScrollContext,
+    ThumbScrollHandler, ViewEventExt, ViewStyleExt, keyed, keyed_sequence,
 };
 pub use accesskit::{Action, ActionData, ActionRequest, Role, TreeUpdate};
 use std::cell::RefCell;

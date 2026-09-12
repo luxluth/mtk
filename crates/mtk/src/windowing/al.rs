@@ -18,7 +18,7 @@ use crate::{
     Context, Node, TextStyle,
     command::{Command, IntoCommand},
     style::{Rect, ScrollbarVisibility},
-    ui::{Event, ThumbScrollContext, View, event::EventResult},
+    ui::{Event, ScrollContext, ScrollSource, ThumbScrollContext, View, event::EventResult},
     windowing::renderer::Renderer,
 };
 
@@ -84,6 +84,7 @@ where
     cursor_pos: (f32, f32),
     last_frame_time: Instant,
     scroll_trackers: HashMap<Node, crate::ui::KineticTracker>,
+    scroll_tracker_sources: HashMap<Node, ScrollSource>,
     touch_scroll_states: HashMap<Node, TouchScrollState>,
     drag_scroll_node: Option<(Node, f32, f32)>,
     drag_scroll_x_node: Option<(Node, f32, f32)>,
@@ -272,6 +273,7 @@ where
             cursor_pos: (0.0, 0.0),
             last_frame_time: Instant::now(),
             scroll_trackers: HashMap::new(),
+            scroll_tracker_sources: HashMap::new(),
             touch_scroll_states: HashMap::new(),
             drag_scroll_node: None,
             drag_scroll_x_node: None,
@@ -391,6 +393,8 @@ where
                 }
             }
 
+            let mut scroll_events: Vec<Event> = Vec::new();
+
             // A) Tick kinetic velocity simulation for physical momentum scrolling
             if let Event::Tick { dt } = mtk_event {
                 let mut is_animating = false;
@@ -433,19 +437,37 @@ where
                             if (next_scroll_y - constraints.scroll.y).abs() > 0.001
                                 || (next_scroll_x - constraints.scroll.x).abs() > 0.001
                             {
+                                let prev_x = constraints.scroll.x;
+                                let prev_y = constraints.scroll.y;
                                 node.update_constraints(&mut self.context, |c| {
                                     c.scroll.y = next_scroll_y;
                                     c.scroll.x = next_scroll_x;
                                 });
+                                let source = self
+                                    .scroll_tracker_sources
+                                    .get(&node)
+                                    .copied()
+                                    .unwrap_or(ScrollSource::Kinetic);
+                                if let Some(context) = ScrollContext::from_node(
+                                    node,
+                                    &self.context,
+                                    prev_x,
+                                    prev_y,
+                                    source,
+                                ) {
+                                    scroll_events.push(Event::Scroll { node, context });
+                                }
                             }
 
                             if tracker.is_active() {
                                 is_animating = true;
                             } else {
                                 self.scroll_trackers.remove(&node);
+                                self.scroll_tracker_sources.remove(&node);
                             }
                         } else {
                             self.scroll_trackers.remove(&node);
+                            self.scroll_tracker_sources.remove(&node);
                         }
                     }
                 }
@@ -680,10 +702,13 @@ where
                             let scroll_delta = (delta_y / track_travel) * max_scroll_y;
                             let new_scroll_y =
                                 (drag_start_scroll_y + scroll_delta).clamp(0.0, max_scroll_y);
+                            let prev_x = constraints.scroll.x;
+                            let prev_y = constraints.scroll.y;
                             node.update_constraints(&mut self.context, |c| {
                                 c.scroll.y = new_scroll_y;
                             });
                             self.scroll_trackers.remove(&node);
+                            self.scroll_tracker_sources.remove(&node);
                             if let Some(window) = &self.window {
                                 window.request_redraw();
                             }
@@ -708,6 +733,17 @@ where
                                     is_dragging: true,
                                 },
                             });
+                            if (new_scroll_y - prev_y).abs() > 0.001 {
+                                if let Some(context) = ScrollContext::from_node(
+                                    node,
+                                    &self.context,
+                                    prev_x,
+                                    prev_y,
+                                    ScrollSource::Thumb,
+                                ) {
+                                    scroll_events.push(Event::Scroll { node, context });
+                                }
+                            }
                         }
                     }
                 }
@@ -731,10 +767,13 @@ where
                             let scroll_delta = (delta_x / track_travel) * max_scroll_x;
                             let new_scroll_x =
                                 (drag_start_scroll_x + scroll_delta).clamp(0.0, max_scroll_x);
+                            let prev_x = constraints.scroll.x;
+                            let prev_y = constraints.scroll.y;
                             node.update_constraints(&mut self.context, |c| {
                                 c.scroll.x = new_scroll_x;
                             });
                             self.scroll_trackers.remove(&node);
+                            self.scroll_tracker_sources.remove(&node);
                             if let Some(window) = &self.window {
                                 window.request_redraw();
                             }
@@ -759,6 +798,17 @@ where
                                     is_dragging: true,
                                 },
                             });
+                            if (new_scroll_x - prev_x).abs() > 0.001 {
+                                if let Some(context) = ScrollContext::from_node(
+                                    node,
+                                    &self.context,
+                                    prev_x,
+                                    prev_y,
+                                    ScrollSource::Thumb,
+                                ) {
+                                    scroll_events.push(Event::Scroll { node, context });
+                                }
+                            }
                         }
                     }
                 }
@@ -868,6 +918,7 @@ where
                                 match phase {
                                     TouchPhase::Started => {
                                         if self.scroll_trackers.remove(node).is_some() {
+                                            self.scroll_tracker_sources.remove(node);
                                             scrolled = true;
                                         }
                                         if max_scroll_y > 0.0 || max_scroll_x > 0.0 {
@@ -911,6 +962,8 @@ where
                                                 if new_scroll_y != constraints.scroll.y
                                                     || new_scroll_x != constraints.scroll.x
                                                 {
+                                                    let prev_x = constraints.scroll.x;
+                                                    let prev_y = constraints.scroll.y;
                                                     node.update_constraints(
                                                         &mut self.context,
                                                         |c| {
@@ -919,6 +972,18 @@ where
                                                         },
                                                     );
                                                     scrolled = true;
+                                                    if let Some(context) = ScrollContext::from_node(
+                                                        *node,
+                                                        &self.context,
+                                                        prev_x,
+                                                        prev_y,
+                                                        ScrollSource::Touchpad,
+                                                    ) {
+                                                        scroll_events.push(Event::Scroll {
+                                                            node: *node,
+                                                            context,
+                                                        });
+                                                    }
                                                 }
                                                 if let Some(state) =
                                                     self.touch_scroll_states.get_mut(node)
@@ -944,6 +1009,8 @@ where
                                                         crate::ui::KineticTracker::new(4.8);
                                                     tracker.set_velocity(vx, vy);
                                                     self.scroll_trackers.insert(*node, tracker);
+                                                    self.scroll_tracker_sources
+                                                        .insert(*node, ScrollSource::Kinetic);
                                                     scrolled = true;
                                                 }
                                             }
@@ -990,11 +1057,25 @@ where
                                                 || new_scroll_x != constraints.scroll.x;
 
                                             if scroll_changed {
+                                                let prev_x = constraints.scroll.x;
+                                                let prev_y = constraints.scroll.y;
                                                 node.update_constraints(&mut self.context, |c| {
                                                     c.scroll.y = new_scroll_y;
                                                     c.scroll.x = new_scroll_x;
                                                 });
                                                 scrolled = true;
+                                                if let Some(context) = ScrollContext::from_node(
+                                                    *node,
+                                                    &self.context,
+                                                    prev_x,
+                                                    prev_y,
+                                                    ScrollSource::Touchpad,
+                                                ) {
+                                                    scroll_events.push(Event::Scroll {
+                                                        node: *node,
+                                                        context,
+                                                    });
+                                                }
                                             }
 
                                             if scrolled
@@ -1005,6 +1086,7 @@ where
                                                     .entry(*node)
                                                     .or_insert_with(|| {
                                                         self.scroll_trackers.remove(node);
+                                                        self.scroll_tracker_sources.remove(node);
                                                         let mut tracker =
                                                             crate::ui::KineticTracker::new(4.8);
                                                         tracker.on_press(0.0, 0.0);
@@ -1033,12 +1115,15 @@ where
                                                     crate::ui::KineticTracker::new(4.8);
                                                 tracker.set_velocity(vx, vy);
                                                 self.scroll_trackers.insert(*node, tracker);
+                                                self.scroll_tracker_sources
+                                                    .insert(*node, ScrollSource::Kinetic);
                                                 scrolled = true;
                                             }
                                         }
                                     }
                                     TouchPhase::Cancelled => {
                                         self.touch_scroll_states.remove(node);
+                                        self.scroll_tracker_sources.remove(node);
                                         if self.scroll_trackers.remove(node).is_some() {
                                             scrolled = true;
                                         }
@@ -1099,6 +1184,8 @@ where
                                         .unwrap_or_else(|| crate::ui::KineticTracker::new(4.8));
                                     tracker.set_velocity(new_vx, new_vy);
                                     self.scroll_trackers.insert(*node, tracker);
+                                    self.scroll_tracker_sources
+                                        .insert(*node, ScrollSource::Wheel);
                                 }
                             }
 
@@ -1126,6 +1213,8 @@ where
                                         let mut tracker = crate::ui::KineticTracker::new(4.8);
                                         tracker.set_velocity(vx, vy);
                                         self.scroll_trackers.insert(node, tracker);
+                                        self.scroll_tracker_sources
+                                            .insert(node, ScrollSource::Kinetic);
                                         if let Some(window) = &self.window {
                                             window.request_redraw();
                                         }
@@ -1134,6 +1223,21 @@ where
                             }
                         }
                     }
+                }
+            }
+
+            for scroll_ev in scroll_events {
+                let (_scroll_res, scroll_msg) =
+                    view.handle_event(element, &self.state, scroll_ev, &mut self.context);
+                if let Some(msg) = scroll_msg {
+                    let cmd = update_fn(&mut self.state, msg);
+                    Self::execute_command_inner(
+                        &mut self.context,
+                        &self.msg_tx,
+                        &self.event_proxy,
+                        cmd,
+                    );
+                    state_changed = true;
                 }
             }
 
@@ -2002,5 +2106,144 @@ mod tests {
             window.state, 1,
             "Button click should be triggered by stylus tap via pointer fallback"
         );
+    }
+
+    #[test]
+    fn test_on_scroll_integration() {
+        use crate::ui::ViewEventExt;
+        use crate::ui::style::ViewStyleExt;
+        use crate::ui::widgets::{column, scroll_view, text};
+
+        #[derive(Debug, Clone, PartialEq)]
+        struct ScrollInfo {
+            scroll_y: f32,
+            source: ScrollSource,
+        }
+
+        #[derive(Debug, Clone)]
+        enum Msg {
+            Scrolled(ScrollInfo),
+        }
+
+        let mut window = Window::with(
+            Vec::<ScrollInfo>::new(),
+            |state: &mut Vec<ScrollInfo>, msg: Msg| match msg {
+                Msg::Scrolled(info) => {
+                    state.push(info);
+                }
+            },
+            |_state: &Vec<ScrollInfo>| {
+                scroll_view(
+                    column((
+                        text("Item 1"),
+                        text("Item 2"),
+                        text("Item 3"),
+                        text("Item 4"),
+                        text("Item 5"),
+                    ))
+                    .style(
+                        crate::style::Style::new()
+                            .width(crate::style::Size::Fixed(200))
+                            .height(crate::style::Size::Fixed(600)),
+                    ),
+                )
+                .style(
+                    crate::style::Style::new()
+                        .width(crate::style::Size::Fixed(200))
+                        .height(crate::style::Size::Fixed(100)),
+                )
+                .on_scroll(|_state, ctx| {
+                    Some(Msg::Scrolled(ScrollInfo {
+                        scroll_y: ctx.scroll_y,
+                        source: ctx.source,
+                    }))
+                })
+            },
+        );
+
+        window.context.compute_layout(400.0, 400.0);
+        window.context.build_render_list(crate::style::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 400.0,
+            h: 400.0,
+        });
+
+        let hit_nodes = window.context.pick(50.0, 50.0).to_vec();
+        assert!(!hit_nodes.is_empty());
+
+        // 1. Touchpad move
+        window.dispatch_and_rebuild(Event::MouseWheel {
+            delta_x: 0.0,
+            delta_y: -20.0,
+            is_touchpad: true,
+            phase: winit::event::TouchPhase::Moved,
+            hit_nodes: hit_nodes.clone(),
+        });
+
+        assert!(
+            !window.state.is_empty(),
+            "Should have received on_scroll event"
+        );
+        let last = window.state.last().unwrap();
+        assert_eq!(last.source, ScrollSource::Touchpad);
+        assert!(last.scroll_y > 0.0);
+
+        // 2. Touchpad end and glide via Tick
+        window.dispatch_and_rebuild(Event::MouseWheel {
+            delta_x: 0.0,
+            delta_y: 0.0,
+            is_touchpad: true,
+            phase: winit::event::TouchPhase::Ended,
+            hit_nodes: hit_nodes.clone(),
+        });
+
+        let count_before = window.state.len();
+        window.dispatch_and_rebuild(Event::Tick { dt: 0.016 });
+        if window.state.len() > count_before {
+            let kinetic = window.state.last().unwrap();
+            assert_eq!(kinetic.source, ScrollSource::Kinetic);
+        }
+
+        // 3. Mouse wheel scroll
+        window.dispatch_and_rebuild(Event::MouseWheel {
+            delta_x: 0.0,
+            delta_y: -2.0,
+            is_touchpad: false,
+            phase: winit::event::TouchPhase::Moved,
+            hit_nodes: hit_nodes.clone(),
+        });
+        let count_before_wheel = window.state.len();
+        window.dispatch_and_rebuild(Event::Tick { dt: 0.016 });
+        if window.state.len() > count_before_wheel {
+            let wheel = window.state.last().unwrap();
+            assert_eq!(wheel.source, ScrollSource::Wheel);
+        }
+
+        // 4. Scrollbar thumb drag
+        window.dispatch_and_rebuild(Event::MouseInput {
+            button: winit::event::MouseButton::Left,
+            pressed: true,
+            x: 195.0,
+            y: 20.0,
+            hit_nodes: hit_nodes.clone(),
+        });
+        window.dispatch_and_rebuild(Event::CursorMoved {
+            x: 195.0,
+            y: 60.0,
+            delta_x: 0.0,
+            delta_y: 40.0,
+            hit_nodes: hit_nodes.clone(),
+        });
+        let thumb_event = window.state.last().unwrap();
+        assert_eq!(thumb_event.source, ScrollSource::Thumb);
+
+        window.dispatch_and_rebuild(Event::MouseInput {
+            button: winit::event::MouseButton::Left,
+            pressed: false,
+            x: 195.0,
+            y: 60.0,
+            hit_nodes: hit_nodes.clone(),
+        });
     }
 }

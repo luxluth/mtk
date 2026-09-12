@@ -21,7 +21,8 @@ pub mod widgets;
 pub use adapter::{ViewAdaptExt, adapt};
 pub use event::{
     DragContext, DragElement, DragHandler, DragPhase, EventKind, KeyActionKind, KeyEventContext,
-    KeyHandler, KeyScope, ThumbScrollContext, ThumbScrollHandler, TickHandler, ViewEventExt,
+    KeyHandler, KeyScope, ScrollContext, ScrollHandler, ScrollSource, ThumbScrollContext,
+    ThumbScrollHandler, TickHandler, ViewEventExt,
 };
 pub use focus::{Focusable, FocusableExt};
 pub use keyed::{Keyed, KeyedViewSequence, keyed, keyed_sequence};
@@ -113,6 +114,13 @@ pub enum Event {
         node: Node,
         /// Geometry and state of the thumb.
         context: ThumbScrollContext,
+    },
+    /// Dispatched when a scrollable container view is scrolled via mouse wheel, touchpad gesture, scrollbar thumb, or kinetic decay.
+    Scroll {
+        /// The scroll container node whose scroll offset changed.
+        node: Node,
+        /// Contextual layout metrics, scroll percentages, deltas, and origin source.
+        context: ScrollContext,
     },
     /// Dispatched when a previously focused node loses focus (e.g. on click outside or blur).
     FocusLost {
