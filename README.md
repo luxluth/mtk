@@ -5,7 +5,7 @@
 
 </div>
 
-MTK is a declarative, retained-mode GUI toolkit for Rust. It pairs an Elm-inspired functional interface with a C-based Flexbox layout engine, native WGPU hardware rendering, and Parley typography.
+MTK is a declarative, retained-mode GUI toolkit for Rust. It pairs an Elm-inspired functional interface with a custom Flexbox layout engine, native WGPU hardware rendering, and Parley typography.
 
 > [!WARNING]
 > _Still experimental and under active development. Not recommended for production use._
