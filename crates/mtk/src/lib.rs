@@ -41,10 +41,11 @@ pub use crate::ui::widgets::{
     TooltipPlacement,
 };
 pub use crate::ui::{
-    DragContext, DragPhase, Focusable, FocusableExt, KeyEvent, KeyEventContext, Keyed,
-    KeyedViewSequence, Motion, MotionOffset, PageTransition, Presence, PresenceViewExt, Router,
-    ScrollContext, ScrollHandler, ScrollSource, ThumbScrollContext, ThumbScrollHandler, Transition,
-    TransitionOrder, ViewEventExt, ViewStyleExt, keyed, keyed_sequence, presence, router,
+    BoxedElement, BoxedView, BoxedViewExt, DragContext, DragPhase, Focusable, FocusableExt,
+    KeyEvent, KeyEventContext, Keyed, KeyedViewSequence, Motion, MotionOffset, PageTransition,
+    Presence, PresenceViewExt, Router, ScrollContext, ScrollHandler, ScrollSource,
+    ThumbScrollContext, ThumbScrollHandler, Transition, TransitionOrder, ViewEventExt,
+    ViewStyleExt, boxed, keyed, keyed_sequence, presence, router,
 };
 pub use accesskit::{Action, ActionData, ActionRequest, Role, TreeUpdate};
 use std::cell::RefCell;

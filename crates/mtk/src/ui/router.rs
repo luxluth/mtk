@@ -72,16 +72,16 @@ where
 }
 
 pub struct RouterElement<Key, V: View<State>, State> {
-    container_node: Node,
-    active_key: Key,
-    current_node: Node,
-    current_el: V::Element,
-    outgoing: Option<(Node, V::Element)>,
-    current_transition: PageTransition,
-    anim_progress: AnimatedValue<f32>,
-    anim_start: Instant,
-    current_orig_positioning: PositionStrategy,
-    current_orig_z_index: i32,
+    pub(crate) container_node: Node,
+    pub(crate) active_key: Key,
+    pub(crate) current_node: Node,
+    pub(crate) current_el: V::Element,
+    pub(crate) outgoing: Option<(Node, V::Element)>,
+    pub(crate) current_transition: PageTransition,
+    pub(crate) anim_progress: AnimatedValue<f32>,
+    pub(crate) anim_start: Instant,
+    pub(crate) current_orig_positioning: PositionStrategy,
+    pub(crate) current_orig_z_index: i32,
     _marker: PhantomData<State>,
 }
 

@@ -6,6 +6,7 @@
 use crate::{Context, Node, ui::event::EventResult, windowing::WindowDimension};
 
 pub mod adapter;
+pub mod boxed;
 pub mod event;
 pub mod focus;
 pub mod keyed;
@@ -20,6 +21,7 @@ pub mod transition;
 pub mod widgets;
 
 pub use adapter::{ViewAdaptExt, adapt};
+pub use boxed::{BoxedElement, BoxedView, BoxedViewExt, boxed};
 pub use event::{
     DragContext, DragElement, DragHandler, DragPhase, EventKind, KeyActionKind, KeyEventContext,
     KeyHandler, KeyScope, ScrollContext, ScrollHandler, ScrollSource, ThumbScrollContext,
