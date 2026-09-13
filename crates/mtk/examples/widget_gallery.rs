@@ -9,7 +9,7 @@ use mtk::ui::widgets::{
 };
 use mtk::ui::{View, ViewLayerExt, ViewStyleExt};
 use mtk::windowing::{Window, WindowAttributes, WindowDimension};
-use mtk::{Lens, TooltipAnimation, TooltipPlacement, clr, rgb, rgba};
+use mtk::{BoxShadow, Lens, TooltipAnimation, TooltipPlacement, clr, rgb, rgba};
 
 #[derive(Clone, Debug, Lens)]
 pub struct GalleryState {
@@ -263,7 +263,11 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
             .corner_radius(10.0)
             .bg_color(bg_card)
             .border(1.0, border_card)
-            .shadow(rgba!(0, 0, 0, 10), 6.0, 0.3),
+            .box_shadow(
+                BoxShadow::new(rgba!(0, 0, 0, 10))
+                    .blur(6.0)
+                    .offset(0.0, 2.0),
+            ),
     );
 
     // ==========================================
@@ -316,7 +320,11 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
             .corner_radius(10.0)
             .bg_color(bg_card)
             .border(1.0, border_card)
-            .shadow(rgba!(0, 0, 0, 10), 6.0, 0.3),
+            .box_shadow(
+                BoxShadow::new(rgba!(0, 0, 0, 10))
+                    .blur(6.0)
+                    .offset(0.0, 2.0),
+            ),
     );
 
     // ==========================================
@@ -376,7 +384,11 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
             .corner_radius(10.0)
             .bg_color(bg_card)
             .border(1.0, border_card)
-            .shadow(rgba!(0, 0, 0, 10), 6.0, 0.3),
+            .box_shadow(
+                BoxShadow::new(rgba!(0, 0, 0, 10))
+                    .blur(6.0)
+                    .offset(0.0, 2.0),
+            ),
     );
 
     // ==========================================
@@ -437,7 +449,11 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
             .corner_radius(10.0)
             .bg_color(bg_card)
             .border(1.0, border_card)
-            .shadow(rgba!(0, 0, 0, 10), 6.0, 0.3),
+            .box_shadow(
+                BoxShadow::new(rgba!(0, 0, 0, 10))
+                    .blur(6.0)
+                    .offset(0.0, 2.0),
+            ),
     );
 
     // ==========================================
@@ -505,7 +521,11 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
             .corner_radius(10.0)
             .bg_color(bg_card)
             .border(1.0, border_card)
-            .shadow(rgba!(0, 0, 0, 10), 6.0, 0.3),
+            .box_shadow(
+                BoxShadow::new(rgba!(0, 0, 0, 10))
+                    .blur(6.0)
+                    .offset(0.0, 2.0),
+            ),
     );
 
     // ==========================================
@@ -582,7 +602,11 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
             .corner_radius(10.0)
             .bg_color(bg_card)
             .border(1.0, border_card)
-            .shadow(rgba!(0, 0, 0, 10), 6.0, 0.3),
+            .box_shadow(
+                BoxShadow::new(rgba!(0, 0, 0, 10))
+                    .blur(6.0)
+                    .offset(0.0, 2.0),
+            ),
     );
 
     // ==========================================
@@ -640,7 +664,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
             .corner_radius(10.0)
             .bg_color(bg_card)
             .border(1.0, border_card)
-            .shadow(rgba!(0, 0, 0, 10), 6.0, 0.3),
+            .box_shadow(BoxShadow::new(rgba!(0, 0, 0, 10)).blur(6.0).offset(0.0, 2.0)),
     );
 
     // ==========================================
@@ -682,7 +706,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
             .corner_radius(10.0)
             .bg_color(bg_card)
             .border(1.0, border_card)
-            .shadow(rgba!(0, 0, 0, 10), 6.0, 0.3)
+            .box_shadow(BoxShadow::new(rgba!(0, 0, 0, 10)).blur(6.0).offset(0.0, 2.0))
             .transition_all(200.0, Curve::ease_out()),
     );
 
@@ -745,7 +769,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
                     .height(Size::Fixed(240))
                     .corner_radius(16.0)
                     .bg_color(rgb!(99, 102, 241))
-                    .shadow(rgba!(99, 102, 241, 120), 32.0, 0.5),
+                    .box_shadow(BoxShadow::new(rgba!(99, 102, 241, 120)).blur(32.0)),
             ),
             column((
                 text("Synthesis & Serenade").style(Style::new().set_text_style(TextStyle {
@@ -846,7 +870,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
             .corner_radius(12.0)
             .bg_color(bg_card)
             .border(1.0, border_card)
-            .shadow(rgba!(0, 0, 0, 80), 28.0, 0.7),
+            .box_shadow(BoxShadow::new(rgba!(0, 0, 0, 80)).blur(28.0).offset(0.0, 8.0)),
     );
 
     // Compose Layers using Chained Modifiers

@@ -446,14 +446,13 @@ impl Renderer {
                     border_color: [0.0; 4],
                     shadow_color: [0.0; 4],
                     border_widths: [0.0; 4],
+                    shadow_offset: [0.0; 2],
+                    shadow_blur: 0.0,
                     shadow_spread: 0.0,
-                    shadow_power: 0.0,
+                    shadow_inset: 0.0,
                     vibrancy: 0.0,
                     vibrancy_darkness: 0.0,
                     passes: 0.0,
-                    _pad1: 0.0,
-                    _pad2: 0.0,
-                    _pad3: 0.0,
                 };
                 surface_pass.set_scissor_rect(
                     0,
@@ -1247,6 +1246,39 @@ fn prepare_command_slice<'a, I>(
                 effects.border.radius.bl * total_scale * scale_factor,
             ];
 
+            let shadow_scale = total_scale * scale_factor;
+            let make_shadow_data = |s: &crate::effects::BoxShadow| {
+                let offset = [
+                    s.offset[0] * shadow_scale,
+                    s.offset[1] * shadow_scale,
+                    s.blur_radius * shadow_scale,
+                    s.spread_radius * shadow_scale,
+                ];
+                let params = [if s.inset { 1.0 } else { 0.0 }, 0.0, 0.0, effective_alpha];
+                let color: [f32; 4] = s.color.into();
+                (offset, params, color)
+            };
+
+            for s in effects.additional_shadows.iter().rev() {
+                let (s_offset, s_params, s_color) = make_shadow_data(s);
+                let shadow_quad = QuadInstance {
+                    pos: [scaled_x, scaled_y],
+                    quad_size: [scaled_w, scaled_h],
+                    color: [0.0; 4],
+                    border_radii,
+                    border_color: [0.0; 4],
+                    border_widths: [0.0; 4],
+                    shadow_color: s_color,
+                    shadow_offset: s_offset,
+                    shadow_params: s_params,
+                    effects: [0.0; 4],
+                    clip_rect,
+                };
+                push_solid_quad(quad_instances, draw_batches, shadow_quad);
+            }
+
+            let (prim_offset, prim_params, prim_color) = make_shadow_data(&effects.box_shadow);
+
             if canvas_textures.contains_key(&node) {
                 let immediate = ImmediateData {
                     color: [1.0, 1.0, 1.0, 1.0],
@@ -1257,16 +1289,15 @@ fn prepare_command_slice<'a, I>(
                     _pad0: 0.0,
                     border_radii,
                     border_color: effects.border.color.into(),
-                    shadow_color: effects.shadow.color.into(),
+                    shadow_color: prim_color,
                     border_widths,
-                    shadow_spread: effects.shadow.spread * total_scale * scale_factor,
-                    shadow_power: effects.shadow.power,
+                    shadow_offset: [prim_offset[0], prim_offset[1]],
+                    shadow_blur: prim_offset[2],
+                    shadow_spread: prim_offset[3],
+                    shadow_inset: prim_params[0],
                     vibrancy,
                     vibrancy_darkness: 0.0,
                     passes,
-                    _pad1: 0.0,
-                    _pad2: 0.0,
-                    _pad3: 0.0,
                 };
                 draw_batches.push(DrawBatch::CanvasTexture {
                     node,
@@ -1293,16 +1324,15 @@ fn prepare_command_slice<'a, I>(
                     _pad0: 0.0,
                     border_radii,
                     border_color: effects.border.color.into(),
-                    shadow_color: effects.shadow.color.into(),
+                    shadow_color: prim_color,
                     border_widths,
-                    shadow_spread: effects.shadow.spread * total_scale * scale_factor,
-                    shadow_power: effects.shadow.power,
+                    shadow_offset: [prim_offset[0], prim_offset[1]],
+                    shadow_blur: prim_offset[2],
+                    shadow_spread: prim_offset[3],
+                    shadow_inset: prim_params[0],
                     vibrancy,
                     vibrancy_darkness: 0.0,
                     passes,
-                    _pad1: 0.0,
-                    _pad2: 0.0,
-                    _pad3: 0.0,
                 };
                 draw_batches.push(DrawBatch::ImageTexture {
                     node,
@@ -1329,16 +1359,15 @@ fn prepare_command_slice<'a, I>(
                     _pad0: 0.0,
                     border_radii,
                     border_color: effects.border.color.into(),
-                    shadow_color: effects.shadow.color.into(),
+                    shadow_color: prim_color,
                     border_widths,
-                    shadow_spread: effects.shadow.spread * total_scale * scale_factor,
-                    shadow_power: effects.shadow.power,
+                    shadow_offset: [prim_offset[0], prim_offset[1]],
+                    shadow_blur: prim_offset[2],
+                    shadow_spread: prim_offset[3],
+                    shadow_inset: prim_params[0],
                     vibrancy,
                     vibrancy_darkness: 0.0,
                     passes,
-                    _pad1: 0.0,
-                    _pad2: 0.0,
-                    _pad3: 0.0,
                 };
                 draw_batches.push(DrawBatch::SvgTexture {
                     node,
@@ -1363,13 +1392,9 @@ fn prepare_command_slice<'a, I>(
                     border_radii,
                     border_color: effects.border.color.into(),
                     border_widths,
-                    shadow_color: effects.shadow.color.into(),
-                    shadow_params: [
-                        effects.shadow.spread * total_scale * scale_factor,
-                        effects.shadow.power,
-                        effective_alpha,
-                        0.0,
-                    ],
+                    shadow_color: prim_color,
+                    shadow_offset: prim_offset,
+                    shadow_params: prim_params,
                     effects: [vibrancy, 0.0, passes, 0.0],
                     clip_rect,
                 };
@@ -1416,7 +1441,8 @@ fn prepare_command_slice<'a, I>(
                         border_color: [0.0, 0.47, 1.0, 1.0],
                         border_widths: [ring_thickness; 4],
                         shadow_color: [0.0; 4],
-                        shadow_params: [0.0, 0.0, effective_alpha, 0.0],
+                        shadow_offset: [0.0; 4],
+                        shadow_params: [0.0, 0.0, 0.0, effective_alpha],
                         effects: [0.0; 4],
                         clip_rect,
                     };
@@ -1446,7 +1472,8 @@ fn prepare_command_slice<'a, I>(
                         border_color: [0.0; 4],
                         border_widths: [0.0; 4],
                         shadow_color: [0.0; 4],
-                        shadow_params: [0.0, 0.0, range.alpha, 0.0],
+                        shadow_offset: [0.0; 4],
+                        shadow_params: [0.0, 0.0, 0.0, range.alpha],
                         effects: [0.0; 4],
                         clip_rect,
                     };
@@ -1490,7 +1517,8 @@ fn prepare_command_slice<'a, I>(
                         border_color: [0.0; 4],
                         border_widths: [0.0; 4],
                         shadow_color: [0.0; 4],
-                        shadow_params: [0.0, 0.0, range.alpha, 0.0],
+                        shadow_offset: [0.0; 4],
+                        shadow_params: [0.0, 0.0, 0.0, range.alpha],
                         effects: [0.0; 4],
                         clip_rect,
                     };
@@ -1506,7 +1534,8 @@ fn prepare_command_slice<'a, I>(
                         border_color: [0.0; 4],
                         border_widths: [0.0; 4],
                         shadow_color: [0.0; 4],
-                        shadow_params: [0.0, 0.0, range.alpha, 0.0],
+                        shadow_offset: [0.0; 4],
+                        shadow_params: [0.0, 0.0, 0.0, range.alpha],
                         effects: [0.0; 4],
                         clip_rect,
                     };
@@ -1522,7 +1551,8 @@ fn prepare_command_slice<'a, I>(
                         border_color: [0.0; 4],
                         border_widths: [0.0; 4],
                         shadow_color: [0.0; 4],
-                        shadow_params: [0.0, 0.0, range.alpha, 0.0],
+                        shadow_offset: [0.0; 4],
+                        shadow_params: [0.0, 0.0, 0.0, range.alpha],
                         effects: [0.0; 4],
                         clip_rect,
                     };
@@ -1595,7 +1625,8 @@ fn prepare_command_slice<'a, I>(
                                 border_color: [0.0; 4],
                                 border_widths: [0.0; 4],
                                 shadow_color: [0.0; 4],
-                                shadow_params: [0.0, 0.0, 1.0, 0.0],
+                                shadow_offset: [0.0; 4],
+                                shadow_params: [0.0, 0.0, 0.0, 1.0],
                                 effects: [0.0; 4],
                                 clip_rect,
                             };
@@ -1614,7 +1645,8 @@ fn prepare_command_slice<'a, I>(
                                 border_color: [0.0; 4],
                                 border_widths: [0.0; 4],
                                 shadow_color: [0.0; 4],
-                                shadow_params: [0.0, 0.0, 1.0, 0.0],
+                                shadow_offset: [0.0; 4],
+                                shadow_params: [0.0, 0.0, 0.0, 1.0],
                                 effects: [0.0; 4],
                                 clip_rect,
                             };
@@ -1631,7 +1663,8 @@ fn prepare_command_slice<'a, I>(
                         border_color: [0.0; 4],
                         border_widths: [0.0; 4],
                         shadow_color: [0.0; 4],
-                        shadow_params: [0.0, 0.0, 1.0, 0.0],
+                        shadow_offset: [0.0; 4],
+                        shadow_params: [0.0, 0.0, 0.0, 1.0],
                         effects: [0.0; 4],
                         clip_rect,
                     };
@@ -1705,7 +1738,8 @@ fn prepare_command_slice<'a, I>(
                                 border_color: [0.0; 4],
                                 border_widths: [0.0; 4],
                                 shadow_color: [0.0; 4],
-                                shadow_params: [0.0, 0.0, 1.0, 0.0],
+                                shadow_offset: [0.0; 4],
+                                shadow_params: [0.0, 0.0, 0.0, 1.0],
                                 effects: [0.0; 4],
                                 clip_rect,
                             };
@@ -1724,7 +1758,8 @@ fn prepare_command_slice<'a, I>(
                                 border_color: [0.0; 4],
                                 border_widths: [0.0; 4],
                                 shadow_color: [0.0; 4],
-                                shadow_params: [0.0, 0.0, 1.0, 0.0],
+                                shadow_offset: [0.0; 4],
+                                shadow_params: [0.0, 0.0, 0.0, 1.0],
                                 effects: [0.0; 4],
                                 clip_rect,
                             };
@@ -1741,7 +1776,8 @@ fn prepare_command_slice<'a, I>(
                         border_color: [0.0; 4],
                         border_widths: [0.0; 4],
                         shadow_color: [0.0; 4],
-                        shadow_params: [0.0, 0.0, 1.0, 0.0],
+                        shadow_offset: [0.0; 4],
+                        shadow_params: [0.0, 0.0, 0.0, 1.0],
                         effects: [0.0; 4],
                         clip_rect,
                     };
@@ -1778,7 +1814,8 @@ fn prepare_debug_highlight(
             border_color: [0.06, 0.72, 0.95, 0.9],
             border_widths: [outline_thickness; 4],
             shadow_color: [0.0; 4],
-            shadow_params: [0.0, 0.0, 1.0, 0.0],
+            shadow_offset: [0.0; 4],
+            shadow_params: [0.0, 0.0, 0.0, 1.0],
             effects: [0.0; 4],
             clip_rect: [-1.0, -1.0, -1.0, -1.0],
         };

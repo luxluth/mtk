@@ -7,7 +7,7 @@ use mtk::ui::widgets::{
     ScrollAxis, button, column, container, image, row, scroll_view, slider, svg, text,
 };
 use mtk::windowing::{Window, WindowAttributes};
-use mtk::{clr, rgb, rgba};
+use mtk::{BoxShadow, clr, rgb, rgba};
 
 #[derive(Clone, Debug)]
 struct DemoState {
@@ -221,7 +221,11 @@ fn app(state: &DemoState) -> impl View<DemoState, Message = DemoMsg> + use<> {
                             .height(Size::Fixed(effective_h))
                             .corner_radius(16.0)
                             .border(1.5, rgb!(59, 130, 246))
-                            .shadow(rgba!(0, 0, 0, 30), 24.0, 0.4)
+                            .box_shadow(
+                                BoxShadow::new(rgba!(0, 0, 0, 30))
+                                    .blur(24.0)
+                                    .offset(0.0, 6.0),
+                            )
                             .bg_color(clr!(white)),
                     ),))
                     .style(

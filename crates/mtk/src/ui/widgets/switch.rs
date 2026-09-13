@@ -5,6 +5,7 @@ use winit::keyboard::{Key, NamedKey};
 use crate::animation::{Animatable, AnimatedValue, Curve};
 use crate::colors::Color;
 use crate::debugger::SourceLocation;
+use crate::effects::BoxShadow;
 use crate::style::{
     AlignItems, FlexDirection, JustifyContent, Size, Style, TextStyle, VerticalAlignment,
 };
@@ -269,7 +270,11 @@ where
             .height(Size::Fixed(20))
             .corner_radius(10.0)
             .bg_color(self.style.knob_color)
-            .shadow(rgba!(0, 0, 0, 40), 4.0, 0.2)
+            .box_shadow(
+                BoxShadow::new(rgba!(0, 0, 0, 40))
+                    .blur(4.0)
+                    .offset(0.0, 1.0),
+            )
             .apply_to_node(ctx, knob_node);
 
         track_node.append(ctx, knob_node);

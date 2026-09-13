@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use crate::animation::{AnimatedValue, Curve};
 use crate::debugger::SourceLocation;
-use crate::effects::Effects;
+use crate::effects::{BoxShadow, Effects};
 use crate::style::{PositionStrategy, Style, TextStyle};
 use crate::text_property::FontWeight;
 use crate::ui::event::EventResult;
@@ -166,7 +166,11 @@ impl<V> Tooltip<V> {
             .corner_radius(4.0)
             .bg_color(rgb!(15, 23, 42))
             .border(1.0, rgb!(51, 65, 85))
-            .shadow(rgba!(0, 0, 0, 80), 8.0, 0.5)
+            .box_shadow(
+                BoxShadow::new(rgba!(0, 0, 0, 80))
+                    .blur(8.0)
+                    .offset(0.0, 2.0),
+            )
             .set_text_style(TextStyle {
                 font_size: 11.0,
                 font_weight: FontWeight::MEDIUM,

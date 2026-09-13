@@ -2,7 +2,7 @@
 
 use crate::Vector2;
 use crate::colors::Color;
-use crate::effects::{Effects, Radius, Shadow};
+use crate::effects::{BoxShadow, Effects, Radius};
 use crate::style::{Edges, ScrollbarStyle, Size, Style};
 
 pub mod keyframes;
@@ -257,19 +257,27 @@ impl Animatable for Radius {
     }
 }
 
-impl Animatable for Shadow {
+impl Animatable for BoxShadow {
     fn interpolate(start: &Self, end: &Self, t: f64) -> Self {
         let t_f = t as f32;
-        Shadow {
+        BoxShadow {
             color: Color::interpolate(&start.color, &end.color, t),
-            spread: start.spread + (end.spread - start.spread) * t_f,
-            power: start.power + (end.power - start.power) * t_f,
+            offset: [
+                start.offset[0] + (end.offset[0] - start.offset[0]) * t_f,
+                start.offset[1] + (end.offset[1] - start.offset[1]) * t_f,
+            ],
+            blur_radius: start.blur_radius + (end.blur_radius - start.blur_radius) * t_f,
+            spread_radius: start.spread_radius + (end.spread_radius - start.spread_radius) * t_f,
+            inset: if t >= 0.5 { end.inset } else { start.inset },
         }
     }
     fn is_finished(&self, target: &Self) -> bool {
         self.color.is_finished(&target.color)
-            && (self.spread - target.spread).abs() < 1e-4
-            && (self.power - target.power).abs() < 1e-4
+            && (self.offset[0] - target.offset[0]).abs() < 1e-4
+            && (self.offset[1] - target.offset[1]).abs() < 1e-4
+            && (self.blur_radius - target.blur_radius).abs() < 1e-4
+            && (self.spread_radius - target.spread_radius).abs() < 1e-4
+            && self.inset == target.inset
     }
 }
 
@@ -298,7 +306,12 @@ impl Animatable for Effects {
                 color: Color::interpolate(&start.border.color, &end.border.color, t),
                 radius: Radius::interpolate(&start.border.radius, &end.border.radius, t),
             },
-            shadow: Shadow::interpolate(&start.shadow, &end.shadow, t),
+            box_shadow: BoxShadow::interpolate(&start.box_shadow, &end.box_shadow, t),
+            additional_shadows: if t >= 0.5 {
+                end.additional_shadows.clone()
+            } else {
+                start.additional_shadows.clone()
+            },
             filters: if t >= 0.5 {
                 end.filters.clone()
             } else {
@@ -314,7 +327,8 @@ impl Animatable for Effects {
         self.background_color.is_finished(&target.background_color)
             && self.border.color.is_finished(&target.border.color)
             && self.border.radius.is_finished(&target.border.radius)
-            && self.shadow.is_finished(&target.shadow)
+            && self.box_shadow.is_finished(&target.box_shadow)
+            && self.additional_shadows == target.additional_shadows
             && (self.opacity - target.opacity).abs() < 1e-4
             && (self.scale - target.scale).abs() < 1e-4
     }
@@ -589,5 +603,31 @@ mod tests {
         assert!((mid.gap - 4.0).abs() < 1e-3);
         assert_eq!(mid.thumb_color.r, 150);
         assert_eq!(mid.track_color.unwrap().r, 30);
+    }
+
+    #[test]
+    fn test_box_shadow_interpolation() {
+        let s1 = BoxShadow::new(Color::new(0, 0, 0, 100))
+            .offset(0.0, 2.0)
+            .blur(4.0)
+            .spread(1.0);
+        let s2 = BoxShadow::new(Color::new(100, 100, 100, 200))
+            .offset(10.0, 12.0)
+            .blur(14.0)
+            .spread(5.0);
+
+        let mid = BoxShadow::interpolate(&s1, &s2, 0.5);
+        assert_eq!(mid.color, Color::new(50, 50, 50, 150));
+        assert!((mid.offset[0] - 5.0).abs() < 1e-3);
+        assert!((mid.offset[1] - 7.0).abs() < 1e-3);
+        assert!((mid.blur_radius - 9.0).abs() < 1e-3);
+        assert!((mid.spread_radius - 3.0).abs() < 1e-3);
+        assert!(!mid.inset);
+
+        let inset_end = BoxShadow::inset(Color::new(0, 0, 0, 100));
+        let early = BoxShadow::interpolate(&s1, &inset_end, 0.4);
+        assert!(!early.inset);
+        let late = BoxShadow::interpolate(&s1, &inset_end, 0.6);
+        assert!(late.inset);
     }
 }

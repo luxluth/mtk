@@ -5,7 +5,7 @@ use mtk::ui::{
     widgets::{column, row, text},
 };
 use mtk::windowing::{Window, WindowAttributes};
-use mtk::{clr, rgb, rgba};
+use mtk::{BoxShadow, clr, rgb, rgba};
 
 #[derive(Clone)]
 struct State {
@@ -24,7 +24,11 @@ fn glassmorphic(s: Style) -> Style {
         .border(1.5, rgba!(218, 226, 238, 240))
         .corner_radius(16.0)
         .padding(20.0)
-        .shadow(rgba!(100, 116, 139, 50), 16.0, 0.25)
+        .box_shadow(
+            BoxShadow::new(rgba!(100, 116, 139, 50))
+                .blur(16.0)
+                .offset(0.0, 4.0),
+        )
 }
 
 fn card_panel(s: Style) -> Style {
@@ -32,7 +36,11 @@ fn card_panel(s: Style) -> Style {
         .border(1.5, rgb!(226, 232, 240))
         .corner_radius(14.0)
         .padding(20.0)
-        .shadow(rgba!(148, 163, 184, 40), 14.0, 0.2)
+        .box_shadow(
+            BoxShadow::new(rgba!(148, 163, 184, 40))
+                .blur(14.0)
+                .offset(0.0, 4.0),
+        )
 }
 
 fn bouncy_btn(s: Style) -> Style {
@@ -40,9 +48,11 @@ fn bouncy_btn(s: Style) -> Style {
         .padding_xy(18.0, 10.0)
         .bg_color(rgb!(79, 70, 229))
         .on_hover(|btn| {
-            btn.bg_color(rgb!(99, 102, 241))
-                .scale(1.06)
-                .shadow(rgba!(99, 102, 241, 100), 10.0, 0.4)
+            btn.bg_color(rgb!(99, 102, 241)).scale(1.06).box_shadow(
+                BoxShadow::new(rgba!(99, 102, 241, 100))
+                    .blur(10.0)
+                    .offset(0.0, 3.0),
+            )
         })
         .on_active(|btn| btn.scale(0.94).bg_color(rgb!(67, 56, 202)))
         .transition_all(200.0, Curve::spring(Spring::bouncy()))
@@ -145,10 +155,10 @@ fn main() {
                         .gap(10.0)
                         .width(Size::Fixed(640))
                         .on_hover(|c| {
-                            c.border(1.5, rgb!(99, 102, 241)).shadow(
-                                rgba!(99, 102, 241, 70),
-                                18.0,
-                                0.3,
+                            c.border(1.5, rgb!(99, 102, 241)).box_shadow(
+                                BoxShadow::new(rgba!(99, 102, 241, 70))
+                                    .blur(18.0)
+                                    .offset(0.0, 4.0),
                             )
                         })
                         .transition_all(250.0, Curve::ease_out()),
@@ -183,7 +193,11 @@ fn main() {
                             .when(is_active, |s| {
                                 s.bg_color(rgb!(16, 185, 129))
                                     .border(1.0, rgb!(16, 185, 129))
-                                    .shadow(rgba!(16, 185, 129, 90), 12.0, 0.4)
+                                    .box_shadow(
+                                        BoxShadow::new(rgba!(16, 185, 129, 90))
+                                            .blur(12.0)
+                                            .offset(0.0, 3.0),
+                                    )
                             })
                             .on_hover(|s| s.scale(1.05))
                             .on_active(|s| s.scale(0.95))
@@ -207,10 +221,10 @@ fn main() {
                         .gap(10.0)
                         .width(Size::Fixed(640))
                         .when(is_active, |s| {
-                            s.border(1.5, rgb!(16, 185, 129)).shadow(
-                                rgba!(16, 185, 129, 60),
-                                16.0,
-                                0.25,
+                            s.border(1.5, rgb!(16, 185, 129)).box_shadow(
+                                BoxShadow::new(rgba!(16, 185, 129, 60))
+                                    .blur(16.0)
+                                    .offset(0.0, 4.0),
                             )
                         })
                         .transition_all(300.0, Curve::ease_out()),

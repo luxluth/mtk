@@ -277,7 +277,10 @@ fn property_changed(prop: TransitionProperty, a: &Style, b: &Style) -> bool {
             a.base_constraints.border != b.base_constraints.border
                 || a.base_effects.border.color != b.base_effects.border.color
         }
-        TransitionProperty::Shadow => a.base_effects.shadow != b.base_effects.shadow,
+        TransitionProperty::BoxShadow => {
+            a.base_effects.box_shadow != b.base_effects.box_shadow
+                || a.base_effects.additional_shadows != b.base_effects.additional_shadows
+        }
         TransitionProperty::Padding => a.base_constraints.padding != b.base_constraints.padding,
         TransitionProperty::Width => a.base_constraints.width != b.base_constraints.width,
         TransitionProperty::Height => a.base_constraints.height != b.base_constraints.height,

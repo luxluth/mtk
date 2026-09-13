@@ -16,14 +16,13 @@ pub struct ImmediateData {
     pub border_color: [f32; 4],
     pub shadow_color: [f32; 4],
     pub border_widths: [f32; 4], // top, right, bottom, left
+    pub shadow_offset: [f32; 2],
+    pub shadow_blur: f32,
     pub shadow_spread: f32,
-    pub shadow_power: f32,
+    pub shadow_inset: f32,
     pub vibrancy: f32,
     pub vibrancy_darkness: f32,
     pub passes: f32,
-    pub _pad1: f32,
-    pub _pad2: f32,
-    pub _pad3: f32,
 }
 
 /// GPU Render Pipelines and associated Bind Group Layouts.

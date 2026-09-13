@@ -9,7 +9,7 @@ pub use mtk_layout::{
 use crate::animation::Curve;
 use crate::clr;
 use crate::colors::Color;
-use crate::effects::{Effects, Filter, Radius, Shadow};
+use crate::effects::{BoxShadow, Effects, Filter, Radius};
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub enum LineHeight {
@@ -91,7 +91,7 @@ pub enum TransitionProperty {
     CornerRadius,
     Scale,
     Opacity,
-    Shadow,
+    BoxShadow,
     TextColor,
     FontSize,
     Scrollbar,
@@ -130,8 +130,11 @@ impl Effects {
         if other.border.radius != crate::effects::Radius::all(0.0) {
             self.border.radius = other.border.radius;
         }
-        if other.shadow != Shadow::default() {
-            self.shadow = other.shadow;
+        if other.box_shadow != BoxShadow::default() {
+            self.box_shadow = other.box_shadow;
+        }
+        if !other.additional_shadows.is_empty() {
+            self.additional_shadows = other.additional_shadows.clone();
         }
         if !other.filters.is_empty() {
             self.filters = other.filters.clone();
@@ -580,12 +583,25 @@ impl Style {
         self
     }
 
-    pub fn shadow(mut self, color: Color, spread: f32, power: f32) -> Self {
-        self.base_effects.shadow = Shadow {
-            color,
-            spread,
-            power,
-        };
+    pub fn box_shadow(mut self, shadow: BoxShadow) -> Self {
+        self.base_effects.box_shadow = shadow;
+        self
+    }
+
+    pub fn add_box_shadow(mut self, shadow: BoxShadow) -> Self {
+        self.base_effects.additional_shadows.push(shadow);
+        self
+    }
+
+    pub fn box_shadows(mut self, shadows: impl IntoIterator<Item = BoxShadow>) -> Self {
+        let mut iter = shadows.into_iter();
+        if let Some(first) = iter.next() {
+            self.base_effects.box_shadow = first;
+            self.base_effects.additional_shadows = iter.collect();
+        } else {
+            self.base_effects.box_shadow = BoxShadow::default();
+            self.base_effects.additional_shadows.clear();
+        }
         self
     }
 
@@ -1467,5 +1483,20 @@ pub(crate) mod tests {
             "child.x was {}",
             child_comp.x
         );
+    }
+
+    #[test]
+    fn test_style_box_shadows() {
+        let s1 = BoxShadow::sm();
+        let s2 = BoxShadow::md();
+        let style = Style::new().box_shadow(s1).add_box_shadow(s2);
+
+        assert_eq!(style.base_effects.box_shadow, s1);
+        assert_eq!(style.base_effects.additional_shadows, vec![s2]);
+
+        let s3 = BoxShadow::lg();
+        let style2 = Style::new().box_shadows([s1, s2, s3]);
+        assert_eq!(style2.base_effects.box_shadow, s1);
+        assert_eq!(style2.base_effects.additional_shadows, vec![s2, s3]);
     }
 }

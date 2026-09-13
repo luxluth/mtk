@@ -9,7 +9,7 @@ use mtk::ui::{
     widgets::{column, row, text},
 };
 use mtk::windowing::{Window, WindowAttributes};
-use mtk::{clr, rgb, rgba};
+use mtk::{BoxShadow, clr, rgb, rgba};
 
 #[derive(Clone)]
 struct State {
@@ -47,7 +47,11 @@ fn active_button_style(s: Style) -> Style {
         .corner_radius(8.0)
         .bg_color(rgb!(79, 70, 229))
         .border(1.0, rgb!(67, 56, 202))
-        .shadow(rgba!(79, 70, 229, 60), 8.0, 0.3)
+        .box_shadow(
+            BoxShadow::new(rgba!(79, 70, 229, 60))
+                .blur(8.0)
+                .offset(0.0, 2.0),
+        )
         .on_hover(|btn| btn.bg_color(rgb!(99, 102, 241)).scale(1.04))
         .on_active(|btn| btn.scale(0.96).bg_color(rgb!(67, 56, 202)))
         .transition_all(150.0, Curve::spring(Spring::bouncy()))
@@ -58,14 +62,22 @@ fn card_panel(s: Style) -> Style {
         .border(1.5, rgb!(226, 232, 240))
         .corner_radius(12.0)
         .padding(18.0)
-        .shadow(rgba!(148, 163, 184, 30), 12.0, 0.2)
+        .box_shadow(
+            BoxShadow::new(rgba!(148, 163, 184, 30))
+                .blur(12.0)
+                .offset(0.0, 4.0),
+        )
 }
 
 fn scroll_card_panel(s: Style) -> Style {
     s.bg_color(rgba!(255, 255, 255, 245))
         .border(1.5, rgb!(226, 232, 240))
         .corner_radius(12.0)
-        .shadow(rgba!(148, 163, 184, 30), 12.0, 0.2)
+        .box_shadow(
+            BoxShadow::new(rgba!(148, 163, 184, 30))
+                .blur(12.0)
+                .offset(0.0, 4.0),
+        )
 }
 
 fn main() {

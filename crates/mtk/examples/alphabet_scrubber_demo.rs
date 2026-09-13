@@ -1,5 +1,5 @@
 use mtk::colors::Color;
-use mtk::effects::Radius;
+use mtk::effects::{BoxShadow, Radius};
 use mtk::style::{
     AlignItems, Edges, FlexDirection, JustifyContent, PositionStrategy, ScrollbarStyle, Size,
     Style, TextStyle,
@@ -682,7 +682,7 @@ fn main() {
                         .bg_color(clr!(0x4f46e5ff))
                         .align_items(AlignItems::Center)
                         .justify_content(JustifyContent::Center)
-                        .shadow(Color::new(79, 70, 229, 100), 14.0, 0.4),
+                        .box_shadow(BoxShadow::new(Color::new(79, 70, 229, 100)).blur(14.0)),
                 ),
             )
         } else {

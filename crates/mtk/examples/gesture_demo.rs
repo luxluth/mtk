@@ -8,7 +8,7 @@ use mtk::ui::{
     widgets::{button, column, row, text},
 };
 use mtk::windowing::{Window, WindowAttributes};
-use mtk::{Color, rgb, rgba, winit};
+use mtk::{BoxShadow, Color, rgb, rgba, winit};
 
 #[derive(Clone)]
 struct State {
@@ -60,7 +60,11 @@ fn card_panel(s: Style) -> Style {
         .border(1.0, rgb!(226, 232, 240))
         .corner_radius(14.0)
         .padding(18.0)
-        .shadow(rgba!(15, 23, 42, 20), 14.0, 0.15)
+        .box_shadow(
+            BoxShadow::new(rgba!(15, 23, 42, 20))
+                .blur(14.0)
+                .offset(0.0, 4.0),
+        )
 }
 
 fn badge_pill(s: Style, bg: Color, fg: Color) -> Style {
@@ -101,15 +105,13 @@ fn keycap(label: &str, is_active: bool) -> impl View<State, Message = Message> {
             .corner_radius(6.0)
             .bg_color(bg)
             .border(1.5, border)
-            .shadow(
-                if is_active {
-                    rgba!(16, 185, 129, 60)
-                } else {
-                    rgba!(0, 0, 0, 0)
-                },
-                8.0,
-                0.2,
-            )
+            .box_shadow(if is_active {
+                BoxShadow::new(rgba!(16, 185, 129, 60))
+                    .blur(8.0)
+                    .offset(0.0, 2.0)
+            } else {
+                BoxShadow::none()
+            })
             .set_text_style(TextStyle {
                 font_size: 12.0,
                 color: fg,
@@ -461,15 +463,15 @@ fn main() {
                                             rgb!(203, 213, 225)
                                         },
                                     )
-                                    .shadow(
-                                        if state.node_dragging {
-                                            rgba!(79, 70, 229, 60)
-                                        } else {
-                                            rgba!(15, 23, 42, 20)
-                                        },
-                                        if state.node_dragging { 20.0 } else { 8.0 },
-                                        0.2,
-                                    )
+                                    .box_shadow(if state.node_dragging {
+                                        BoxShadow::new(rgba!(79, 70, 229, 60))
+                                            .blur(20.0)
+                                            .offset(0.0, 8.0)
+                                    } else {
+                                        BoxShadow::new(rgba!(15, 23, 42, 20))
+                                            .blur(8.0)
+                                            .offset(0.0, 2.0)
+                                    })
                                     .position(PositionStrategy::Absolute {
                                         left: state.node_pos.0,
                                         top: state.node_pos.1,
@@ -554,15 +556,15 @@ fn main() {
                                             rgb!(203, 213, 225)
                                         },
                                     )
-                                    .shadow(
-                                        if state.dial_dragging {
-                                            rgba!(217, 119, 6, 60)
-                                        } else {
-                                            rgba!(15, 23, 42, 25)
-                                        },
-                                        14.0,
-                                        0.2,
-                                    ),
+                                    .box_shadow(if state.dial_dragging {
+                                        BoxShadow::new(rgba!(217, 119, 6, 60))
+                                            .blur(14.0)
+                                            .offset(0.0, 4.0)
+                                    } else {
+                                        BoxShadow::new(rgba!(15, 23, 42, 25))
+                                            .blur(6.0)
+                                            .offset(0.0, 2.0)
+                                    }),
                             )
                             .on_drag_relative(|_, ctx| Some(Message::DialScrub(ctx))),
 
@@ -666,7 +668,7 @@ fn main() {
                                     .justify_content(JustifyContent::Center)
                                     .bg_color(puck_color)
                                     .border(2.0, rgb!(255, 255, 255))
-                                    .shadow(puck_color, 14.0, 0.4)
+                                    .box_shadow(BoxShadow::new(puck_color).blur(14.0))
                                     .position(PositionStrategy::Absolute {
                                         left: state.puck_pos.0,
                                         top: state.puck_pos.1,
@@ -798,7 +800,7 @@ fn main() {
                             .gap(12.0)
                             .on_focus(|s| {
                                 s.border_color(rgb!(59, 130, 246))
-                                    .shadow(rgba!(59, 130, 246, 50), 16.0, 0.25)
+                                    .box_shadow(BoxShadow::new(rgba!(59, 130, 246, 50)).blur(16.0).offset(0.0, 4.0))
                             }),
                     )
                     .on_key_down(|_, k| Some(Message::KeyDown(k)))

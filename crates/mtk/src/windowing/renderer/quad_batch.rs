@@ -11,13 +11,14 @@ pub struct QuadInstance {
     pub border_color: [f32; 4],
     pub border_widths: [f32; 4], // top, right, bottom, left
     pub shadow_color: [f32; 4],
-    pub shadow_params: [f32; 4], // shadow_spread, shadow_power, alpha, _pad
+    pub shadow_offset: [f32; 4], // offset_x, offset_y, blur_radius, spread_radius
+    pub shadow_params: [f32; 4], // inset (1.0 or 0.0), _pad0, _pad1, alpha
     pub effects: [f32; 4],       // vibrancy, vibrancy_darkness, passes, _pad
     pub clip_rect: [f32; 4],     // clip_x, clip_y, clip_w, clip_h (w<=0 or h<=0 disables clipping)
 }
 
 impl QuadInstance {
-    pub const ATTRIBS: [wgpu::VertexAttribute; 10] = [
+    pub const ATTRIBS: [wgpu::VertexAttribute; 11] = [
         // 0: pos
         wgpu::VertexAttribute {
             format: wgpu::VertexFormat::Float32x2,
@@ -60,23 +61,29 @@ impl QuadInstance {
             offset: 80,
             shader_location: 6,
         },
-        // 7: shadow_params
+        // 7: shadow_offset
         wgpu::VertexAttribute {
             format: wgpu::VertexFormat::Float32x4,
             offset: 96,
             shader_location: 7,
         },
-        // 8: effects
+        // 8: shadow_params
         wgpu::VertexAttribute {
             format: wgpu::VertexFormat::Float32x4,
             offset: 112,
             shader_location: 8,
         },
-        // 9: clip_rect
+        // 9: effects
         wgpu::VertexAttribute {
             format: wgpu::VertexFormat::Float32x4,
             offset: 128,
             shader_location: 9,
+        },
+        // 10: clip_rect
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x4,
+            offset: 144,
+            shader_location: 10,
         },
     ];
 
@@ -140,14 +147,14 @@ mod tests {
 
     #[test]
     fn test_quad_instance_layout() {
-        assert_eq!(std::mem::size_of::<QuadInstance>(), 144);
+        assert_eq!(std::mem::size_of::<QuadInstance>(), 160);
         assert_eq!(std::mem::align_of::<QuadInstance>(), 4);
         assert_eq!(std::mem::size_of::<SolidPushConstants>(), 8);
 
         let desc = QuadInstance::desc();
-        assert_eq!(desc.array_stride, 144);
+        assert_eq!(desc.array_stride, 160);
         assert_eq!(desc.step_mode, wgpu::VertexStepMode::Instance);
-        assert_eq!(desc.attributes.len(), 10);
+        assert_eq!(desc.attributes.len(), 11);
 
         // Verify that attributes are strictly contiguous and non-overlapping
         assert_eq!(desc.attributes[0].offset, 0);
@@ -160,5 +167,6 @@ mod tests {
         assert_eq!(desc.attributes[7].offset, 96);
         assert_eq!(desc.attributes[8].offset, 112);
         assert_eq!(desc.attributes[9].offset, 128);
+        assert_eq!(desc.attributes[10].offset, 144);
     }
 }

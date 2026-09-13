@@ -24,7 +24,7 @@ pub use crate::accessibility::{AccessibleInfo, AccessibleView, AccessibleViewExt
 pub use crate::colors::Color;
 pub use crate::command::{Command, IntoCommand};
 pub use crate::debugger::{LayoutSnapshot, NodeDebugInfo, SourceLocation};
-pub use crate::effects::{Border, Effects, Radius};
+pub use crate::effects::{Border, BoxShadow, Effects, Radius};
 pub use crate::image::{ImageCache, ImageData, ObjectFit, SvgData, SvgStyle};
 pub use crate::layer::*;
 pub use crate::layout::{LayoutEngine, NodeId};

@@ -3,6 +3,7 @@ use winit::keyboard::{Key, NamedKey};
 
 use crate::colors::Color;
 use crate::debugger::SourceLocation;
+use crate::effects::BoxShadow;
 use crate::style::{
     AlignItems, FlexDirection, JustifyContent, PositionStrategy, Size, Style, TextStyle,
 };
@@ -194,7 +195,11 @@ where
             .bg_color(self.bg_color)
             .border(1.0, self.border_color)
             .corner_radius(8.0)
-            .shadow(rgba!(0, 0, 0, 20), 12.0, 0.4)
+            .box_shadow(
+                BoxShadow::new(rgba!(0, 0, 0, 20))
+                    .blur(12.0)
+                    .offset(0.0, 4.0),
+            )
             .z_index(2000)
             .apply_to_node(ctx, menu_node);
 

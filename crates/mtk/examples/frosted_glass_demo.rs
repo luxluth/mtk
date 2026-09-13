@@ -6,7 +6,7 @@ use mtk::ui::{
     widgets::{column, row, text},
 };
 use mtk::windowing::{Window, WindowAttributes};
-use mtk::{clr, rgb, rgba};
+use mtk::{BoxShadow, clr, rgb, rgba};
 
 #[derive(Clone)]
 struct State {
@@ -35,7 +35,11 @@ fn button_style(s: Style) -> Style {
         .corner_radius(8.0)
         .bg_color(rgba!(255, 255, 255, 200))
         .border(1.0, rgba!(203, 213, 225, 200))
-        .shadow(rgba!(15, 23, 42, 12), 4.0, 0.1)
+        .box_shadow(
+            BoxShadow::new(rgba!(15, 23, 42, 12))
+                .blur(4.0)
+                .offset(0.0, 1.0),
+        )
         .on_hover(|btn| btn.bg_color(rgba!(255, 255, 255, 255)).scale(1.03))
         .on_active(|btn| btn.scale(0.97).bg_color(rgba!(241, 245, 249, 255)))
         .transition_all(150.0, Curve::spring(Spring::bouncy()))
@@ -46,7 +50,11 @@ fn active_button_style(s: Style) -> Style {
         .corner_radius(8.0)
         .bg_color(rgb!(79, 70, 229))
         .border(1.0, rgb!(67, 56, 202))
-        .shadow(rgba!(79, 70, 229, 60), 8.0, 0.3)
+        .box_shadow(
+            BoxShadow::new(rgba!(79, 70, 229, 60))
+                .blur(8.0)
+                .offset(0.0, 2.0),
+        )
         .on_hover(|btn| btn.bg_color(rgb!(99, 102, 241)).scale(1.03))
         .on_active(|btn| btn.scale(0.97).bg_color(rgb!(67, 56, 202)))
         .transition_all(150.0, Curve::spring(Spring::bouncy()))
@@ -213,7 +221,7 @@ fn main() {
                             .gap(10.0)
                             .corner_radius(20.0)
                             .bg_color(rgb!(249, 115, 22))
-                            .shadow(rgba!(249, 115, 22, 140), 32.0, 0.4),
+                            .box_shadow(BoxShadow::new(rgba!(249, 115, 22, 140)).blur(32.0).offset(0.0, 8.0)),
                     ),
 
                     // Card 2: Indigo Luminescence
@@ -259,7 +267,7 @@ fn main() {
                             .gap(10.0)
                             .corner_radius(20.0)
                             .bg_color(rgb!(99, 102, 241))
-                            .shadow(rgba!(99, 102, 241, 150), 36.0, 0.45),
+                            .box_shadow(BoxShadow::new(rgba!(99, 102, 241, 150)).blur(36.0).offset(0.0, 8.0)),
                     ),
 
                     // Card 3: Emerald Radiance
@@ -305,7 +313,7 @@ fn main() {
                             .gap(10.0)
                             .corner_radius(20.0)
                             .bg_color(rgb!(16, 185, 129))
-                            .shadow(rgba!(16, 185, 129, 140), 32.0, 0.4),
+                            .box_shadow(BoxShadow::new(rgba!(16, 185, 129, 140)).blur(32.0).offset(0.0, 8.0)),
                     ),
                 ))
                 .style(
@@ -485,7 +493,7 @@ fn main() {
                             .corner_radius(18.0)
                             .bg_color(glass_tint)
                             .border(1.5, glass_border)
-                            .shadow(rgba!(15, 23, 42, 40), 28.0, 0.25)
+                            .box_shadow(BoxShadow::new(rgba!(15, 23, 42, 40)).blur(28.0).offset(0.0, 8.0))
                             .blur(state.vibrancy),
                     ),
                 ))

@@ -9,14 +9,13 @@ struct ImmediateData {
     border_color: vec4<f32>,
     shadow_color: vec4<f32>,
     border_widths: vec4<f32>, // top, right, bottom, left
+    shadow_offset: vec2<f32>,
+    shadow_blur: f32,
     shadow_spread: f32,
-    shadow_power: f32,
+    shadow_inset: f32,
     vibrancy: f32,
     vibrancy_darkness: f32,
     passes: f32,
-    _pad1: f32,
-    _pad2: f32,
-    _pad3: f32,
 }
 var<immediate> imm: ImmediateData;
 
@@ -38,12 +37,33 @@ fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> VertexOutput {
         vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0)
     );
 
-    let expansion = max(2.0, imm.shadow_spread * 2.8);
+    let offset = imm.shadow_offset;
+    let blur_radius = imm.shadow_blur;
+    let spread_radius = imm.shadow_spread;
+    let is_inset = imm.shadow_inset > 0.5;
+    let has_shadow = imm.shadow_color.a > 0.0 && (blur_radius > 0.0 || spread_radius != 0.0 || length(offset) > 0.0);
+
+    var expand_left = 2.0;
+    var expand_right = 2.0;
+    var expand_top = 2.0;
+    var expand_bottom = 2.0;
+
+    if has_shadow && !is_inset {
+        let blur_ext = blur_radius * 2.5;
+        let spread_ext = max(0.0, spread_radius);
+        expand_left = max(2.0, max(0.0, -offset.x) + spread_ext + blur_ext);
+        expand_right = max(2.0, max(0.0, offset.x) + spread_ext + blur_ext);
+        expand_top = max(2.0, max(0.0, -offset.y) + spread_ext + blur_ext);
+        expand_bottom = max(2.0, max(0.0, offset.y) + spread_ext + blur_ext);
+    }
+
+    let unit_pos = positions[in_vertex_index];
+    let physical_p = vec2<f32>(
+        mix(imm.pos.x - expand_left, imm.pos.x + imm.quad_size.x + expand_right, unit_pos.x),
+        mix(imm.pos.y - expand_top, imm.pos.y + imm.quad_size.y + expand_bottom, unit_pos.y)
+    );
+
     let logical_center = imm.pos + imm.quad_size * 0.5;
-
-    let expand_dir = positions[in_vertex_index] * 2.0 - 1.0;
-    let physical_p = (positions[in_vertex_index] * imm.quad_size) + imm.pos + expand_dir * expansion;
-
     let ndc_x = (physical_p.x / imm.screen_size.x) * 2.0 - 1.0;
     let ndc_y = 1.0 - (physical_p.y / imm.screen_size.y) * 2.0;
 
@@ -103,17 +123,69 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         outColor.a = outColor.a * outer_alpha;
     }
 
+    let offset = imm.shadow_offset;
+    let blur_radius = imm.shadow_blur;
+    let spread_radius = imm.shadow_spread;
+    let is_inset = imm.shadow_inset > 0.5;
+
+    // Box Shadow computation (Outer Drop Shadow and Inner Inset Shadow)
     var shadowColor = vec4<f32>(0.0, 0.0, 0.0, 0.0);
-    if (imm.shadow_spread > 0.0 && dist > -2.0) {
-        let sigma = max(1.0, imm.shadow_spread * 0.45);
-        let d = max(0.0, dist);
-        let shadow_falloff = exp(-0.5 * (d * d) / (sigma * sigma));
-        let s_alpha = shadow_falloff * imm.shadow_color.a * imm.shadow_power;
-        shadowColor = vec4<f32>(imm.shadow_color.rgb, s_alpha);
+    if imm.shadow_color.a > 0.0 {
+        if is_inset {
+            // Inset Shadow calculation
+            let inner_b = b - vec2<f32>(imm.border_widths.w + imm.border_widths.y, imm.border_widths.x + imm.border_widths.z) * 0.5;
+            let inner_offset = vec2<f32>(imm.border_widths.w - imm.border_widths.y, imm.border_widths.x - imm.border_widths.z) * 0.5;
+            let p_inner = p - inner_offset;
+            let min_border = min(min(imm.border_widths.x, imm.border_widths.y), min(imm.border_widths.z, imm.border_widths.w));
+            let inner_radii = max(vec4<f32>(0.0), in.fragBorderRadii - vec4<f32>(min_border));
+
+            let p_shadow = p_inner - offset;
+            let dist_inner = sdRoundedBox(p_shadow, inner_b, inner_radii);
+            let d_inward = -dist_inner - spread_radius;
+
+            var s_alpha = 0.0;
+            if blur_radius > 0.5 {
+                s_alpha = clamp(1.0 - smoothstep(0.0, blur_radius * 1.5, d_inward), 0.0, 1.0);
+            } else {
+                s_alpha = select(0.0, 1.0, d_inward <= 0.0);
+            }
+
+            let mask = clamp(1.0 - smoothstep(-0.75, 0.75, dist_inner), 0.0, 1.0);
+            s_alpha = s_alpha * imm.shadow_color.a * mask;
+            shadowColor = vec4<f32>(imm.shadow_color.rgb, s_alpha);
+
+            // Composite inset shadow over outColor background
+            let tinted_rgb = mix(outColor.rgb, shadowColor.rgb, shadowColor.a);
+            outColor = vec4<f32>(tinted_rgb, outColor.a);
+        } else {
+            // Outer Drop Shadow calculation
+            let p_shadow = p - offset;
+            let b_shadow = b;
+            let r_shadow = max(vec4<f32>(0.0), in.fragBorderRadii + vec4<f32>(spread_radius));
+            let dist_shadow = sdRoundedBox(p_shadow, b_shadow, r_shadow) - spread_radius;
+
+            var s_alpha = 0.0;
+            if blur_radius > 0.5 {
+                let sigma = max(0.5, blur_radius * 0.5);
+                let d = max(0.0, dist_shadow);
+                let falloff = exp(-0.5 * (d * d) / (sigma * sigma));
+                s_alpha = select(falloff, 1.0, dist_shadow <= 0.0);
+            } else {
+                s_alpha = clamp(1.0 - smoothstep(-0.75, 0.75, dist_shadow), 0.0, 1.0);
+            }
+
+            s_alpha = s_alpha * imm.shadow_color.a;
+            shadowColor = vec4<f32>(imm.shadow_color.rgb, s_alpha);
+        }
     }
 
-    let final_rgb = outColor.rgb * outColor.a + shadowColor.rgb * shadowColor.a * (1.0 - outColor.a);
-    let final_a = outColor.a + shadowColor.a * (1.0 - outColor.a);
+    var final_rgb = outColor.rgb * outColor.a;
+    var final_a = outColor.a;
+
+    if !is_inset && shadowColor.a > 0.0 {
+        final_rgb = outColor.rgb * outColor.a + shadowColor.rgb * shadowColor.a * (1.0 - outColor.a);
+        final_a = outColor.a + shadowColor.a * (1.0 - outColor.a);
+    }
 
     var finalColor = vec4<f32>(0.0, 0.0, 0.0, 0.0);
     if final_a > 0.001 {

@@ -1,11 +1,11 @@
 use mtk::clr;
-use mtk::rgb;
 use mtk::style::{AlignItems, JustifyContent, Size, Style, TextStyle};
 use mtk::text::TextSpan;
 use mtk::text_property::{FontStyle, FontWeight};
 use mtk::ui::ViewStyleExt;
 use mtk::ui::widgets::{SpanGeometry, column, container, rich_text, row, text};
 use mtk::windowing::{Window, WindowAttributes};
+use mtk::{BoxShadow, rgb, rgba};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TokenKind {
@@ -190,7 +190,11 @@ fn calculate_area(radius: f64) -> f64 {
                         .bg_color(rgb!(15, 23, 42))
                         .corner_radius(8.0)
                         .border(1.0, rgb!(51, 65, 85))
-                        .shadow(rgb!(0, 0, 0), 16.0, 0.2)
+                        .box_shadow(
+                            BoxShadow::new(rgba!(0, 0, 0, 50))
+                                .blur(16.0)
+                                .offset(0.0, 4.0),
+                        )
                         .align_items(AlignItems::Stretch),
                 ),
                 // Hover Inspector / LSP popover info

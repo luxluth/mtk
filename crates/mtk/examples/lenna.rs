@@ -3,12 +3,12 @@ use std::path::PathBuf;
 use mtk::animation::Curve;
 use mtk::clr;
 use mtk::image::ObjectFit;
-use mtk::rgb;
 use mtk::style::{AlignItems, JustifyContent, Size, Style, TextStyle};
 use mtk::text_property::{Alignment, FontStyle};
 use mtk::ui::ViewStyleExt;
 use mtk::ui::widgets::{async_image, column, container, text};
 use mtk::windowing::{Window, WindowAttributes};
+use mtk::{BoxShadow, rgb, rgba};
 
 fn main() {
     let image_path = PathBuf::from(concat!(
@@ -30,7 +30,11 @@ fn main() {
                             .height(Size::Fixed(400))
                             .corner_radius(12.0)
                             .border(1.0, rgb!(226, 232, 240))
-                            .shadow(rgb!(0, 0, 0), 20.0, 0.25)
+                            .box_shadow(
+                                BoxShadow::new(rgba!(0, 0, 0, 64))
+                                    .blur(20.0)
+                                    .offset(0.0, 6.0),
+                            )
                             .on_active(|s| s.scale(0.96))
                             .transition_all(100.0, Curve::ease_in_out()),
                     ),
