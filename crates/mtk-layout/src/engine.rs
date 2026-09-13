@@ -210,6 +210,41 @@ impl LayoutEngine {
         false
     }
 
+    #[inline(always)]
+    fn measure_text_cached<F>(
+        texts: &mut SparseSet<TextNode>,
+        node: NodeId,
+        avail_w: f32,
+        avail_h: f32,
+        measure_text: &mut F,
+    ) -> TextMetrics
+    where
+        F: FnMut(NodeId, &str, Option<&dyn std::any::Any>, f32, f32) -> TextMetrics,
+    {
+        let text_node = texts.get_mut(node).unwrap();
+        if let Some(ref cache) = text_node.cache
+            && ((cache.avail_w == avail_w && cache.avail_h == avail_h)
+                || (cache.avail_w.is_infinite() && avail_w >= cache.metrics.width)
+                || (avail_w.is_infinite() && cache.avail_w >= cache.metrics.width))
+        {
+            return cache.metrics;
+        }
+
+        let m = measure_text(
+            node,
+            &text_node.content,
+            text_node.userdata.as_deref(),
+            avail_w,
+            avail_h,
+        );
+        text_node.cache = Some(CachedTextMeasurement {
+            avail_w,
+            avail_h,
+            metrics: m,
+        });
+        m
+    }
+
     pub fn remove(&mut self, node: NodeId) -> bool {
         if !self.is_valid(node) {
             return false;
@@ -967,42 +1002,13 @@ impl LayoutEngine {
                         comp_h
                     };
 
-                    let text_metrics = {
-                        let text_node = self.texts.get_mut(node).unwrap();
-                        if let Some(ref cache) = text_node.cache {
-                            if cache.avail_w == avail_w && cache.avail_h == avail_h {
-                                cache.metrics
-                            } else {
-                                let m = measure_text(
-                                    node,
-                                    &text_node.content,
-                                    text_node.userdata.as_deref(),
-                                    avail_w,
-                                    avail_h,
-                                );
-                                text_node.cache = Some(CachedTextMeasurement {
-                                    avail_w,
-                                    avail_h,
-                                    metrics: m,
-                                });
-                                m
-                            }
-                        } else {
-                            let m = measure_text(
-                                node,
-                                &text_node.content,
-                                text_node.userdata.as_deref(),
-                                avail_w,
-                                avail_h,
-                            );
-                            text_node.cache = Some(CachedTextMeasurement {
-                                avail_w,
-                                avail_h,
-                                metrics: m,
-                            });
-                            m
-                        }
-                    };
+                    let text_metrics = Self::measure_text_cached(
+                        &mut self.texts,
+                        node,
+                        avail_w,
+                        avail_h,
+                        &mut measure_text,
+                    );
 
                     intrinsic_w = text_metrics.width;
                     intrinsic_h = text_metrics.height;
@@ -1253,22 +1259,13 @@ impl LayoutEngine {
                                 f32::INFINITY
                             };
 
-                            let text_metrics = {
-                                let text_node = self.texts.get_mut(child).unwrap();
-                                let m = measure_text(
-                                    child,
-                                    &text_node.content,
-                                    text_node.userdata.as_deref(),
-                                    c_avail_w,
-                                    c_avail_h,
-                                );
-                                text_node.cache = Some(CachedTextMeasurement {
-                                    avail_w: c_avail_w,
-                                    avail_h: c_avail_h,
-                                    metrics: m,
-                                });
-                                m
-                            };
+                            let text_metrics = Self::measure_text_cached(
+                                &mut self.texts,
+                                child,
+                                c_avail_w,
+                                c_avail_h,
+                                &mut measure_text,
+                            );
 
                             let needed_w = text_metrics.width + c_off_w;
                             let needed_h = text_metrics.height + c_off_h;
@@ -1629,22 +1626,13 @@ impl LayoutEngine {
                             f32::INFINITY
                         };
 
-                        let text_metrics = {
-                            let text_node = self.texts.get_mut(item.node).unwrap();
-                            let m = measure_text(
-                                item.node,
-                                &text_node.content,
-                                text_node.userdata.as_deref(),
-                                c_avail_w,
-                                c_avail_h,
-                            );
-                            text_node.cache = Some(CachedTextMeasurement {
-                                avail_w: c_avail_w,
-                                avail_h: c_avail_h,
-                                metrics: m,
-                            });
-                            m
-                        };
+                        let text_metrics = Self::measure_text_cached(
+                            &mut self.texts,
+                            item.node,
+                            c_avail_w,
+                            c_avail_h,
+                            &mut measure_text,
+                        );
 
                         let needed_h = text_metrics.height + c_off_h;
                         if let Some(c_comp) = self.computed.get_mut(item.node)
@@ -2237,22 +2225,13 @@ impl LayoutEngine {
                     f32::INFINITY
                 };
 
-                let text_metrics = {
-                    let text_node = self.texts.get_mut(node).unwrap();
-                    let m = measure_text(
-                        node,
-                        &text_node.content,
-                        text_node.userdata.as_deref(),
-                        avail_w,
-                        avail_h,
-                    );
-                    text_node.cache = Some(CachedTextMeasurement {
-                        avail_w,
-                        avail_h,
-                        metrics: m,
-                    });
-                    m
-                };
+                let text_metrics = Self::measure_text_cached(
+                    &mut self.texts,
+                    node,
+                    avail_w,
+                    avail_h,
+                    &mut measure_text,
+                );
                 max_w = text_metrics.width + off_w;
                 max_h = text_metrics.height + off_h;
             } else {

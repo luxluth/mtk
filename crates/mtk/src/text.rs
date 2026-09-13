@@ -383,7 +383,7 @@ impl TextContext {
             scale_cx: ScaleContext::new(),
             current_cache: hashbrown::HashMap::new(),
             previous_cache: hashbrown::HashMap::new(),
-            generation_capacity: 1000,
+            generation_capacity: 4096,
         }
     }
 
@@ -428,7 +428,7 @@ impl TextContext {
             FontStyle::Oblique(_) => 2,
         };
 
-        let inner_w_bits = if avail_w.is_finite() && avail_w > 0.0 {
+        let inner_w_bits = if text_style.wrap && avail_w.is_finite() && avail_w > 0.0 {
             avail_w.to_bits()
         } else {
             u32::MAX

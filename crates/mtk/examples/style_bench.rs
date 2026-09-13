@@ -3,9 +3,9 @@ use std::time::Instant;
 
 use mtk::colors::Color;
 use mtk::style::{Style, TextStyle};
-use mtk::ui::View;
 use mtk::ui::style::ViewStyleExt;
-use mtk::ui::widgets::{column, row, text};
+use mtk::ui::widgets::{column, row, scroll_view, text, virtual_list_count};
+use mtk::ui::{Event, View};
 use mtk::{Context, Rect, TextComputedOutput, rgb};
 
 fn generate_10k_tree() -> impl View<(), Message = ()> {
@@ -32,6 +32,31 @@ fn generate_10k_tree() -> impl View<(), Message = ()> {
         })
         .collect();
     column(rows)
+}
+
+fn generate_1k_scroll_view() -> impl View<(), Message = ()> {
+    let sv_rows: Vec<_> = (0..1000)
+        .map(|i| {
+            text(format!("Row {i}")).style(
+                Style::new()
+                    .padding(10.0)
+                    .bg_color(rgb!(30, 41, 59))
+                    .text_color(rgb!(241, 245, 249)),
+            )
+        })
+        .collect();
+    scroll_view(column(sv_rows).style(Style::new().gap(5.0)))
+}
+
+fn generate_1k_virtual_list() -> impl View<(), Message = ()> {
+    virtual_list_count(1000, 36.0, |idx| {
+        text(format!("Row {idx}")).style(
+            Style::new()
+                .padding(10.0)
+                .bg_color(rgb!(30, 41, 59))
+                .text_color(rgb!(241, 245, 249)),
+        )
+    })
 }
 
 fn main() {
@@ -171,6 +196,143 @@ fn main() {
         "   • Quadtree Hit Testing:       {:>10.3?} ({pick_iters} hits, {ns_per_hit:.1} ns/hit)",
         hit_time
     );
+
+    // ------------------------------------------------------------------------
+    // Benchmark 5: ScrollView vs VirtualList (1,000 items)
+    // ------------------------------------------------------------------------
+    println!("\n------------------------------------------------------------");
+    println!("5. ScrollView (Non-Virtualized) vs VirtualList (Virtualized)");
+    println!("   Scenario: 1,000 styled rows in vertical viewport (800x600)");
+    println!("------------------------------------------------------------");
+
+    // ScrollView (Retained / Non-virtualized)
+    let sv_start = Instant::now();
+    let sv = generate_1k_scroll_view();
+    let sv_tree_gen = sv_start.elapsed();
+
+    let mut sv_ctx = Context::new();
+    // Do not set dummy text_sizing_func; let it use real Parley measure_text!
+
+    let sv_build_start = Instant::now();
+    let mut sv_el = sv.build(&mut sv_ctx);
+    let sv_build_time = sv_build_start.elapsed();
+
+    let sv_node = sv.get_node(&sv_el);
+    sv_ctx.root_attach(sv_node);
+
+    let sv_layout_start = Instant::now();
+    sv_ctx.compute_layout(800.0, 600.0);
+    let sv_layout_time = sv_layout_start.elapsed();
+
+    let sv_scroll_start = Instant::now();
+    for _ in 0..100 {
+        sv_node.update_constraints(&mut sv_ctx, |c| c.scroll.y += 10.0);
+        sv_ctx.compute_layout(800.0, 600.0);
+    }
+    let sv_scroll_time = sv_scroll_start.elapsed() / 100;
+
+    let sv_tick_start = Instant::now();
+    const TICK_ITERS: u32 = 100;
+    for _ in 0..TICK_ITERS {
+        let (res, msg) = sv.handle_event(&mut sv_el, &(), Event::Tick { dt: 0.016 }, &mut sv_ctx);
+        black_box((res, msg));
+    }
+    let sv_tick_time = sv_tick_start.elapsed() / TICK_ITERS;
+
+    let sv_render_start = Instant::now();
+    sv_ctx.build_render_list(Rect::default().w(800.0).h(600.0));
+    let sv_render_time = sv_render_start.elapsed();
+
+    let sv_mouse_start = Instant::now();
+    let hit_nodes = sv_ctx.pick(400.0, 300.0);
+    for _ in 0..TICK_ITERS {
+        let (res, msg) = sv.handle_event(
+            &mut sv_el,
+            &(),
+            Event::CursorMoved {
+                x: 400.0,
+                y: 300.0,
+                delta_x: 0.0,
+                delta_y: 0.0,
+                hit_nodes: hit_nodes.clone(),
+            },
+            &mut sv_ctx,
+        );
+        black_box((res, msg));
+    }
+    let sv_mouse_time = sv_mouse_start.elapsed() / TICK_ITERS;
+
+    println!("• ScrollView (1,000 items, ~2,002 layout nodes):");
+    println!("   - View Tree Generation:       {:>10.3?}", sv_tree_gen);
+    println!("   - Element Build:              {:>10.3?}", sv_build_time);
+    println!("   - Layout Computation (Cold):  {:>10.3?}", sv_layout_time);
+    println!("   - Scroll Frame Re-layout:     {:>10.3?}", sv_scroll_time);
+    println!("   - Event::Tick Dispatch/frame: {:>10.3?}", sv_tick_time);
+    println!("   - Event::CursorMoved Dispatch:{:>10.3?}", sv_mouse_time);
+    println!("   - Render List Culling:        {:>10.3?}", sv_render_time);
+
+    // VirtualList (Virtualized)
+    let vl_start = Instant::now();
+    let vl = generate_1k_virtual_list();
+    let vl_tree_gen = vl_start.elapsed();
+
+    let mut vl_ctx = Context::new();
+    vl_ctx.set_text_sizing_func(|_ctx, _node, text, _userdata, _avail_w, _avail_h| {
+        TextComputedOutput {
+            computed_width: text.len() as f32 * 7.5,
+            computed_height: 16.0,
+            baseline_offset: 13.0,
+        }
+    });
+
+    let vl_build_start = Instant::now();
+    let mut vl_el = vl.build(&mut vl_ctx);
+    let vl_build_time = vl_build_start.elapsed();
+
+    let vl_node = vl.get_node(&vl_el);
+    vl_ctx.root_attach(vl_node);
+
+    let vl_layout_start = Instant::now();
+    vl_ctx.compute_layout(800.0, 600.0);
+    let vl_layout_time = vl_layout_start.elapsed();
+
+    let vl_tick_start = Instant::now();
+    for _ in 0..TICK_ITERS {
+        let (res, msg) = vl.handle_event(&mut vl_el, &(), Event::Tick { dt: 0.016 }, &mut vl_ctx);
+        black_box((res, msg));
+    }
+    let vl_tick_time = vl_tick_start.elapsed() / TICK_ITERS;
+
+    let vl_render_start = Instant::now();
+    vl_ctx.build_render_list(Rect::default().w(800.0).h(600.0));
+    let vl_render_time = vl_render_start.elapsed();
+
+    let vl_mouse_start = Instant::now();
+    let vl_hit_nodes = vl_ctx.pick(400.0, 300.0);
+    for _ in 0..TICK_ITERS {
+        let (res, msg) = vl.handle_event(
+            &mut vl_el,
+            &(),
+            Event::CursorMoved {
+                x: 400.0,
+                y: 300.0,
+                delta_x: 0.0,
+                delta_y: 0.0,
+                hit_nodes: vl_hit_nodes.clone(),
+            },
+            &mut vl_ctx,
+        );
+        black_box((res, msg));
+    }
+    let vl_mouse_time = vl_mouse_start.elapsed() / TICK_ITERS;
+
+    println!("\n• VirtualList (1,000 items, ~20 visible layout nodes):");
+    println!("   - View Tree Generation:       {:>10.3?}", vl_tree_gen);
+    println!("   - Element Build:              {:>10.3?}", vl_build_time);
+    println!("   - Layout Computation:         {:>10.3?}", vl_layout_time);
+    println!("   - Event::Tick Dispatch/frame: {:>10.3?}", vl_tick_time);
+    println!("   - Event::CursorMoved Dispatch:{:>10.3?}", vl_mouse_time);
+    println!("   - Render List Culling:        {:>10.3?}", vl_render_time);
 
     println!("============================================================");
 }

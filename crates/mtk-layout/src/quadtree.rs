@@ -351,7 +351,7 @@ impl Quadtree {
 
         // Descending order by render_order (topmost first)
         self.query_scratch
-            .sort_unstable_by(|a, b| b.render_order.cmp(&a.render_order));
+            .sort_unstable_by_key(|b| std::cmp::Reverse(b.render_order));
 
         let mut last_node = None;
         for item in &self.query_scratch {

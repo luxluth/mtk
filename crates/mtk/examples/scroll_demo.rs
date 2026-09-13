@@ -23,7 +23,7 @@ fn main() {
     let mut initial_rows = Vec::new();
     let colors = [Color::blue, Color::red, Color::green, Color::ll_blue];
 
-    for i in 1..=100 {
+    for i in 1..=1_000 {
         let color = colors[i % colors.len()];
 
         initial_rows.push(Rc::new(RowData {
