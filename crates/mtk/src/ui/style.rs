@@ -299,29 +299,34 @@ fn property_changed(prop: TransitionProperty, a: &Style, b: &Style) -> bool {
 
 impl<V> StyledView<V> {
     fn compute_target_style(&self, view_state: &StyledViewState) -> Style {
+        if self.style.interaction.is_none() {
+            return self.style.clone();
+        }
+
+        let inter = self.style.interaction.as_ref().unwrap();
         let mut target = self.style.clone();
 
         if view_state.is_disabled {
-            if let Some(disabled) = &self.style.disabled {
-                target = target.merge((**disabled).clone());
+            if let Some(disabled) = &inter.disabled {
+                target = target.merge(disabled.clone());
             }
         }
 
         if view_state.is_focused {
-            if let Some(focus) = &self.style.focus {
-                target = target.merge((**focus).clone());
+            if let Some(focus) = &inter.focus {
+                target = target.merge(focus.clone());
             }
         }
 
         if view_state.is_hovered {
-            if let Some(hover) = &self.style.hover {
-                target = target.merge((**hover).clone());
+            if let Some(hover) = &inter.hover {
+                target = target.merge(hover.clone());
             }
         }
 
         if view_state.is_active {
-            if let Some(active) = &self.style.active {
-                target = target.merge((**active).clone());
+            if let Some(active) = &inter.active {
+                target = target.merge(active.clone());
             }
         }
 
@@ -424,7 +429,7 @@ impl<V> StyledView<V> {
 
         // Apply scrollbar style
         if let Some(sb) = &active_style.scrollbar {
-            node.set_scrollbar_style(ctx, sb.clone());
+            node.set_scrollbar_style(ctx, (**sb).clone());
             if sb.visibility == ScrollbarVisibility::Never {
                 node.update_constraints(ctx, |c| c.scrollbar_visible = false);
             } else {

@@ -59,8 +59,8 @@ impl TextArea {
             let is_focused = Some(node) == ctx.focused_node();
             let mut target = style.clone();
             if is_focused {
-                if let Some(focus) = &style.focus {
-                    target = target.merge((**focus).clone());
+                if let Some(focus) = style.focus() {
+                    target = target.merge(focus.clone());
                 }
             }
             target.apply_to_node(ctx, node);
@@ -70,7 +70,7 @@ impl TextArea {
     fn sync_render_nodes(&self, ctx: &mut Context, element: &mut TextAreaInner) {
         let text_style = if let Some(ref style) = self.custom_style {
             let is_focused = Some(element.node.clone()) == ctx.focused_node();
-            if is_focused && let Some(focus) = &style.focus {
+            if is_focused && let Some(focus) = style.focus() {
                 focus.base_text_style.clone()
             } else {
                 style.base_text_style.clone()

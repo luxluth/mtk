@@ -63,6 +63,7 @@ impl<Msg: Clone> Button<Msg> {
                 .corner_radius(6.0)
                 .bg_color(rgb!(241, 245, 249))
                 .border(1.0, rgb!(203, 213, 225))
+                .on_hover(|s| s.bg_color(rgb!(226, 232, 240)))
                 .set_text_style(TextStyle {
                     color: rgb!(51, 65, 85),
                     font_size: 14.0,
@@ -79,6 +80,7 @@ impl<Msg: Clone> Button<Msg> {
             Style::new()
                 .corner_radius(6.0)
                 .bg_color(rgb!(239, 68, 68))
+                .on_hover(|s| s.bg_color(rgb!(220, 38, 38)))
                 .set_text_style(TextStyle {
                     color: rgb!(255, 255, 255),
                     font_size: 14.0,
@@ -262,14 +264,25 @@ impl<State, Msg: Clone> View<State> for Button<Msg> {
                 let is_hit = hit_nodes.contains(&element.node);
                 if is_hit != element.is_hovered {
                     element.is_hovered = is_hit;
-                    let bg = if element.is_hovered {
+                    let default_bg = if element.is_hovered {
                         rgb!(37, 99, 235)
                     } else {
                         rgb!(59, 130, 246)
                     };
                     element.node.update_effects(ctx, |e| {
-                        if self.custom_style.is_none() {
-                            e.background_color = bg;
+                        if let Some(custom) = &self.custom_style {
+                            if let Some(hover) = custom.hover() {
+                                if element.is_hovered {
+                                    if hover.flags.contains(crate::style::StyleFlags::BG_COLOR) {
+                                        e.background_color = hover.base_effects.background_color;
+                                    }
+                                } else if custom.flags.contains(crate::style::StyleFlags::BG_COLOR)
+                                {
+                                    e.background_color = custom.base_effects.background_color;
+                                }
+                            }
+                        } else {
+                            e.background_color = default_bg;
                         }
                     });
                     ctx.request_frame();

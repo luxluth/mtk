@@ -482,7 +482,7 @@ impl TextContext {
         builder.push_default(StyleProperty::FontWeight(text_style.font_weight));
         builder.push_default(StyleProperty::FontStyle(text_style.font_style));
         builder.push_default(parley::style::FontFamily::from(
-            text_style.font_family.as_str(),
+            text_style.font_family.as_ref(),
         ));
         if text_style.wrap {
             builder.push_default(StyleProperty::OverflowWrap(text_style.overflow_wrap));
@@ -750,7 +750,7 @@ pub fn get_cursor_geometry(
 
     builder.push_default(StyleProperty::FontSize(text_style.font_size));
     builder.push_default(parley::style::FontFamily::from(
-        text_style.font_family.as_str(),
+        text_style.font_family.as_ref(),
     ));
     builder.push_default(StyleProperty::FontWeight(text_style.font_weight));
     builder.push_default(StyleProperty::FontStyle(text_style.font_style));

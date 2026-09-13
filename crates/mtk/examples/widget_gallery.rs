@@ -295,7 +295,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
                 .on_click(GalleryMsg::OpenModal(true))
                 .tooltip("Opens centered modal with backdrop scrim"),
         ))
-        .style(Style::new().gap(10.0).wrap()),
+        .style(Style::new().width(Size::Fill).gap(10.0).wrap()),
         divider().color(border_card),
         column((
             text("Select Component Preset:").style(Style::new().set_text_style(TextStyle {
@@ -494,6 +494,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
         ))
         .style(
             Style::new()
+                .width(Size::Fill)
                 .align_items(AlignItems::Center)
                 .justify_content(JustifyContent::SpaceBetween),
         ),
@@ -646,9 +647,10 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
                     ..Default::default()
                 })),
                 text("Software rasterizer output directly blitted to GPU framebuffers without overhead.")
-                    .style(Style::new().set_text_style(TextStyle {
+                    .style(Style::new().width(Size::Fill).set_text_style(TextStyle {
                         font_size: 12.0,
                         color: text_secondary,
+                        wrap: true,
                         ..Default::default()
                     })),
             ))
@@ -846,7 +848,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
             dark,
         ),
         text("Modals isolate keyboard focus, dim background surfaces, and dismiss on Escape or backdrop click.")
-            .style(Style::new().set_text_style(TextStyle {
+            .style(Style::new().width(Size::Fill).set_text_style(TextStyle {
                 font_size: 14.0,
                 color: text_secondary,
                 wrap: true,
@@ -860,7 +862,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
             spacer(),
             button("Confirm & Close").on_click(GalleryMsg::OpenModal(false)),
         ))
-        .style(Style::new().align_items(AlignItems::Center)),
+        .style(Style::new().align_items(AlignItems::Center).gap(5.)),
     ))
     .style(
         Style::new()

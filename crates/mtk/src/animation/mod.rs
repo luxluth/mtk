@@ -406,7 +406,7 @@ impl Animatable for Style {
         interpolated.base_text_style.color =
             Color::interpolate(&start.base_text_style.color, &end.base_text_style.color, t);
         interpolated.scrollbar = match (&start.scrollbar, &end.scrollbar) {
-            (Some(s), Some(e)) => Some(ScrollbarStyle::interpolate(s, e, t)),
+            (Some(s), Some(e)) => Some(Box::new(ScrollbarStyle::interpolate(s, e, t))),
             (Some(s), None) => Some(s.clone()),
             (None, Some(e)) => Some(e.clone()),
             (None, None) => None,

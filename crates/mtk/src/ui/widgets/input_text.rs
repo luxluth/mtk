@@ -75,8 +75,8 @@ impl InputText {
             let is_focused = Some(node) == ctx.focused_node();
             let mut target = style.clone();
             if is_focused {
-                if let Some(focus) = &style.focus {
-                    target = target.merge((**focus).clone());
+                if let Some(focus) = style.focus() {
+                    target = target.merge(focus.clone());
                 }
             }
             target.apply_to_node(ctx, node);
@@ -96,7 +96,7 @@ impl InputText {
         };
         if let Some(ref style) = self.custom_style {
             let is_focused = Some(element.node.clone()) == ctx.focused_node();
-            let custom_text_style = if is_focused && let Some(focus) = &style.focus {
+            let custom_text_style = if is_focused && let Some(focus) = style.focus() {
                 &focus.base_text_style
             } else {
                 &style.base_text_style

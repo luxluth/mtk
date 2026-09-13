@@ -72,7 +72,7 @@ fn calc_btn(
                     font_size: 24.0,
                     alignment: Alignment::Center,
                     font_weight: text_property::FontWeight::BOLD,
-                    font_family: "IosevkaTerm NF".to_string(),
+                    font_family: "IosevkaTerm NF".into(),
                     color: fg,
                     ..Default::default()
                 })
@@ -226,7 +226,7 @@ fn app_view(state: &CalcState) -> impl View<CalcState, Message = CalcMsg> + use<
                     .set_text_style(TextStyle {
                         font_size: 48.0,
                         alignment: Alignment::End,
-                        font_family: "IosevkaTerm NF".to_string(),
+                        font_family: "IosevkaTerm NF".into(),
                         color: state.theme.fg(),
                         wrap: true,
                         overflow_wrap: OverflowWrap::Anywhere,

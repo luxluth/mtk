@@ -270,6 +270,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{TextStyle, rgb};
 
     #[derive(Clone, Debug, PartialEq)]
     enum TestMsg {
@@ -328,6 +329,56 @@ mod tests {
         let btn2 = button("Updated Label").on_click(TestMsg::Clicked);
         View::<()>::rebuild(&btn2, &btn, &mut ctx, &mut element);
         View::<()>::teardown(&btn2, &mut ctx, &mut element);
+    }
+
+    #[test]
+    fn test_secondary_button_style_and_hover() {
+        let mut ctx = Context::new();
+        let btn = button("Secondary").secondary().on_click(TestMsg::Clicked);
+
+        let mut element = View::<()>::build(&btn, &mut ctx);
+        let node = View::<()>::get_node(&btn, &element);
+
+        let text_style = node.get_text_userdata::<TextStyle>(&ctx).unwrap();
+        assert_eq!(text_style.color, rgb!(51, 65, 85));
+        assert_eq!(text_style.font_size, 14.0);
+
+        let effects = node.get_effects(&ctx).unwrap();
+        assert_eq!(effects.background_color, rgb!(241, 245, 249));
+
+        let _ = View::<()>::handle_event(
+            &btn,
+            &mut element,
+            &(),
+            Event::CursorMoved {
+                x: 0.0,
+                y: 0.0,
+                delta_x: 0.0,
+                delta_y: 0.0,
+                hit_nodes: vec![node],
+            },
+            &mut ctx,
+        );
+
+        let hover_effects = node.get_effects(&ctx).unwrap();
+        assert_eq!(hover_effects.background_color, rgb!(226, 232, 240));
+
+        let _ = View::<()>::handle_event(
+            &btn,
+            &mut element,
+            &(),
+            Event::CursorMoved {
+                x: 500.0,
+                y: 500.0,
+                delta_x: 0.0,
+                delta_y: 0.0,
+                hit_nodes: vec![],
+            },
+            &mut ctx,
+        );
+
+        let unhover_effects = node.get_effects(&ctx).unwrap();
+        assert_eq!(unhover_effects.background_color, rgb!(241, 245, 249));
     }
 
     #[test]
