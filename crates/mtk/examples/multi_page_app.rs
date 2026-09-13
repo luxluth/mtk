@@ -1,7 +1,7 @@
-use mtk::animation::Curve;
 use mtk::style::{AlignItems, JustifyContent, PositionStrategy, Size, Style, TextStyle};
 use mtk::text_property::FontWeight;
-use mtk::ui::transition::Transition;
+use mtk::ui::presence::presence;
+use mtk::ui::transition::{Motion, PageTransition};
 use mtk::ui::widgets::{button, column, router, row, text};
 use mtk::ui::{View, ViewStyleExt};
 use mtk::windowing::{Window, WindowAttributes, WindowDimension};
@@ -135,7 +135,32 @@ fn render_page(num: usize, state: &AppState) -> impl View<AppState, Message = Ap
         );
     }
 
+    let history_hint = presence(
+        !state.history.is_empty(),
+        text(format!(
+            "Navigated from Page #{}",
+            state.history.last().map(|p| p.number()).unwrap_or(1)
+        ))
+        .style(
+            Style::new()
+                .padding_xy(12.0, 6.0)
+                .bg_color(clr!(white))
+                .border(1.0, rgb!(226, 232, 240))
+                .corner_radius(16.0)
+                .set_text_style(TextStyle {
+                    font_size: 13.0,
+                    font_weight: FontWeight::MEDIUM,
+                    color: rgb!(100, 116, 139),
+                    ..Default::default()
+                }),
+        ),
+    )
+    .enter(Motion::slide_in_top().combined(Motion::fade_in()))
+    .exit(Motion::slide_out_top().combined(Motion::fade_out()))
+    .duration_ms(200.0);
+
     column((
+        history_hint,
         text(format!("Page #{num}")).style(Style::new().set_text_style(TextStyle {
             font_size: 48.0,
             font_weight: FontWeight::BOLD,
@@ -166,9 +191,12 @@ fn app(state: &AppState) -> impl View<AppState, Message = AppMsg> + use<> {
         state.current_page,
         render_page(state.current_page.number(), state),
     )
-    .transition(Transition::Fade {
-        duration_ms: 220.0,
-        curve: Curve::ease_out(),
+    .transition_spec(|from, to| {
+        if to.number() > from.number() {
+            PageTransition::push().duration_ms(280.0)
+        } else {
+            PageTransition::pop().duration_ms(280.0)
+        }
     })
 }
 

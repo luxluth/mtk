@@ -13,6 +13,7 @@ pub mod kinetic;
 pub mod layer;
 pub mod lens;
 pub mod memoize;
+pub mod presence;
 pub mod router;
 pub mod style;
 pub mod transition;
@@ -29,9 +30,10 @@ pub use keyed::{Keyed, KeyedViewSequence, keyed, keyed_sequence};
 pub use kinetic::KineticTracker;
 pub use layer::{Layer, ViewLayerExt, layer};
 pub use lens::Lens;
+pub use presence::{Presence, PresenceViewExt, presence};
 pub use router::{Router, router};
 pub use style::ViewStyleExt;
-pub use transition::Transition;
+pub use transition::{Motion, MotionOffset, PageTransition, Transition, TransitionOrder};
 
 /// Represents user interaction, layout lifecycle, and system input events dispatched down the view tree.
 #[derive(Clone, Debug)]
