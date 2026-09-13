@@ -33,6 +33,7 @@ pub struct LayoutEngine {
 
     pub render_list: Vec<RenderCommand>,
     pub render_list_dirty: bool,
+    pub temp_render_list: Vec<(RenderCommand, usize)>,
 
     pub pick_list: Vec<NodeId>,
     pub scratch_children: Vec<NodeId>,
@@ -63,6 +64,7 @@ impl LayoutEngine {
 
             render_list: Vec::new(),
             render_list_dirty: true,
+            temp_render_list: Vec::new(),
 
             pick_list: Vec::new(),
             scratch_children: Vec::new(),
@@ -97,6 +99,14 @@ impl LayoutEngine {
     }
 
     pub fn destroy_node(&mut self, node: NodeId) {
+        self.destroy_node_with(node, |_| {});
+    }
+
+    pub fn destroy_node_with<F: FnMut(NodeId)>(&mut self, node: NodeId, mut on_destroy: F) {
+        self.destroy_node_internal(node, &mut on_destroy);
+    }
+
+    fn destroy_node_internal(&mut self, node: NodeId, on_destroy: &mut impl FnMut(NodeId)) {
         if !self.is_valid(node) {
             return;
         }
@@ -108,7 +118,7 @@ impl LayoutEngine {
             let mut curr = hrc.first_child;
             while let Some(child) = curr {
                 let next = self.hierarchies.get(child).and_then(|h| h.next_sibling);
-                self.destroy_node(child);
+                self.destroy_node_internal(child, on_destroy);
                 curr = next;
             }
         }
@@ -122,6 +132,8 @@ impl LayoutEngine {
         self.available_ids.push(node);
         self.layout_order_dirty = true;
         self.render_list_dirty = true;
+
+        on_destroy(node);
     }
 
     pub fn root_attach(&mut self, node: NodeId) {
@@ -2474,6 +2486,7 @@ impl LayoutEngine {
     pub fn build_render_list(&mut self, viewport: Rect) {
         let Some(root) = self.root else {
             self.render_list.clear();
+            self.temp_render_list.clear();
             return;
         };
 
@@ -2482,7 +2495,8 @@ impl LayoutEngine {
         }
 
         self.render_list.clear();
-        let mut temp_list = Vec::new();
+        let mut temp_list = std::mem::take(&mut self.temp_render_list);
+        temp_list.clear();
         let mut seq = 0;
 
         self.flatten_recursive(root, &mut temp_list, &mut seq, viewport, true, 0);
@@ -2496,7 +2510,9 @@ impl LayoutEngine {
             }
         });
 
-        self.render_list = temp_list.into_iter().map(|(cmd, _)| cmd).collect();
+        self.render_list
+            .extend(temp_list.drain(..).map(|(cmd, _)| cmd));
+        self.temp_render_list = temp_list;
         self.render_list_dirty = false;
     }
 

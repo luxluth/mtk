@@ -70,6 +70,10 @@ pub struct Renderer {
     pub(crate) svg_generations: HashMap<crate::Node, u64>,
     pub(crate) svg_requested_sizes: HashMap<crate::Node, (u64, u32, u32, crate::image::ObjectFit)>,
     pub(crate) next_svg_gen: u64,
+    pub(crate) scratch_quad_instances: Vec<QuadInstance>,
+    scratch_batches_pass1: Vec<DrawBatch>,
+    scratch_batches_pass3: Vec<DrawBatch>,
+    scratch_batches: Vec<DrawBatch>,
 }
 
 fn generate_rgba8_mipmaps(width: u32, height: u32, base_pixels: &[u8]) -> Vec<(u32, u32, Vec<u8>)> {
@@ -224,6 +228,10 @@ impl Renderer {
             svg_generations: HashMap::new(),
             svg_requested_sizes: HashMap::new(),
             next_svg_gen: 0,
+            scratch_quad_instances: Vec::with_capacity(1024),
+            scratch_batches_pass1: Vec::with_capacity(64),
+            scratch_batches_pass3: Vec::with_capacity(64),
+            scratch_batches: Vec::with_capacity(64),
         }
     }
 
@@ -303,9 +311,12 @@ impl Renderer {
         });
 
         if let Some(split_idx) = first_vibrancy_index {
-            let mut quad_instances = Vec::new();
-            let mut batches_pass1 = Vec::new();
-            let mut batches_pass3 = Vec::new();
+            let mut quad_instances = std::mem::take(&mut self.scratch_quad_instances);
+            quad_instances.clear();
+            let mut batches_pass1 = std::mem::take(&mut self.scratch_batches_pass1);
+            batches_pass1.clear();
+            let mut batches_pass3 = std::mem::take(&mut self.scratch_batches_pass3);
+            batches_pass3.clear();
 
             prepare_command_slice(
                 context.render_list().enumerate().take(split_idx),
@@ -479,10 +490,16 @@ impl Renderer {
                     &self.svg_textures,
                 );
             }
+
+            self.scratch_quad_instances = quad_instances;
+            self.scratch_batches_pass1 = batches_pass1;
+            self.scratch_batches_pass3 = batches_pass3;
         } else {
             // SINGLE-PASS FAST PATH FOR NON-BLURRED SCENES //
-            let mut quad_instances = Vec::new();
-            let mut batches = Vec::new();
+            let mut quad_instances = std::mem::take(&mut self.scratch_quad_instances);
+            quad_instances.clear();
+            let mut batches = std::mem::take(&mut self.scratch_batches);
+            batches.clear();
 
             prepare_command_slice(
                 context.render_list().enumerate(),
@@ -503,36 +520,41 @@ impl Renderer {
                 .ensure_capacity(&self.device, quad_instances.len());
             self.quad_batch.upload(&self.queue, &quad_instances);
 
-            let mut surface_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Surface Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
+            {
+                let mut surface_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Surface Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
 
-            execute_draw_batches(
-                &mut surface_pass,
-                &batches,
-                self.size.width,
-                self.size.height,
-                &self.pipelines,
-                &self.pipelines.dummy_solid_bind_group,
-                &self.text_batch.bind_group,
-                &self.quad_batch.buffer,
-                &self.canvas_textures,
-                &self.image_textures,
-                &self.svg_textures,
-            );
+                execute_draw_batches(
+                    &mut surface_pass,
+                    &batches,
+                    self.size.width,
+                    self.size.height,
+                    &self.pipelines,
+                    &self.pipelines.dummy_solid_bind_group,
+                    &self.text_batch.bind_group,
+                    &self.quad_batch.buffer,
+                    &self.canvas_textures,
+                    &self.image_textures,
+                    &self.svg_textures,
+                );
+            }
+
+            self.scratch_quad_instances = quad_instances;
+            self.scratch_batches = batches;
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));

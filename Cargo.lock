@@ -2873,6 +2873,7 @@ dependencies = [
  "bytemuck",
  "crossterm",
  "env_logger",
+ "hashbrown 0.17.1",
  "mtk-layout",
  "mtk-macro",
  "parley",

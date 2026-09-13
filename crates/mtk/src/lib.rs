@@ -569,12 +569,45 @@ impl Context {
 
     /// Destroys a node and all of its recursive children from the layout engine and cleans up associated text/effect state.
     pub fn destroy_node(&mut self, node: Node) {
-        self.accessibility_nodes.remove(&node);
-        self.dirty_accessibility.remove(&node);
-        self.effects.remove(&node);
-        self.dirty_effects.remove(&node);
-        self.canvases.borrow_mut().remove(&node);
-        self.layout.destroy_node(node.0);
+        let accessibility_nodes = &mut self.accessibility_nodes;
+        let dirty_accessibility = &mut self.dirty_accessibility;
+        let effects = &mut self.effects;
+        let dirty_effects = &mut self.dirty_effects;
+        let canvases = &self.canvases;
+        let images = &self.images;
+        let svgs = &self.svgs;
+        let scrollbars = &mut self.scrollbars;
+        let ensure_visible_requests = &mut self.ensure_visible_requests;
+        let node_sources = &mut self.node_sources;
+        let focused_node = &mut self.focused_node;
+        let focusable_nodes = &mut self.focusable_nodes;
+        let highlight_node = &mut self.highlight_node;
+        let captured_pointer = &mut self.captured_pointer;
+
+        self.layout.destroy_node_with(node.0, |destroyed_id| {
+            let n = Node(destroyed_id);
+            accessibility_nodes.remove(&n);
+            dirty_accessibility.remove(&n);
+            effects.remove(&n);
+            dirty_effects.remove(&n);
+            canvases.borrow_mut().remove(&n);
+            images.borrow_mut().remove(&n);
+            svgs.borrow_mut().remove(&n);
+            scrollbars.remove(&n);
+            ensure_visible_requests.remove(&n);
+            node_sources.remove(&n);
+
+            if *focused_node == Some(n) {
+                *focused_node = None;
+            }
+            if *highlight_node == Some(n) {
+                *highlight_node = None;
+            }
+            if captured_pointer.as_ref().map_or(false, |c| c.node == n) {
+                *captured_pointer = None;
+            }
+            focusable_nodes.retain(|&x| x != n);
+        });
     }
 
     /// Attaches or updates semantic accessibility metadata for `node`.
@@ -939,4 +972,67 @@ pub mod accesskit {
 
 pub mod bytemuck {
     pub use bytemuck::*;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::effects::Effects;
+    use crate::image::{ImageData, ObjectFit};
+    use crate::style::ScrollbarStyle;
+
+    #[test]
+    fn test_destroy_node_recursive_cleanup() {
+        let mut ctx = Context::new();
+
+        let parent = ctx.create_node();
+        let child1 = ctx.create_node();
+        let child2 = ctx.create_node();
+        let grand_child = ctx.create_node();
+
+        parent.append(&mut ctx, child1);
+        parent.append(&mut ctx, child2);
+        child1.append(&mut ctx, grand_child);
+
+        // Attach various resources to parent, child1, child2, and grand_child
+        child1.set_effects(&mut ctx, Effects::default());
+        grand_child.set_scrollbar_style(&mut ctx, ScrollbarStyle::default());
+        ctx.set_accessible(child2, AccessibleInfo::new(accesskit::Role::Button));
+
+        ctx.images.borrow_mut().insert(
+            grand_child,
+            (
+                ImageData {
+                    id: 42,
+                    width: 100,
+                    height: 100,
+                    pixels: std::sync::Arc::from([]),
+                },
+                ObjectFit::Cover,
+            ),
+        );
+
+        ctx.focused_node = Some(child2);
+        assert_eq!(ctx.focused_node(), Some(child2));
+
+        // Verify elements exist prior to destruction
+        assert!(ctx.effects.contains_key(&child1));
+        assert!(ctx.scrollbars.contains_key(&grand_child));
+        assert!(ctx.accessibility_nodes.contains_key(&child2));
+        assert!(ctx.images.borrow().contains_key(&grand_child));
+
+        // Destroy the root parent
+        ctx.destroy_node(parent);
+
+        // Verify that ALL nodes (parent and all recursive descendants) are completely purged
+        assert!(!ctx.effects.contains_key(&child1));
+        assert!(!ctx.scrollbars.contains_key(&grand_child));
+        assert!(!ctx.accessibility_nodes.contains_key(&child2));
+        assert!(!ctx.images.borrow().contains_key(&grand_child));
+        assert_eq!(ctx.focused_node(), None);
+        assert!(!ctx.layout.is_valid(parent.0));
+        assert!(!ctx.layout.is_valid(child1.0));
+        assert!(!ctx.layout.is_valid(child2.0));
+        assert!(!ctx.layout.is_valid(grand_child.0));
+    }
 }

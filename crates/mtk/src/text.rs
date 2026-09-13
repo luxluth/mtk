@@ -4,7 +4,6 @@ use parley::style::{FontStyle, LineHeight, StyleProperty};
 use parley::{
     AlignmentOptions, BreakReason, Cluster, ClusterSide, Cursor, FontContext, LayoutContext,
 };
-use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -265,6 +264,8 @@ pub(crate) fn hash_spans(spans: &[TextSpan<()>]) -> u64 {
     hasher.finish()
 }
 
+use hashbrown::Equivalent;
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TextLayoutCacheKey {
     pub text: String,
@@ -282,6 +283,79 @@ pub struct TextLayoutCacheKey {
     pub spans_hash: u64,
 }
 
+#[derive(Copy, Clone, Debug)]
+pub struct TextLayoutLookupKey<'a> {
+    pub text: &'a str,
+    pub font_size_bits: u32,
+    pub font_family: &'a str,
+    pub font_weight_bits: u32,
+    pub font_style: u8,
+    pub color_u32: u32,
+    pub wrap: bool,
+    pub strikethrough: bool,
+    pub underline: bool,
+    pub selection: Option<(usize, usize)>,
+    pub preedit_range: Option<(usize, usize)>,
+    pub inner_w_bits: u32,
+    pub spans_hash: u64,
+}
+
+impl<'a> std::hash::Hash for TextLayoutLookupKey<'a> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.text.hash(state);
+        self.font_size_bits.hash(state);
+        self.font_family.hash(state);
+        self.font_weight_bits.hash(state);
+        self.font_style.hash(state);
+        self.color_u32.hash(state);
+        self.wrap.hash(state);
+        self.strikethrough.hash(state);
+        self.underline.hash(state);
+        self.selection.hash(state);
+        self.preedit_range.hash(state);
+        self.inner_w_bits.hash(state);
+        self.spans_hash.hash(state);
+    }
+}
+
+impl<'a> Equivalent<TextLayoutCacheKey> for TextLayoutLookupKey<'a> {
+    fn equivalent(&self, key: &TextLayoutCacheKey) -> bool {
+        self.text == key.text
+            && self.font_size_bits == key.font_size_bits
+            && self.font_family == key.font_family
+            && self.font_weight_bits == key.font_weight_bits
+            && self.font_style == key.font_style
+            && self.color_u32 == key.color_u32
+            && self.wrap == key.wrap
+            && self.strikethrough == key.strikethrough
+            && self.underline == key.underline
+            && self.selection == key.selection
+            && self.preedit_range == key.preedit_range
+            && self.inner_w_bits == key.inner_w_bits
+            && self.spans_hash == key.spans_hash
+    }
+}
+
+impl<'a> TextLayoutLookupKey<'a> {
+    pub fn to_cache_key(&self) -> TextLayoutCacheKey {
+        TextLayoutCacheKey {
+            text: self.text.to_string(),
+            font_size_bits: self.font_size_bits,
+            font_family: self.font_family.to_string(),
+            font_weight_bits: self.font_weight_bits,
+            font_style: self.font_style,
+            color_u32: self.color_u32,
+            wrap: self.wrap,
+            strikethrough: self.strikethrough,
+            underline: self.underline,
+            selection: self.selection,
+            preedit_range: self.preedit_range,
+            inner_w_bits: self.inner_w_bits,
+            spans_hash: self.spans_hash,
+        }
+    }
+}
+
 pub struct TextLayoutCacheEntry {
     pub layout: parley::Layout<Color>,
     pub actual_text_width: f32,
@@ -293,7 +367,12 @@ pub struct TextContext {
     pub font_cx: FontContext,
     pub layout_cx: LayoutContext<Color>,
     pub scale_cx: ScaleContext,
-    pub layout_cache: HashMap<TextLayoutCacheKey, Arc<TextLayoutCacheEntry>>,
+    /// Current active generation of cached layouts.
+    pub current_cache: hashbrown::HashMap<TextLayoutCacheKey, Arc<TextLayoutCacheEntry>>,
+    /// Previous generation of cached layouts. Items queried here are promoted to `current_cache`.
+    pub previous_cache: hashbrown::HashMap<TextLayoutCacheKey, Arc<TextLayoutCacheEntry>>,
+    /// Maximum capacity per generation before aging out `previous_cache`.
+    pub generation_capacity: usize,
 }
 
 impl TextContext {
@@ -302,7 +381,9 @@ impl TextContext {
             font_cx: FontContext::new(),
             layout_cx: LayoutContext::new(),
             scale_cx: ScaleContext::new(),
-            layout_cache: HashMap::new(),
+            current_cache: hashbrown::HashMap::new(),
+            previous_cache: hashbrown::HashMap::new(),
+            generation_capacity: 1000,
         }
     }
 
@@ -311,7 +392,18 @@ impl TextContext {
         self.font_cx
             .collection
             .register_fonts(font_data.into(), None);
-        self.layout_cache.clear();
+        self.clear_cache();
+    }
+
+    /// Clears both generations of the layout cache.
+    pub fn clear_cache(&mut self) {
+        self.current_cache.clear();
+        self.previous_cache.clear();
+    }
+
+    /// Returns the total number of cached layout entries across both generations.
+    pub fn cached_layout_count(&self) -> usize {
+        self.current_cache.len() + self.previous_cache.len()
     }
 
     /// Loads and registers a font file from disk.
@@ -344,10 +436,10 @@ impl TextContext {
 
         let spans_hash = hash_spans(spans);
 
-        let key = TextLayoutCacheKey {
-            text: text.to_string(),
+        let lookup_key = TextLayoutLookupKey {
+            text,
             font_size_bits: text_style.font_size.to_bits(),
-            font_family: text_style.font_family.clone(),
+            font_family: &text_style.font_family,
             font_weight_bits: text_style.font_weight.value().to_bits(),
             font_style: font_style_u8,
             color_u32: text_style.color.as_u32(),
@@ -360,8 +452,19 @@ impl TextContext {
             spans_hash,
         };
 
-        if let Some(entry) = self.layout_cache.get(&key) {
+        // 1. Check current active generation (fast path, zero allocation)
+        if let Some(entry) = self.current_cache.get(&lookup_key) {
             return Arc::clone(entry);
+        }
+
+        // 2. Check previous generation; if found, promote to current generation (zero allocation)
+        if let Some((prev_key, entry)) = self.previous_cache.remove_entry(&lookup_key) {
+            let cloned_entry = Arc::clone(&entry);
+            if self.current_cache.len() >= self.generation_capacity {
+                self.previous_cache = std::mem::take(&mut self.current_cache);
+            }
+            self.current_cache.insert(prev_key, entry);
+            return cloned_entry;
         }
 
         let display_scale = 1.0;
@@ -445,11 +548,12 @@ impl TextContext {
             actual_text_height,
         });
 
-        if self.layout_cache.len() > 1000 {
-            self.layout_cache.clear();
+        if self.current_cache.len() >= self.generation_capacity {
+            self.previous_cache = std::mem::take(&mut self.current_cache);
         }
 
-        self.layout_cache.insert(key, Arc::clone(&entry));
+        self.current_cache
+            .insert(lookup_key.to_cache_key(), Arc::clone(&entry));
         entry
     }
 }
@@ -823,5 +927,52 @@ mod tests {
             found_non_underlined_red,
             "Must find a non-underlined run with red brush"
         );
+    }
+
+    #[test]
+    fn test_text_layout_cache_generational_promotion() {
+        let mut text_cx = TextContext::new();
+        text_cx.generation_capacity = 3; // Small generation capacity for deterministic testing
+        let style = TextStyle::default();
+
+        // 1. Insert 3 items to fill generation 0
+        let entry1 = text_cx.get_or_create_layout("Item 1", &style, 100.0, None, None, &[]);
+        let _entry2 = text_cx.get_or_create_layout("Item 2", &style, 100.0, None, None, &[]);
+        let _entry3 = text_cx.get_or_create_layout("Item 3", &style, 100.0, None, None, &[]);
+
+        assert_eq!(text_cx.current_cache.len(), 3);
+        assert_eq!(text_cx.previous_cache.len(), 0);
+
+        // 2. Insert 4th item -> causes generation rollover!
+        // current_cache moves to previous_cache; 4th item goes into new current_cache
+        let _entry4 = text_cx.get_or_create_layout("Item 4", &style, 100.0, None, None, &[]);
+        assert_eq!(text_cx.current_cache.len(), 1);
+        assert_eq!(text_cx.previous_cache.len(), 3);
+
+        // 3. Query "Item 1" which lives in previous_cache -> should be promoted to current_cache!
+        let entry1_hit = text_cx.get_or_create_layout("Item 1", &style, 100.0, None, None, &[]);
+        assert!(Arc::ptr_eq(&entry1, &entry1_hit));
+        assert_eq!(text_cx.current_cache.len(), 2);
+        assert_eq!(text_cx.previous_cache.len(), 2); // "Item 1" was moved out of previous_cache
+
+        // 4. Fill up current_cache until rollover again
+        let _entry5 = text_cx.get_or_create_layout("Item 5", &style, 100.0, None, None, &[]);
+        let _entry6 = text_cx.get_or_create_layout("Item 6", &style, 100.0, None, None, &[]);
+        // Now current has 1, 4, 5, 6 -> rollover!
+        // "Item 2" and "Item 3" (which were never queried) get naturally evicted!
+        assert!(
+            !text_cx
+                .current_cache
+                .keys()
+                .any(|k| k.text == "Item 2" || k.text == "Item 3")
+        );
+        assert!(
+            !text_cx
+                .previous_cache
+                .keys()
+                .any(|k| k.text == "Item 2" || k.text == "Item 3")
+        );
+        // But "Item 1" survived into previous_cache because it was promoted!
+        assert!(text_cx.previous_cache.keys().any(|k| k.text == "Item 1"));
     }
 }

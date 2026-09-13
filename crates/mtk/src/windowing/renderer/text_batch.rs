@@ -43,6 +43,7 @@ pub struct TextBatch {
     pub buffer: wgpu::Buffer,
     pub bind_group: wgpu::BindGroup,
     pub capacity: usize,
+    pub scratch_instances: Vec<TextInstance>,
 }
 
 impl TextBatch {
@@ -83,6 +84,7 @@ impl TextBatch {
             buffer,
             bind_group,
             capacity,
+            scratch_instances: Vec::with_capacity(capacity),
         }
     }
 
@@ -96,7 +98,8 @@ impl TextBatch {
         text_bind_group_layout: &wgpu::BindGroupLayout,
         context: &crate::Context,
     ) -> (HashMap<usize, RenderTextData>, Option<[f32; 4]>) {
-        let mut text_instances = Vec::new();
+        let mut text_instances = std::mem::take(&mut self.scratch_instances);
+        text_instances.clear();
         let mut text_ranges = HashMap::new();
         let mut focused_caret = None;
         let scale_factor = context.scale_factor.max(0.1);
@@ -464,6 +467,7 @@ impl TextBatch {
             queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&text_instances));
         }
 
+        self.scratch_instances = text_instances;
         (text_ranges, focused_caret)
     }
 }
