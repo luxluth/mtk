@@ -1,3 +1,4 @@
+use super::quadtree::Quadtree;
 use super::sparse_set::{NodeId, SparseSet};
 use super::types::{
     AlignItems, AlignSelf, CachedTextMeasurement, Computed, Constraints, FlexDirection, FlexWrap,
@@ -38,6 +39,7 @@ pub struct LayoutEngine {
     pub pick_list: Vec<NodeId>,
     pub scratch_children: Vec<NodeId>,
     scratch_flex_items: Vec<FlexItemScratch>,
+    pub quadtree: Quadtree,
 }
 
 impl Default for LayoutEngine {
@@ -69,6 +71,7 @@ impl LayoutEngine {
             pick_list: Vec::new(),
             scratch_children: Vec::new(),
             scratch_flex_items: Vec::new(),
+            quadtree: Quadtree::new(),
         }
     }
 
@@ -2487,6 +2490,7 @@ impl LayoutEngine {
         let Some(root) = self.root else {
             self.render_list.clear();
             self.temp_render_list.clear();
+            self.quadtree.clear();
             return;
         };
 
@@ -2514,6 +2518,8 @@ impl LayoutEngine {
             .extend(temp_list.drain(..).map(|(cmd, _)| cmd));
         self.temp_render_list = temp_list;
         self.render_list_dirty = false;
+
+        self.quadtree.build(viewport, &self.render_list);
     }
 
     pub fn pick(&mut self, x: f32, y: f32) -> &[NodeId] {
@@ -2523,36 +2529,7 @@ impl LayoutEngine {
             return &self.pick_list;
         }
 
-        let mut last_checked = None;
-
-        for cmd in self.render_list.iter().rev() {
-            let node = cmd.node;
-            if Some(node) == last_checked {
-                continue;
-            }
-
-            let in_bounds = x >= cmd.computed.x
-                && x <= cmd.computed.x + cmd.computed.w
-                && y >= cmd.computed.y
-                && y <= cmd.computed.y + cmd.computed.h;
-
-            if !in_bounds {
-                continue;
-            }
-
-            if cmd.has_clip
-                && (x < cmd.clip.x
-                    || x > cmd.clip.x + cmd.clip.w
-                    || y < cmd.clip.y
-                    || y > cmd.clip.y + cmd.clip.h)
-            {
-                continue;
-            }
-
-            last_checked = Some(node);
-            self.pick_list.push(node);
-        }
-
+        self.quadtree.query_point(x, y, &mut self.pick_list);
         &self.pick_list
     }
 }
@@ -2986,5 +2963,54 @@ mod tests {
         assert_eq!(text_comp.h, 70.0);
         assert_eq!(inner_col_comp.h, 70.0);
         assert_eq!(row_comp.h, 70.0);
+    }
+
+    #[test]
+    fn test_engine_pick_quadtree() {
+        let mut engine = LayoutEngine::new();
+        let root = engine.create_node();
+        let child1 = engine.create_node();
+        let child2 = engine.create_node();
+
+        let mut root_cons = Constraints::default();
+        root_cons.width = Size::Fixed(400);
+        root_cons.height = Size::Fixed(300);
+        engine.set_constraints(root, root_cons);
+
+        let mut c1_cons = Constraints::default();
+        c1_cons.width = Size::Fixed(50);
+        c1_cons.height = Size::Fixed(50);
+        engine.set_constraints(child1, c1_cons);
+
+        let mut c2_cons = Constraints::default();
+        c2_cons.width = Size::Fixed(50);
+        c2_cons.height = Size::Fixed(50);
+        engine.set_constraints(child2, c2_cons);
+
+        engine.append(root, child1);
+        engine.append(root, child2);
+        engine.root_attach(root);
+
+        let dummy_measure = |_node: NodeId,
+                             _text: &str,
+                             _userdata: Option<&dyn std::any::Any>,
+                             _w: f32,
+                             _h: f32| TextMetrics::default();
+
+        engine.compute_layout(400.0, 300.0, dummy_measure);
+        engine.build_render_list(Rect::new(0.0, 0.0, 400.0, 300.0));
+
+        // Child 1 is at (0, 0, 50, 50), Child 2 is at (0, 50, 50, 50)
+        let hit_c1 = engine.pick(25.0, 25.0);
+        assert_eq!(hit_c1, &[child1, root]);
+
+        let hit_c2 = engine.pick(25.0, 75.0);
+        assert_eq!(hit_c2, &[child2, root]);
+
+        let hit_bg = engine.pick(200.0, 200.0);
+        assert_eq!(hit_bg, &[root]);
+
+        let hit_outside = engine.pick(500.0, 500.0);
+        assert!(hit_outside.is_empty());
     }
 }

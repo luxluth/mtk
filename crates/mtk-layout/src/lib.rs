@@ -1,8 +1,10 @@
 pub mod engine;
+pub mod quadtree;
 pub mod sparse_set;
 pub mod types;
 
 pub use engine::LayoutEngine;
+pub use quadtree::{QuadItem, QuadNode, Quadtree};
 pub use sparse_set::{NodeId, SPARSE_NULL, SparseSet};
 pub use types::{
     AbsoluteBuilder, AlignItems, AlignSelf, CachedTextMeasurement, Computed, Constraints, Edges,

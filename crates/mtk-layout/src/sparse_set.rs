@@ -13,6 +13,11 @@ impl NodeId {
     };
 
     #[inline(always)]
+    pub const fn new(index: u32, generation: u32) -> Self {
+        Self { index, generation }
+    }
+
+    #[inline(always)]
     pub fn is_valid(self) -> bool {
         self.index != u32::MAX && self.generation != u32::MAX
     }

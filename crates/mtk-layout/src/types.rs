@@ -466,10 +466,58 @@ macro_rules! with {
 }
 
 impl Rect {
+    pub const ZERO: Self = Self {
+        x: 0.0,
+        y: 0.0,
+        w: 0.0,
+        h: 0.0,
+    };
+
+    pub fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
+        Self { x, y, w, h }
+    }
+
     with!(x, f32);
     with!(y, f32);
     with!(w, f32);
     with!(h, f32);
+
+    #[inline]
+    pub fn contains(&self, px: f32, py: f32) -> bool {
+        px >= self.x && px <= self.x + self.w && py >= self.y && py <= self.y + self.h
+    }
+
+    #[inline]
+    pub fn intersect(&self, other: &Rect) -> Option<Rect> {
+        let x1 = self.x.max(other.x);
+        let y1 = self.y.max(other.y);
+        let x2 = (self.x + self.w).min(other.x + other.w);
+        let y2 = (self.y + self.h).min(other.y + other.h);
+        if x2 >= x1 && y2 >= y1 {
+            Some(Rect {
+                x: x1,
+                y: y1,
+                w: x2 - x1,
+                h: y2 - y1,
+            })
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub fn union(&self, other: &Rect) -> Rect {
+        let x1 = self.x.min(other.x);
+        let y1 = self.y.min(other.y);
+        let x2 = (self.x + self.w).max(other.x + other.w);
+        let y2 = (self.y + self.h).max(other.y + other.h);
+        Rect {
+            x: x1,
+            y: y1,
+            w: (x2 - x1).max(0.0),
+            h: (y2 - y1).max(0.0),
+        }
+    }
 }
 
 impl Default for Rect {
