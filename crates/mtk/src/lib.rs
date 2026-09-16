@@ -16,6 +16,7 @@ pub mod text;
 pub mod ui;
 pub mod windowing;
 
+use crate::ui::morph::{MorphId, MorphInfo, MorphPair, MorphTransition};
 use ::winit::keyboard::ModifiersState;
 use ::winit::window::Window;
 pub use mtk_macro::Lens;
@@ -130,6 +131,10 @@ pub struct Context {
     pub scale_factor: f32,
     pub captured_pointer: Option<PointerCapture>,
 
+    // Shared element morph registry
+    pub morph_registry: HashMap<Node, MorphInfo>,
+    pub morph_nodes_by_id: HashMap<MorphId, Vec<Node>>,
+
     // Core-level Super Layers and User Intermediate Layers
     pub base_layer: InternalLayer,
     pub intermediate_layers: Vec<UserLayer>,
@@ -189,6 +194,9 @@ impl Context {
             highlight_node: None,
             scale_factor: 1.0,
             captured_pointer: None,
+
+            morph_registry: HashMap::new(),
+            morph_nodes_by_id: HashMap::new(),
 
             base_layer: InternalLayer::new(true),
             intermediate_layers: Vec::new(),
@@ -844,6 +852,67 @@ impl Context {
     /// Retrieves the source code definition location for a layout node, if recorded.
     pub fn get_node_source(&self, node: Node) -> Option<SourceLocation> {
         self.node_sources.get(&node).copied()
+    }
+
+    /// Registers a node with a morph identifier for shared element transitions.
+    pub fn register_morph_node(
+        &mut self,
+        container_node: Node,
+        inner_node: Node,
+        id: MorphId,
+        transition: MorphTransition,
+    ) {
+        let info = MorphInfo {
+            container_node,
+            inner_node,
+            id: id.clone(),
+            transition,
+        };
+        self.morph_registry.insert(container_node, info);
+        self.morph_nodes_by_id
+            .entry(id)
+            .or_default()
+            .push(container_node);
+    }
+
+    /// Unregisters a morph node from the context registry.
+    pub fn unregister_morph_node(&mut self, container_node: Node) {
+        if let Some(info) = self.morph_registry.remove(&container_node) {
+            if let Some(list) = self.morph_nodes_by_id.get_mut(&info.id) {
+                list.retain(|n| *n != container_node);
+                if list.is_empty() {
+                    self.morph_nodes_by_id.remove(&info.id);
+                }
+            }
+        }
+    }
+
+    /// Discovers matching pairs of morphable elements between an outgoing and incoming view subtree.
+    pub fn find_morph_pairs(&self, out_root: Node, cur_root: Node) -> Vec<MorphPair> {
+        let mut pairs = Vec::new();
+        for (id, nodes) in &self.morph_nodes_by_id {
+            let mut source = None;
+            let mut target = None;
+            for &node in nodes {
+                if node.is_descendant_of(self, out_root) || node == out_root {
+                    if let Some(info) = self.morph_registry.get(&node) {
+                        source = Some(info.clone());
+                    }
+                } else if node.is_descendant_of(self, cur_root) || node == cur_root {
+                    if let Some(info) = self.morph_registry.get(&node) {
+                        target = Some(info.clone());
+                    }
+                }
+            }
+            if let (Some(source), Some(target)) = (source, target) {
+                pairs.push(MorphPair {
+                    id: id.clone(),
+                    source,
+                    target,
+                });
+            }
+        }
+        pairs
     }
 
     /// Returns the currently attached root node of the layout tree, if any.

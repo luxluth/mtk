@@ -389,6 +389,12 @@ impl PageTransition {
         self
     }
 
+    /// Sets transition duration in seconds.
+    pub fn duration_secs(mut self, duration_secs: f32) -> Self {
+        self.duration_ms = 1000.0 * duration_secs;
+        self
+    }
+
     /// Sets transition easing curve.
     pub fn curve(mut self, curve: Curve) -> Self {
         self.curve = curve;

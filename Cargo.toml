@@ -24,3 +24,4 @@ zune-core = "0.5"
 arboard = { version = "3", features = ["wayland-data-control"] }
 accesskit = "0.25.0"
 hashbrown = "0.17.1"
+smol_str = "0.3.6"

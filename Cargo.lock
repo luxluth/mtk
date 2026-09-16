@@ -2881,6 +2881,7 @@ dependencies = [
  "pollster",
  "ratatui",
  "resvg",
+ "smol_str",
  "swash",
  "wgpu",
  "winit",
