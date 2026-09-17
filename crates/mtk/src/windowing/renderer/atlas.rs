@@ -11,6 +11,7 @@ pub struct CacheKey {
     pub glyph_id: u16,
     pub subpx: u8,
     pub coords_hash: u64,
+    pub hinted: bool,
 }
 
 pub struct Atlas {

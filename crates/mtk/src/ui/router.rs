@@ -9,12 +9,12 @@ use std::time::Instant;
 use crate::animation::{Animatable, AnimatedValue};
 use crate::debugger::SourceLocation;
 use crate::effects::Effects;
-use crate::style::{Overflow, PositionStrategy, Rect, Size, Style};
+use crate::style::{AlignItems, JustifyContent, Overflow, PositionStrategy, Rect, Size, Style};
 use crate::ui::event::EventResult;
 use crate::ui::morph::{MorphId, MorphTransition};
 use crate::ui::transition::{PageTransition, TransitionOrder};
 use crate::ui::{Event, View};
-use crate::{Context, Node};
+use crate::{BoxShadow, Color, Context, Node};
 
 /// Tracks active state for an ongoing shared element morph flight.
 pub(crate) struct ActiveMorphFlight {
@@ -164,7 +164,11 @@ fn apply_transition_step(
 }
 
 fn settle_morphs(ctx: &mut Context, morphs: &mut Vec<ActiveMorphFlight>) {
+    let had_morphs = !morphs.is_empty();
     for flight in morphs.drain(..) {
+        ctx.morph_suppressed_nodes.remove(&flight.source_inner);
+        ctx.morph_suppressed_nodes.remove(&flight.target_inner);
+
         if flight.shuttle_target_box.is_some() {
             flight.target_inner.remove(ctx);
             flight.target_container.append(ctx, flight.target_inner);
@@ -184,9 +188,15 @@ fn settle_morphs(ctx: &mut Context, morphs: &mut Vec<ActiveMorphFlight>) {
                 c.height = Size::Fit;
             });
         }
+        if let Some(source_eff) = flight.source_effects {
+            flight.source_inner.set_effects(ctx, source_eff);
+        }
         if let Some(target_eff) = flight.target_effects {
             flight.target_inner.set_effects(ctx, target_eff);
         }
+    }
+    if had_morphs {
+        ctx.request_frame();
     }
 }
 
@@ -225,17 +235,36 @@ fn apply_morph_step(
                     flight.target_effects = Some(t_eff.clone());
 
                     flight.source_container.update_constraints(ctx, |c| {
-                        c.width = Size::Fixed(s.w as u32);
-                        c.height = Size::Fixed(s.h as u32);
+                        c.width = Size::Fixed(s.w.round().max(1.0) as u32);
+                        c.height = Size::Fixed(s.h.round().max(1.0) as u32);
                     });
                     flight.target_orig_size = flight
                         .target_container
                         .get_constraints(ctx)
                         .map(|c| (c.width, c.height));
                     flight.target_container.update_constraints(ctx, |c| {
-                        c.width = Size::Fixed(t.w as u32);
-                        c.height = Size::Fixed(t.h as u32);
+                        c.width = Size::Fixed(t.w.round().max(1.0) as u32);
+                        c.height = Size::Fixed(t.h.round().max(1.0) as u32);
                     });
+
+                    if flight.transition.morph_effects {
+                        ctx.morph_suppressed_nodes.insert(flight.source_inner);
+                        ctx.morph_suppressed_nodes.insert(flight.target_inner);
+
+                        let mut clear_s = s_eff.clone();
+                        clear_s.background_color = Color::transparent;
+                        clear_s.box_shadow = BoxShadow::default();
+                        clear_s.additional_shadows.clear();
+                        clear_s.border.color = Color::transparent;
+                        flight.source_inner.set_effects(ctx, clear_s);
+
+                        let mut clear_t = t_eff.clone();
+                        clear_t.background_color = Color::transparent;
+                        clear_t.box_shadow = BoxShadow::default();
+                        clear_t.additional_shadows.clear();
+                        clear_t.border.color = Color::transparent;
+                        flight.target_inner.set_effects(ctx, clear_t);
+                    }
 
                     let shuttle = ctx.create_node();
                     shuttle.update_constraints(ctx, |c| {
@@ -245,9 +274,8 @@ fn apply_morph_step(
                             right: f32::NAN,
                             bottom: f32::NAN,
                         };
-                        c.width = Size::Fixed(s_rect.w.max(1.0) as u32);
-                        c.height = Size::Fixed(s_rect.h.max(1.0) as u32);
-                        c.overflow = Overflow::Hidden;
+                        c.width = Size::Fixed(s_rect.w.round().max(1.0) as u32);
+                        c.height = Size::Fixed(s_rect.h.round().max(1.0) as u32);
                         c.z_index = 100;
                     });
                     shuttle.set_effects(ctx, s_eff);
@@ -263,6 +291,8 @@ fn apply_morph_step(
                         };
                         c.width = Size::Percent(1.0);
                         c.height = Size::Percent(1.0);
+                        c.justify_content = JustifyContent::Center;
+                        c.align_items = AlignItems::Center;
                     });
                     source_box.update_effects(ctx, |e| e.opacity = 1.0);
 
@@ -276,6 +306,8 @@ fn apply_morph_step(
                         };
                         c.width = Size::Percent(1.0);
                         c.height = Size::Percent(1.0);
+                        c.justify_content = JustifyContent::Center;
+                        c.align_items = AlignItems::Center;
                     });
                     target_box.update_effects(ctx, |e| e.opacity = 0.0);
 
@@ -300,10 +332,26 @@ fn apply_morph_step(
         {
             let p = flight.transition.curve.eval(progress as f64) as f32;
 
-            let curr_x = s_rect.x + (t_rect.x - s_rect.x) * p;
-            let curr_y = s_rect.y + (t_rect.y - s_rect.y) * p;
-            let curr_w = (s_rect.w + (t_rect.w - s_rect.w) * p).max(1.0);
-            let curr_h = (s_rect.h + (t_rect.h - s_rect.h) * p).max(1.0);
+            let curr_x = if progress >= 0.999 {
+                t_rect.x
+            } else {
+                s_rect.x + (t_rect.x - s_rect.x) * p
+            };
+            let curr_y = if progress >= 0.999 {
+                t_rect.y
+            } else {
+                s_rect.y + (t_rect.y - s_rect.y) * p
+            };
+            let curr_w = if progress >= 0.999 {
+                t_rect.w
+            } else {
+                (s_rect.w + (t_rect.w - s_rect.w) * p).max(1.0)
+            };
+            let curr_h = if progress >= 0.999 {
+                t_rect.h
+            } else {
+                (s_rect.h + (t_rect.h - s_rect.h) * p).max(1.0)
+            };
 
             shuttle.update_constraints(ctx, |c| {
                 c.positioning = PositionStrategy::Absolute {
@@ -312,8 +360,8 @@ fn apply_morph_step(
                     right: f32::NAN,
                     bottom: f32::NAN,
                 };
-                c.width = Size::Fixed(curr_w as u32);
-                c.height = Size::Fixed(curr_h as u32);
+                c.width = Size::Fixed(curr_w.round().max(1.0) as u32);
+                c.height = Size::Fixed(curr_h.round().max(1.0) as u32);
             });
 
             if flight.transition.morph_effects {
@@ -908,5 +956,136 @@ mod tests {
         View::<()>::handle_event(&r3, &mut el, &(), Event::Tick { dt: 0.35 }, &mut ctx);
         assert!(el.outgoing.is_none());
         assert!(el.active_morphs.is_empty());
+    }
+
+    #[test]
+    fn test_morph_flight_suppresses_inner_shadows_and_restores_on_settle() {
+        use crate::BoxShadow;
+        use crate::ui::morph::MorphViewExt;
+
+        let mut ctx = Context::new();
+
+        let card = column((text::<_, ()>("Card Title"),))
+            .style(
+                Style::new()
+                    .width(Size::Fixed(240))
+                    .height(Size::Fixed(160))
+                    .bg_color(crate::rgb!(79, 70, 229))
+                    .corner_radius(14.0)
+                    .box_shadow(
+                        BoxShadow::drop(crate::rgba!(0, 0, 0, 45))
+                            .offset(0.0, 4.0)
+                            .blur(10.0),
+                    ),
+            )
+            .morph("card");
+
+        let hero = column((text::<_, ()>("Hero Title"),))
+            .style(
+                Style::new()
+                    .width(Size::Fixed(760))
+                    .height(Size::Fixed(320))
+                    .bg_color(crate::rgb!(67, 56, 202))
+                    .corner_radius(26.0)
+                    .box_shadow(
+                        BoxShadow::drop(crate::rgba!(0, 0, 0, 65))
+                            .offset(0.0, 12.0)
+                            .blur(28.0),
+                    ),
+            )
+            .morph("card");
+
+        let p1 = column((card,)).style(
+            Style::new()
+                .width(Size::Percent(1.0))
+                .height(Size::Percent(1.0))
+                .bg_color(crate::rgb!(248, 250, 252)),
+        );
+
+        let p2 = column((hero,)).style(
+            Style::new()
+                .width(Size::Percent(1.0))
+                .height(Size::Percent(1.0))
+                .bg_color(crate::rgb!(248, 250, 252)),
+        );
+
+        let r1 = router(1, p1).transition(PageTransition::fade().duration_ms(1000.0));
+        let r2 = router(2, p2).transition(PageTransition::fade().duration_ms(1000.0));
+
+        let mut el = View::<()>::build(&r1, &mut ctx);
+        let container = View::<()>::get_node(&r1, &el);
+        ctx.root_attach(container);
+        ctx.compute_layout(1000.0, 650.0);
+
+        View::<()>::rebuild(&r2, &r1, &mut ctx, &mut el);
+        ctx.compute_layout(1000.0, 650.0);
+
+        // Mid-flight: elapsed 500ms
+        el.anim_start = std::time::Instant::now() - std::time::Duration::from_millis(500);
+        View::<()>::handle_event(&r2, &mut el, &(), Event::Tick { dt: 0.016 }, &mut ctx);
+        ctx.compute_layout(1000.0, 650.0);
+
+        assert_eq!(el.active_morphs.len(), 1);
+        let flight = &el.active_morphs[0];
+        let target_inner_node = flight.target_inner;
+        let source_inner_node = flight.source_inner;
+        let shuttle_node = flight.shuttle_node.unwrap();
+
+        assert!(ctx.morph_suppressed_nodes.contains(&source_inner_node));
+        assert!(ctx.morph_suppressed_nodes.contains(&target_inner_node));
+
+        let shuttle_cons = shuttle_node.get_constraints(&ctx).unwrap();
+        assert_eq!(shuttle_cons.overflow, Overflow::Visible);
+
+        let s_inner_eff = ctx
+            .effects
+            .get(&source_inner_node)
+            .cloned()
+            .unwrap_or_default();
+        let t_inner_eff = ctx
+            .effects
+            .get(&target_inner_node)
+            .cloned()
+            .unwrap_or_default();
+        let shuttle_eff = ctx.effects.get(&shuttle_node).cloned().unwrap_or_default();
+
+        // Inner elements have their background and box shadow suppressed to prevent clipped corner triangles
+        assert_eq!(s_inner_eff.background_color.a, 0);
+        assert_eq!(s_inner_eff.box_shadow.blur_radius, 0.0);
+        assert_eq!(t_inner_eff.background_color.a, 0);
+        assert_eq!(t_inner_eff.box_shadow.blur_radius, 0.0);
+
+        // Shuttle is the active shell rendering the interpolated effects
+        assert!(shuttle_eff.box_shadow.blur_radius > 0.0);
+        assert!(shuttle_eff.background_color.a > 0);
+
+        // Simulate an intermediate rebuild (e.g. mouse movement or state change) mid-flight
+        View::<()>::rebuild(&r2, &r2, &mut ctx, &mut el);
+        let t_eff_after_rebuild = ctx
+            .effects
+            .get(&target_inner_node)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(t_eff_after_rebuild.background_color.a, 0);
+        assert_eq!(t_eff_after_rebuild.box_shadow.blur_radius, 0.0);
+
+        // End of transition: elapsed 1000ms
+        el.anim_start = std::time::Instant::now() - std::time::Duration::from_millis(1000);
+        View::<()>::handle_event(&r2, &mut el, &(), Event::Tick { dt: 0.016 }, &mut ctx);
+        ctx.compute_layout(1000.0, 650.0);
+
+        assert!(el.active_morphs.is_empty());
+        assert!(el.outgoing.is_none());
+        assert!(!ctx.morph_suppressed_nodes.contains(&target_inner_node));
+        assert!(!ctx.morph_suppressed_nodes.contains(&source_inner_node));
+
+        let settled_eff = ctx
+            .effects
+            .get(&target_inner_node)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(settled_eff.background_color, crate::rgb!(67, 56, 202));
+        assert_eq!(settled_eff.box_shadow.blur_radius, 28.0);
+        assert_eq!(settled_eff.border.radius.tl, 26.0);
     }
 }

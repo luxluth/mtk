@@ -425,7 +425,16 @@ impl<V> StyledView<V> {
         });
 
         // Apply effects
-        node.set_effects(ctx, active_style.base_effects.clone());
+        if ctx.morph_suppressed_nodes.contains(&node) {
+            let mut suppressed = active_style.base_effects.clone();
+            suppressed.background_color = crate::Color::transparent;
+            suppressed.box_shadow = crate::BoxShadow::default();
+            suppressed.additional_shadows.clear();
+            suppressed.border.color = crate::Color::transparent;
+            node.set_effects(ctx, suppressed);
+        } else {
+            node.set_effects(ctx, active_style.base_effects.clone());
+        }
 
         // Apply scrollbar style
         if let Some(sb) = &active_style.scrollbar {

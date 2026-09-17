@@ -199,12 +199,16 @@ impl TextBatch {
                         norm_coords.hash(&mut hasher);
                         let coords_hash = hasher.finish();
 
+                        let should_hint = false;
                         let mut scaler_opt = None;
 
                         for glyph in glyph_run.positioned_glyphs() {
-                            let raw_x = (text_x + glyph.x) * scale_factor;
-                            let raw_y = (text_y + glyph.y) * scale_factor;
-                            let subpx = ((raw_x.fract().rem_euclid(1.0) * 4.0).round() as u8) % 4;
+                            let local_x = (text_x + glyph.x) * scale_factor;
+                            let local_y = (text_y + glyph.y) * scale_factor;
+
+                            let total_quarters = (local_x * 4.0).round() as i32;
+                            let subpx = total_quarters.rem_euclid(4) as u8;
+                            let subpx_offset = (subpx as f32) * 0.25;
 
                             let cache_key = CacheKey {
                                 font_ptr,
@@ -212,6 +216,7 @@ impl TextBatch {
                                 glyph_id: glyph.id as u16,
                                 subpx,
                                 coords_hash,
+                                hinted: should_hint,
                             };
 
                             let info_opt = if let Some(info) = atlas.get(cache_key) {
@@ -229,7 +234,7 @@ impl TextBatch {
                                             .scale_cx
                                             .builder(swash_font)
                                             .size(font_size)
-                                            .hint(true)
+                                            .hint(should_hint)
                                             .normalized_coords(norm_coords)
                                             .build(),
                                     );
@@ -243,16 +248,19 @@ impl TextBatch {
                                     continue;
                                 }
 
-                                let base_x = raw_x.floor();
-                                let base_y = raw_y.floor();
-                                let global_x = base_x + info.offset_x as f32;
-                                let global_y = base_y + info.offset_y as f32;
+                                let anchor_local_x = local_x - subpx_offset;
+                                let anchor_local_y = local_y;
 
-                                let (transformed_x, transformed_y) = super::transform_node_point(
+                                let (trans_anchor_x, trans_anchor_y) = super::transform_node_point(
                                     context,
                                     node,
-                                    (global_x, global_y),
+                                    (anchor_local_x, anchor_local_y),
                                 );
+
+                                let transformed_x =
+                                    trans_anchor_x + info.offset_x as f32 * total_scale;
+                                let transformed_y =
+                                    trans_anchor_y + info.offset_y as f32 * total_scale;
 
                                 let mut color: [f32; 4] = if info.is_color {
                                     [1.0, 1.0, 1.0, brush.a as f32 / 255.0]
@@ -262,10 +270,10 @@ impl TextBatch {
                                 color[3] *= super::compute_effective_opacity(context, node);
 
                                 text_instances.push(TextInstance {
-                                    pos: [transformed_x.round(), transformed_y.round()],
+                                    pos: [transformed_x, transformed_y],
                                     size: [
-                                        (info.physical_w as f32 * total_scale).round(),
-                                        (info.physical_h as f32 * total_scale).round(),
+                                        info.physical_w as f32 * total_scale,
+                                        info.physical_h as f32 * total_scale,
                                     ],
                                     uv_pos: [info.uv_x, info.uv_y],
                                     uv_size: [info.uv_w, info.uv_h],

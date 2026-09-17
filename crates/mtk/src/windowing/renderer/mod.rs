@@ -1224,7 +1224,13 @@ fn prepare_command_slice<'a, I>(
             let node = cmd.node();
             let computed = cmd.computed();
             let constraints = node.get_constraints(context).unwrap_or_default();
-            let effects = context.effects.get(&node).cloned().unwrap_or_default();
+            let mut effects = context.effects.get(&node).cloned().unwrap_or_default();
+            if context.morph_suppressed_nodes.contains(&node) {
+                effects.background_color = crate::Color::transparent;
+                effects.box_shadow = crate::BoxShadow::default();
+                effects.additional_shadows.clear();
+                effects.border.color = crate::Color::transparent;
+            }
             let total_scale = compute_effective_scale(context, node);
 
             let cx = (computed.x + computed.w / 2.0) * scale_factor;
@@ -2443,5 +2449,202 @@ mod tests {
             .find(|q| q.quad_size == [2.0 * 1.25, 15.0 * 1.25]);
         assert!(caret_quad.is_some());
         assert_eq!(caret_quad.unwrap().pos, [25.0, 6.25]);
+    }
+
+    #[test]
+    fn test_morph_suppressed_nodes_in_renderer() {
+        let mut ctx = Context::new();
+        let node = ctx.create_node();
+        node.set_constraints(
+            &mut ctx,
+            crate::style::Constraints {
+                width: crate::style::Size::Fixed(200),
+                height: crate::style::Size::Fixed(100),
+                ..Default::default()
+            },
+        );
+        node.set_effects(
+            &mut ctx,
+            crate::effects::Effects {
+                background_color: crate::rgb!(255, 0, 0),
+                box_shadow: crate::BoxShadow::drop(crate::rgba!(0, 0, 0, 100)).blur(10.0),
+                ..Default::default()
+            },
+        );
+        ctx.root_attach(node);
+        ctx.compute_layout(800.0, 600.0);
+        ctx.build_render_list(crate::style::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 800.0,
+            h: 600.0,
+        });
+
+        let mut quad_instances = Vec::new();
+        let mut draw_batches = Vec::new();
+        let dummy_text = HashMap::new();
+        let dummy_canvas = HashMap::new();
+        let dummy_images = HashMap::new();
+        let dummy_svgs = HashMap::new();
+
+        prepare_command_slice(
+            ctx.render_list().enumerate(),
+            800,
+            600,
+            &dummy_text,
+            &dummy_canvas,
+            &dummy_images,
+            &dummy_svgs,
+            &ctx,
+            &mut quad_instances,
+            &mut draw_batches,
+        );
+        assert!(!quad_instances.is_empty());
+        let q = quad_instances[0];
+        assert_eq!(q.color, [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(q.shadow_offset[2], 10.0);
+
+        ctx.morph_suppressed_nodes.insert(node);
+        quad_instances.clear();
+        draw_batches.clear();
+        prepare_command_slice(
+            ctx.render_list().enumerate(),
+            800,
+            600,
+            &dummy_text,
+            &dummy_canvas,
+            &dummy_images,
+            &dummy_svgs,
+            &ctx,
+            &mut quad_instances,
+            &mut draw_batches,
+        );
+        assert!(!quad_instances.is_empty());
+        let q_suppressed = quad_instances[0];
+        assert_eq!(q_suppressed.color[3], 0.0);
+        assert_eq!(q_suppressed.shadow_offset[2], 0.0);
+    }
+
+    #[test]
+    fn test_text_glyph_scaling_kerning_invariance() {
+        let mut ctx = Context::new();
+        let btn = ctx.create_node();
+        btn.set_constraints(
+            &mut ctx,
+            crate::style::Constraints {
+                width: crate::style::Size::Fixed(120),
+                height: crate::style::Size::Fixed(40),
+                ..Default::default()
+            },
+        );
+        ctx.root_attach(btn);
+        ctx.compute_layout(800.0, 600.0);
+
+        // Simulated glyph local offsets in a text run ("AB")
+        let glyph_a_local = 10.0f32;
+        let glyph_b_local = 28.5f32;
+        let original_distance = glyph_b_local - glyph_a_local;
+
+        // At scale 1.05 (e.g. hover zoom):
+        let scale = 1.05f32;
+        btn.update_effects(&mut ctx, |e| e.scale = scale);
+
+        let pt_a = transform_node_point(&ctx, btn, (glyph_a_local, 20.0));
+        let pt_b = transform_node_point(&ctx, btn, (glyph_b_local, 20.0));
+        let scaled_distance = pt_b.0 - pt_a.0;
+
+        // Mathematical kerning invariance: distance must scale by exactly `scale`
+        let expected_distance = original_distance * scale;
+        assert!(
+            (scaled_distance - expected_distance).abs() < 1e-5,
+            "Scaled distance {} != expected {}",
+            scaled_distance,
+            expected_distance
+        );
+
+        // At scale 0.95 (e.g. press):
+        let scale_press = 0.95f32;
+        btn.update_effects(&mut ctx, |e| e.scale = scale_press);
+        let pt_a_press = transform_node_point(&ctx, btn, (glyph_a_local, 20.0));
+        let pt_b_press = transform_node_point(&ctx, btn, (glyph_b_local, 20.0));
+        let pressed_distance = pt_b_press.0 - pt_a_press.0;
+        let expected_press_distance = original_distance * scale_press;
+        assert!(
+            (pressed_distance - expected_press_distance).abs() < 1e-5,
+            "Pressed distance {} != expected {}",
+            pressed_distance,
+            expected_press_distance
+        );
+    }
+
+    #[test]
+    fn test_text_glyph_translation_kerning_invariance() {
+        let mut ctx = Context::new();
+        let card = ctx.create_node();
+        card.set_constraints(
+            &mut ctx,
+            crate::style::Constraints {
+                width: crate::style::Size::Fixed(200),
+                height: crate::style::Size::Fixed(50),
+                ..Default::default()
+            },
+        );
+        ctx.root_attach(card);
+
+        let glyph_a = 12.3f32;
+        let glyph_b = 31.8f32;
+        let original_distance = glyph_b - glyph_a;
+
+        let mut prev_a_pos = -1.0f32;
+
+        // Continuous fractional translation steps (simulating a smooth 60fps/120fps transition)
+        for step in 0..100 {
+            let offset_x = 10.0 + (step as f32) * 0.05;
+            card.update_constraints(&mut ctx, |c| {
+                c.positioning = crate::style::PositionStrategy::Absolute {
+                    left: offset_x,
+                    top: 20.0,
+                    right: f32::NAN,
+                    bottom: f32::NAN,
+                };
+            });
+            ctx.compute_layout(800.0, 600.0);
+
+            let local_a = offset_x + glyph_a;
+            let total_quarters_a = (local_a * 4.0).round() as i32;
+            let subpx_a = total_quarters_a.rem_euclid(4) as u8;
+            let anchor_a = local_a - (subpx_a as f32) * 0.25;
+
+            let local_b = offset_x + glyph_b;
+            let total_quarters_b = (local_b * 4.0).round() as i32;
+            let subpx_b = total_quarters_b.rem_euclid(4) as u8;
+            let anchor_b = local_b - (subpx_b as f32) * 0.25;
+
+            let pt_a = transform_node_point(&ctx, card, (anchor_a, 10.0));
+            let pt_b = transform_node_point(&ctx, card, (anchor_b, 10.0));
+
+            // Continuous subpixel positioning restores the fractional subpx offset:
+            let visual_a = pt_a.0 + (subpx_a as f32) * 0.25;
+            let visual_b = pt_b.0 + (subpx_b as f32) * 0.25;
+
+            let distance = visual_b - visual_a;
+            assert!(
+                (distance - original_distance).abs() < 1e-5,
+                "Inter-glyph distance {} wobbled at step {} (expected {})",
+                distance,
+                step,
+                original_distance
+            );
+
+            if prev_a_pos >= 0.0 {
+                assert!(
+                    visual_a >= prev_a_pos,
+                    "Backward position snap detected: previous {}, current {}",
+                    prev_a_pos,
+                    visual_a
+                );
+            }
+            prev_a_pos = visual_a;
+        }
     }
 }

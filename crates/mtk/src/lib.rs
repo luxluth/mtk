@@ -134,6 +134,7 @@ pub struct Context {
     // Shared element morph registry
     pub morph_registry: HashMap<Node, MorphInfo>,
     pub morph_nodes_by_id: HashMap<MorphId, Vec<Node>>,
+    pub morph_suppressed_nodes: HashSet<Node>,
 
     // Core-level Super Layers and User Intermediate Layers
     pub base_layer: InternalLayer,
@@ -197,6 +198,7 @@ impl Context {
 
             morph_registry: HashMap::new(),
             morph_nodes_by_id: HashMap::new(),
+            morph_suppressed_nodes: HashSet::new(),
 
             base_layer: InternalLayer::new(true),
             intermediate_layers: Vec::new(),
