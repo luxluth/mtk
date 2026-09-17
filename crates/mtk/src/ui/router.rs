@@ -20,10 +20,10 @@ use crate::{BoxShadow, Color, Context, Node};
 pub(crate) struct ActiveMorphFlight {
     #[allow(dead_code)]
     pub(crate) id: MorphId,
-    pub(crate) source_container: Node,
-    pub(crate) source_inner: Node,
-    pub(crate) target_container: Node,
-    pub(crate) target_inner: Node,
+    pub(crate) source_node: Node,
+    pub(crate) target_node: Node,
+    pub(crate) source_placeholder: Option<Node>,
+    pub(crate) target_placeholder: Option<Node>,
     pub(crate) transition: MorphTransition,
     pub(crate) source_rect: Option<Rect>,
     pub(crate) target_rect: Option<Rect>,
@@ -32,7 +32,6 @@ pub(crate) struct ActiveMorphFlight {
     pub(crate) shuttle_node: Option<Node>,
     pub(crate) shuttle_source_box: Option<Node>,
     pub(crate) shuttle_target_box: Option<Node>,
-    pub(crate) target_orig_size: Option<(Size, Size)>,
 }
 
 /// A router widget that smoothly animates between pages/views when its route key changes.
@@ -166,33 +165,31 @@ fn apply_transition_step(
 fn settle_morphs(ctx: &mut Context, morphs: &mut Vec<ActiveMorphFlight>) {
     let had_morphs = !morphs.is_empty();
     for flight in morphs.drain(..) {
-        ctx.morph_suppressed_nodes.remove(&flight.source_inner);
-        ctx.morph_suppressed_nodes.remove(&flight.target_inner);
+        ctx.morph_suppressed_nodes.remove(&flight.source_node);
+        ctx.morph_suppressed_nodes.remove(&flight.target_node);
 
-        if flight.shuttle_target_box.is_some() {
-            flight.target_inner.remove(ctx);
-            flight.target_container.append(ctx, flight.target_inner);
+        if let Some(t_ph) = flight.target_placeholder {
+            if !flight.target_node.put_before(ctx, t_ph) {
+                if let Some(parent) = t_ph.parent(ctx) {
+                    parent.append(ctx, flight.target_node);
+                }
+            }
+            t_ph.remove(ctx);
+            ctx.destroy_node(t_ph);
+        }
+        if let Some(s_ph) = flight.source_placeholder {
+            s_ph.remove(ctx);
+            ctx.destroy_node(s_ph);
         }
         if let Some(shuttle) = flight.shuttle_node {
             shuttle.remove(ctx);
             ctx.destroy_node(shuttle);
         }
-        if let Some((w, h)) = flight.target_orig_size {
-            flight.target_container.update_constraints(ctx, |c| {
-                c.width = w;
-                c.height = h;
-            });
-        } else {
-            flight.target_container.update_constraints(ctx, |c| {
-                c.width = Size::Fit;
-                c.height = Size::Fit;
-            });
-        }
         if let Some(source_eff) = flight.source_effects {
-            flight.source_inner.set_effects(ctx, source_eff);
+            flight.source_node.set_effects(ctx, source_eff);
         }
         if let Some(target_eff) = flight.target_effects {
-            flight.target_inner.set_effects(ctx, target_eff);
+            flight.target_node.set_effects(ctx, target_eff);
         }
     }
     if had_morphs {
@@ -214,8 +211,8 @@ fn apply_morph_step(
 
     for flight in morphs.iter_mut() {
         if flight.shuttle_node.is_none() {
-            let s_comp = flight.source_container.get_computed(ctx);
-            let t_comp = flight.target_container.get_computed(ctx);
+            let s_comp = flight.source_node.get_computed(ctx);
+            let t_comp = flight.target_node.get_computed(ctx);
 
             if let (Some(s), Some(t)) = (s_comp, t_comp) {
                 if s.w > 0.0 && s.h > 0.0 && t.w > 0.0 && t.h > 0.0 {
@@ -229,41 +226,56 @@ fn apply_morph_step(
                     flight.source_rect = Some(s_rect);
                     flight.target_rect = Some(t_rect);
 
-                    let s_eff = flight.source_inner.get_effects(ctx).unwrap_or_default();
-                    let t_eff = flight.target_inner.get_effects(ctx).unwrap_or_default();
+                    let s_eff = flight.source_node.get_effects(ctx).unwrap_or_default();
+                    let t_eff = flight.target_node.get_effects(ctx).unwrap_or_default();
                     flight.source_effects = Some(s_eff.clone());
                     flight.target_effects = Some(t_eff.clone());
 
-                    flight.source_container.update_constraints(ctx, |c| {
+                    let s_ph = ctx.create_node();
+                    s_ph.update_constraints(ctx, |c| {
                         c.width = Size::Fixed(s.w.round().max(1.0) as u32);
                         c.height = Size::Fixed(s.h.round().max(1.0) as u32);
+                        c.flex_grow = 0.0;
+                        c.flex_shrink = 0.0;
                     });
-                    flight.target_orig_size = flight
-                        .target_container
-                        .get_constraints(ctx)
-                        .map(|c| (c.width, c.height));
-                    flight.target_container.update_constraints(ctx, |c| {
+                    if !s_ph.put_before(ctx, flight.source_node) {
+                        if let Some(parent) = flight.source_node.parent(ctx) {
+                            parent.append(ctx, s_ph);
+                        }
+                    }
+                    flight.source_placeholder = Some(s_ph);
+
+                    let t_ph = ctx.create_node();
+                    t_ph.update_constraints(ctx, |c| {
                         c.width = Size::Fixed(t.w.round().max(1.0) as u32);
                         c.height = Size::Fixed(t.h.round().max(1.0) as u32);
+                        c.flex_grow = 0.0;
+                        c.flex_shrink = 0.0;
                     });
+                    if !t_ph.put_before(ctx, flight.target_node) {
+                        if let Some(parent) = flight.target_node.parent(ctx) {
+                            parent.append(ctx, t_ph);
+                        }
+                    }
+                    flight.target_placeholder = Some(t_ph);
 
                     if flight.transition.morph_effects {
-                        ctx.morph_suppressed_nodes.insert(flight.source_inner);
-                        ctx.morph_suppressed_nodes.insert(flight.target_inner);
+                        ctx.morph_suppressed_nodes.insert(flight.source_node);
+                        ctx.morph_suppressed_nodes.insert(flight.target_node);
 
                         let mut clear_s = s_eff.clone();
                         clear_s.background_color = Color::transparent;
                         clear_s.box_shadow = BoxShadow::default();
                         clear_s.additional_shadows.clear();
                         clear_s.border.color = Color::transparent;
-                        flight.source_inner.set_effects(ctx, clear_s);
+                        flight.source_node.set_effects(ctx, clear_s);
 
                         let mut clear_t = t_eff.clone();
                         clear_t.background_color = Color::transparent;
                         clear_t.box_shadow = BoxShadow::default();
                         clear_t.additional_shadows.clear();
                         clear_t.border.color = Color::transparent;
-                        flight.target_inner.set_effects(ctx, clear_t);
+                        flight.target_node.set_effects(ctx, clear_t);
                     }
 
                     let shuttle = ctx.create_node();
@@ -276,6 +288,7 @@ fn apply_morph_step(
                         };
                         c.width = Size::Fixed(s_rect.w.round().max(1.0) as u32);
                         c.height = Size::Fixed(s_rect.h.round().max(1.0) as u32);
+                        c.overflow = Overflow::Visible;
                         c.z_index = 100;
                     });
                     shuttle.set_effects(ctx, s_eff);
@@ -314,11 +327,11 @@ fn apply_morph_step(
                     shuttle.append(ctx, source_box);
                     shuttle.append(ctx, target_box);
 
-                    flight.source_inner.remove(ctx);
-                    source_box.append(ctx, flight.source_inner);
+                    flight.source_node.remove(ctx);
+                    source_box.append(ctx, flight.source_node);
 
-                    flight.target_inner.remove(ctx);
-                    target_box.append(ctx, flight.target_inner);
+                    flight.target_node.remove(ctx);
+                    target_box.append(ctx, flight.target_node);
 
                     flight.shuttle_node = Some(shuttle);
                     flight.shuttle_source_box = Some(source_box);
@@ -490,10 +503,10 @@ where
                 .into_iter()
                 .map(|p| ActiveMorphFlight {
                     id: p.id,
-                    source_container: p.source.container_node,
-                    source_inner: p.source.inner_node,
-                    target_container: p.target.container_node,
-                    target_inner: p.target.inner_node,
+                    source_node: p.source.node,
+                    target_node: p.target.node,
+                    source_placeholder: None,
+                    target_placeholder: None,
                     transition: p.target.transition,
                     source_rect: None,
                     target_rect: None,
@@ -502,7 +515,6 @@ where
                     shuttle_node: None,
                     shuttle_source_box: None,
                     shuttle_target_box: None,
-                    target_orig_size: None,
                 })
                 .collect();
 
@@ -1027,26 +1039,18 @@ mod tests {
 
         assert_eq!(el.active_morphs.len(), 1);
         let flight = &el.active_morphs[0];
-        let target_inner_node = flight.target_inner;
-        let source_inner_node = flight.source_inner;
+        let target_node = flight.target_node;
+        let source_node = flight.source_node;
         let shuttle_node = flight.shuttle_node.unwrap();
 
-        assert!(ctx.morph_suppressed_nodes.contains(&source_inner_node));
-        assert!(ctx.morph_suppressed_nodes.contains(&target_inner_node));
+        assert!(ctx.morph_suppressed_nodes.contains(&source_node));
+        assert!(ctx.morph_suppressed_nodes.contains(&target_node));
 
         let shuttle_cons = shuttle_node.get_constraints(&ctx).unwrap();
         assert_eq!(shuttle_cons.overflow, Overflow::Visible);
 
-        let s_inner_eff = ctx
-            .effects
-            .get(&source_inner_node)
-            .cloned()
-            .unwrap_or_default();
-        let t_inner_eff = ctx
-            .effects
-            .get(&target_inner_node)
-            .cloned()
-            .unwrap_or_default();
+        let s_inner_eff = ctx.effects.get(&source_node).cloned().unwrap_or_default();
+        let t_inner_eff = ctx.effects.get(&target_node).cloned().unwrap_or_default();
         let shuttle_eff = ctx.effects.get(&shuttle_node).cloned().unwrap_or_default();
 
         // Inner elements have their background and box shadow suppressed to prevent clipped corner triangles
@@ -1061,11 +1065,7 @@ mod tests {
 
         // Simulate an intermediate rebuild (e.g. mouse movement or state change) mid-flight
         View::<()>::rebuild(&r2, &r2, &mut ctx, &mut el);
-        let t_eff_after_rebuild = ctx
-            .effects
-            .get(&target_inner_node)
-            .cloned()
-            .unwrap_or_default();
+        let t_eff_after_rebuild = ctx.effects.get(&target_node).cloned().unwrap_or_default();
         assert_eq!(t_eff_after_rebuild.background_color.a, 0);
         assert_eq!(t_eff_after_rebuild.box_shadow.blur_radius, 0.0);
 
@@ -1076,16 +1076,15 @@ mod tests {
 
         assert!(el.active_morphs.is_empty());
         assert!(el.outgoing.is_none());
-        assert!(!ctx.morph_suppressed_nodes.contains(&target_inner_node));
-        assert!(!ctx.morph_suppressed_nodes.contains(&source_inner_node));
+        assert!(!ctx.morph_suppressed_nodes.contains(&target_node));
+        assert!(!ctx.morph_suppressed_nodes.contains(&source_node));
 
-        let settled_eff = ctx
-            .effects
-            .get(&target_inner_node)
-            .cloned()
-            .unwrap_or_default();
+        let settled_eff = ctx.effects.get(&target_node).cloned().unwrap_or_default();
         assert_eq!(settled_eff.background_color, crate::rgb!(67, 56, 202));
         assert_eq!(settled_eff.box_shadow.blur_radius, 28.0);
         assert_eq!(settled_eff.border.radius.tl, 26.0);
+
+        // Target node must be restored back inside its parent in the active view
+        assert_eq!(target_node.parent(&ctx), Some(el.current_node));
     }
 }

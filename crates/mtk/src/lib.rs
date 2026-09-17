@@ -593,6 +593,9 @@ impl Context {
         let focusable_nodes = &mut self.focusable_nodes;
         let highlight_node = &mut self.highlight_node;
         let captured_pointer = &mut self.captured_pointer;
+        let morph_registry = &mut self.morph_registry;
+        let morph_nodes_by_id = &mut self.morph_nodes_by_id;
+        let morph_suppressed_nodes = &mut self.morph_suppressed_nodes;
 
         self.layout.destroy_node_with(node.0, |destroyed_id| {
             let n = Node(destroyed_id);
@@ -606,6 +609,15 @@ impl Context {
             scrollbars.remove(&n);
             ensure_visible_requests.remove(&n);
             node_sources.remove(&n);
+            morph_suppressed_nodes.remove(&n);
+            if let Some(info) = morph_registry.remove(&n) {
+                if let Some(list) = morph_nodes_by_id.get_mut(&info.id) {
+                    list.retain(|x| *x != n);
+                    if list.is_empty() {
+                        morph_nodes_by_id.remove(&info.id);
+                    }
+                }
+            }
 
             if *focused_node == Some(n) {
                 *focused_node = None;
@@ -857,31 +869,21 @@ impl Context {
     }
 
     /// Registers a node with a morph identifier for shared element transitions.
-    pub fn register_morph_node(
-        &mut self,
-        container_node: Node,
-        inner_node: Node,
-        id: MorphId,
-        transition: MorphTransition,
-    ) {
+    pub fn register_morph_node(&mut self, node: Node, id: MorphId, transition: MorphTransition) {
         let info = MorphInfo {
-            container_node,
-            inner_node,
+            node,
             id: id.clone(),
             transition,
         };
-        self.morph_registry.insert(container_node, info);
-        self.morph_nodes_by_id
-            .entry(id)
-            .or_default()
-            .push(container_node);
+        self.morph_registry.insert(node, info);
+        self.morph_nodes_by_id.entry(id).or_default().push(node);
     }
 
     /// Unregisters a morph node from the context registry.
-    pub fn unregister_morph_node(&mut self, container_node: Node) {
-        if let Some(info) = self.morph_registry.remove(&container_node) {
+    pub fn unregister_morph_node(&mut self, node: Node) {
+        if let Some(info) = self.morph_registry.remove(&node) {
             if let Some(list) = self.morph_nodes_by_id.get_mut(&info.id) {
-                list.retain(|n| *n != container_node);
+                list.retain(|n| *n != node);
                 if list.is_empty() {
                     self.morph_nodes_by_id.remove(&info.id);
                 }

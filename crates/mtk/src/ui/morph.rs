@@ -108,8 +108,7 @@ impl MorphTransition {
 /// Metadata stored in [`Context`] for a registered morphable element.
 #[derive(Clone, Debug)]
 pub struct MorphInfo {
-    pub container_node: Node,
-    pub inner_node: Node,
+    pub node: Node,
     pub id: MorphId,
     pub transition: MorphTransition,
 }
@@ -175,8 +174,7 @@ impl<Id, V> Morphable<Id, V> {
 
 /// Persistent element state for a [`Morphable`] widget.
 pub struct MorphElement<V: View<State>, State> {
-    pub(crate) container_node: Node,
-    pub(crate) inner_node: Node,
+    pub(crate) node: Node,
     pub(crate) inner_el: V::Element,
     pub(crate) id: MorphId,
     _marker: PhantomData<State>,
@@ -187,25 +185,16 @@ impl<State, V: View<State>> View<State> for Morphable<MorphId, V> {
     type Message = V::Message;
 
     fn build(&self, ctx: &mut Context) -> Self::Element {
-        let container_node = ctx.create_node();
+        let inner_el = self.view.build(ctx);
+        let node = self.view.get_node(&inner_el);
         if let Some(loc) = self.source_loc {
-            ctx.set_node_source(container_node, loc);
+            ctx.set_node_source(node, loc);
         }
 
-        let inner_el = self.view.build(ctx);
-        let inner_node = self.view.get_node(&inner_el);
-        container_node.append(ctx, inner_node);
-
-        ctx.register_morph_node(
-            container_node,
-            inner_node,
-            self.id.clone(),
-            self.transition.clone(),
-        );
+        ctx.register_morph_node(node, self.id.clone(), self.transition.clone());
 
         MorphElement {
-            container_node,
-            inner_node,
+            node,
             inner_el,
             id: self.id.clone(),
             _marker: PhantomData,
@@ -213,18 +202,15 @@ impl<State, V: View<State>> View<State> for Morphable<MorphId, V> {
     }
 
     fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
-        if self.id != element.id {
-            ctx.unregister_morph_node(element.container_node);
-            element.id = self.id.clone();
-            ctx.register_morph_node(
-                element.container_node,
-                element.inner_node,
-                self.id.clone(),
-                self.transition.clone(),
-            );
-        }
-
         self.view.rebuild(&prev.view, ctx, &mut element.inner_el);
+        let updated_node = self.view.get_node(&element.inner_el);
+
+        if self.id != element.id || updated_node != element.node {
+            ctx.unregister_morph_node(element.node);
+            element.id = self.id.clone();
+            element.node = updated_node;
+            ctx.register_morph_node(element.node, self.id.clone(), self.transition.clone());
+        }
     }
 
     fn rebuild_with_parent(
@@ -235,30 +221,25 @@ impl<State, V: View<State>> View<State> for Morphable<MorphId, V> {
         parent: Node,
         next_sibling: Option<Node>,
     ) {
-        if self.id != element.id {
-            ctx.unregister_morph_node(element.container_node);
-            element.id = self.id.clone();
-            ctx.register_morph_node(
-                element.container_node,
-                element.inner_node,
-                self.id.clone(),
-                self.transition.clone(),
-            );
-        }
-
         self.view
             .rebuild_with_parent(&prev.view, ctx, &mut element.inner_el, parent, next_sibling);
+        let updated_node = self.view.get_node(&element.inner_el);
+
+        if self.id != element.id || updated_node != element.node {
+            ctx.unregister_morph_node(element.node);
+            element.id = self.id.clone();
+            element.node = updated_node;
+            ctx.register_morph_node(element.node, self.id.clone(), self.transition.clone());
+        }
     }
 
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
-        ctx.unregister_morph_node(element.container_node);
+        ctx.unregister_morph_node(element.node);
         self.view.teardown(ctx, &mut element.inner_el);
-        element.container_node.remove(ctx);
-        ctx.destroy_node(element.container_node);
     }
 
     fn get_node(&self, element: &Self::Element) -> Node {
-        element.container_node
+        element.node
     }
 
     fn handle_event(
@@ -322,18 +303,18 @@ mod tests {
         let mut el4 = View::<()>::build(&v4, &mut ctx);
 
         let root_a = ctx.create_node();
-        root_a.append(&mut ctx, el1.container_node);
-        root_a.append(&mut ctx, el2.container_node);
+        root_a.append(&mut ctx, el1.node);
+        root_a.append(&mut ctx, el2.node);
 
         let root_b = ctx.create_node();
-        root_b.append(&mut ctx, el3.container_node);
-        root_b.append(&mut ctx, el4.container_node);
+        root_b.append(&mut ctx, el3.node);
+        root_b.append(&mut ctx, el4.node);
 
         let pairs = ctx.find_morph_pairs(root_a, root_b);
         assert_eq!(pairs.len(), 1);
         assert_eq!(pairs[0].id, MorphId::new("shared-card"));
-        assert_eq!(pairs[0].source.container_node, el1.container_node);
-        assert_eq!(pairs[0].target.container_node, el3.container_node);
+        assert_eq!(pairs[0].source.node, el1.node);
+        assert_eq!(pairs[0].target.node, el3.node);
 
         View::<()>::teardown(&v1, &mut ctx, &mut el1);
         View::<()>::teardown(&v2, &mut ctx, &mut el2);
@@ -342,5 +323,33 @@ mod tests {
 
         let pairs_after = ctx.find_morph_pairs(root_a, root_b);
         assert_eq!(pairs_after.len(), 0);
+    }
+
+    #[test]
+    fn test_morphable_zero_overhead_and_constraint_preservation() {
+        use crate::ui::style::ViewStyleExt;
+        use crate::{Size, Style};
+
+        let mut ctx = Context::new();
+
+        let styled_box = text::<_, ()>("Album Cover")
+            .style(
+                Style::new()
+                    .width(Size::Fill)
+                    .aspect_ratio(1.0)
+                    .bg_color(crate::rgb!(255, 0, 0)),
+            )
+            .morph("album-cover");
+
+        let el = View::<()>::build(&styled_box, &mut ctx);
+        let node = View::<()>::get_node(&styled_box, &el);
+
+        // Morphable must return the inner node directly with its constraints and effects preserved.
+        let cons = node.get_constraints(&ctx).unwrap();
+        assert_eq!(cons.width, Size::Fill);
+        assert_eq!(cons.aspect_ratio, 1.0);
+
+        let eff = ctx.effects.get(&node).unwrap();
+        assert_eq!(eff.background_color, crate::rgb!(255, 0, 0));
     }
 }
