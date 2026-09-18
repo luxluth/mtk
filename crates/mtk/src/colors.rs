@@ -167,15 +167,33 @@ impl Color {
 
         (lighter + 0.05) / (darker + 0.05)
     }
+    /// Returns the HSL saturation component of this color in the range `[0.0, 1.0]`.
+    #[inline]
+    pub fn saturation(&self) -> f32 {
+        self.to_hsl().1
+    }
+
+    /// Determines whether white text is preferred over black text for legibility on this background.
+    ///
+    /// Unlike the raw WCAG 2.1 mathematical crossover (which abruptly forces dark text at $L > 0.179$),
+    /// this method uses a perceptually tuned threshold accounting for the Helmholtz-Kohlrausch effect
+    /// on chromatic and saturated colors (such as red, blue, purple, and orange).
+    ///
+    /// Highly saturated colors maintain readability with white text up to $\sim 0.42$ relative luminance,
+    /// while neutral and grayscale surfaces use the standard $\sim 0.18$ - $0.20$ threshold.
+    #[inline]
+    pub fn prefers_white_text(&self) -> bool {
+        let s = self.saturation() as f64;
+        let threshold = 0.18 + 0.24 * s;
+        self.relative_luminance() < threshold
+    }
 
     /// Selects pure white or pure black to maximize contrast against this background.
     ///
     /// Matches standard design system utilities (such as Material UI `getContrastText`).
-    /// Computes contrast against both [`Color::white`] and [`Color::black`],
-    /// returning the one with the higher ratio.
-    ///
-    /// Due to the `+ 0.05` offset in the WCAG contrast formula, the crossover
-    /// point is roughly `0.179` relative luminance rather than `0.5`.
+    /// Uses [`Color::prefers_white_text`] to account for the Helmholtz-Kohlrausch effect
+    /// on saturated colors (such as red, blue, and purple) while matching standard contrast
+    /// behavior on neutral and achromatic backgrounds.
     ///
     /// ## Examples
     ///
@@ -184,12 +202,10 @@ impl Color {
     ///
     /// assert_eq!(Color::black.get_contrast_text(), Color::white);
     /// assert_eq!(Color::white.get_contrast_text(), Color::black);
+    /// assert_eq!(Color::dodger_blue.get_contrast_text(), Color::white);
     /// ```
     pub fn get_contrast_text(&self) -> Color {
-        let white_ratio = self.contrast_ratio(&Self::white);
-        let black_ratio = self.contrast_ratio(&Self::black);
-
-        if white_ratio >= black_ratio {
+        if self.prefers_white_text() {
             Self::white
         } else {
             Self::black
@@ -205,8 +221,7 @@ impl Color {
     ///
     /// ## Selection Logic
     ///
-    /// 1. Picks [`Color::off_white`] or [`Color::off_black`] based on which gives
-    ///    higher contrast.
+    /// 1. Picks [`Color::off_white`] or [`Color::off_black`] using [`Color::prefers_white_text`].
     /// 2. If the chosen base cannot reach `min_contrast` even without tinting,
     ///    falls back directly to pure [`Color::white`] or [`Color::black`].
     /// 3. Tests candidate colors by stepping down the tint factor from `max_tint`
@@ -230,10 +245,9 @@ impl Color {
     /// assert!(navy.contrast_ratio(&text_color) >= 4.5);
     /// ```
     pub fn get_tinted_contrast_text(&self, min_contrast: f64, max_tint: f64) -> Color {
-        let white_ratio = self.contrast_ratio(&Self::off_white);
-        let black_ratio = self.contrast_ratio(&Self::off_black);
+        let use_white = self.prefers_white_text();
 
-        let base_text = if white_ratio >= black_ratio {
+        let base_text = if use_white {
             Self::off_white
         } else {
             Self::off_black
@@ -241,11 +255,7 @@ impl Color {
 
         // If the base color cannot hit the target, return untinted pure fallback
         if self.contrast_ratio(&base_text) < min_contrast {
-            return if white_ratio >= black_ratio {
-                Self::white
-            } else {
-                Self::black
-            };
+            return if use_white { Self::white } else { Self::black };
         }
 
         let steps = 15;
@@ -296,22 +306,16 @@ impl Color {
         max_tint: f64,
     ) -> Color {
         let effective_bg = self.over(backdrop);
+        let use_white = effective_bg.prefers_white_text();
 
-        let white_ratio = effective_bg.contrast_ratio(&Self::off_white);
-        let black_ratio = effective_bg.contrast_ratio(&Self::off_black);
-
-        let base_text = if white_ratio >= black_ratio {
+        let base_text = if use_white {
             Self::off_white
         } else {
             Self::off_black
         };
 
         if effective_bg.contrast_ratio(&base_text) < min_contrast {
-            return if white_ratio >= black_ratio {
-                Self::white
-            } else {
-                Self::black
-            };
+            return if use_white { Self::white } else { Self::black };
         }
 
         let steps = 15;
@@ -436,13 +440,13 @@ impl Color {
         }
     }
 
-    /// Returns `true` if the color is considered dark according to WCAG contrast threshold.
+    /// Returns `true` if the color is perceptually dark (meaning light/white text is preferred on it).
     #[inline]
     pub fn is_dark(&self) -> bool {
-        self.relative_luminance() < 0.179
+        self.prefers_white_text()
     }
 
-    /// Returns `true` if the color is considered light according to WCAG contrast threshold.
+    /// Returns `true` if the color is perceptually light (meaning dark/black text is preferred on it).
     #[inline]
     pub fn is_light(&self) -> bool {
         !self.is_dark()
@@ -1149,5 +1153,71 @@ pub mod macros {
         ($h:expr, $s:expr, $l:expr, $a:expr) => {
             $crate::colors::Color::from_hsla($h as f32, $s as f32, $l as f32, $a as f32)
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_prefers_white_text_on_saturated_and_neutral_colors() {
+        // Neutral colors
+        assert!(Color::black.prefers_white_text());
+        assert!(!Color::white.prefers_white_text());
+
+        let dark_slate = Color::new(30, 41, 59, 255);
+        assert!(dark_slate.prefers_white_text());
+
+        let light_gray = Color::new(226, 232, 240, 255);
+        assert!(!light_gray.prefers_white_text());
+
+        // Saturated colors that human eyes prefer with white text
+        assert!(Color::dodger_blue.prefers_white_text());
+
+        let red_500 = Color::new(239, 68, 68, 255);
+        assert!(red_500.prefers_white_text());
+
+        let purple_500 = Color::new(168, 85, 247, 255);
+        assert!(purple_500.prefers_white_text());
+
+        let orange_500 = Color::new(249, 115, 22, 255);
+        assert!(orange_500.prefers_white_text());
+
+        let pure_red = Color::new(255, 0, 0, 255);
+        assert!(pure_red.prefers_white_text());
+
+        // High-luminance saturated colors that still require black text
+        let yellow = Color::new(255, 255, 0, 255);
+        assert!(!yellow.prefers_white_text());
+
+        let amber_400 = Color::new(251, 191, 36, 255);
+        assert!(!amber_400.prefers_white_text());
+    }
+
+    #[test]
+    fn test_get_contrast_text_perceptual() {
+        assert_eq!(Color::black.get_contrast_text(), Color::white);
+        assert_eq!(Color::white.get_contrast_text(), Color::black);
+        assert_eq!(Color::dodger_blue.get_contrast_text(), Color::white);
+        assert_eq!(
+            Color::new(239, 68, 68, 255).get_contrast_text(),
+            Color::white
+        );
+        assert_eq!(
+            Color::new(255, 255, 0, 255).get_contrast_text(),
+            Color::black
+        );
+    }
+
+    #[test]
+    fn test_get_tinted_contrast_text_on_saturated_background() {
+        let text_color = Color::dodger_blue.get_tinted_contrast_text(4.5, 0.12);
+        // On Dodger Blue, white text is preferred
+        assert_eq!(text_color, Color::white);
+
+        let navy = Color::Hex(0x0a192fff);
+        let navy_text = navy.get_tinted_contrast_text(4.5, 0.12);
+        assert!(navy.contrast_ratio(&navy_text) >= 4.5);
     }
 }
