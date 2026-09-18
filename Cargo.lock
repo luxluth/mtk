@@ -2851,11 +2851,11 @@ dependencies = [
 
 [[package]]
 name = "mtk-layout"
-version = "0.1.0-beta.2"
+version = "0.1.0-beta.3"
 
 [[package]]
 name = "mtk-macro"
-version = "0.1.0-beta.2"
+version = "0.1.0-beta.3"
 dependencies = [
  "quote",
  "syn 3.0.4",
@@ -2863,7 +2863,7 @@ dependencies = [
 
 [[package]]
 name = "mtk-rs"
-version = "0.1.0-beta.2"
+version = "0.1.0-beta.3"
 dependencies = [
  "accesskit",
  "accesskit_macos",
