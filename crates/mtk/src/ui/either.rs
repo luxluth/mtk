@@ -1,6 +1,6 @@
 //! Stack-allocated heterogeneous view branching for conditional and multi-branch UI composition.
 //!
-//! Provides [`Either`], the [`either`] combinator, [`ViewEitherExt`], and the [`switch!`] macro.
+//! Provides [`Either`], the [`either`] combinator, [`ViewEitherExt`], and the [`crate::switch!`] macro.
 //! These allow different concrete [`View`] types to be unified conditionally without heap allocation
 //! ([`BoxedView`](crate::ui::BoxedView)) or manual sum-type enums.
 
@@ -138,7 +138,7 @@ impl<A: Default, B> Default for Either<A, B> {
 
 /// Creates an [`Either`] view by evaluating a boolean condition.
 ///
-/// If `condition` is `true`, returns [`Either::Left(true_view)`]. Otherwise returns [`Either::Right(false_view)`].
+/// If `condition` is `true`, returns [`Either::Left`]. Otherwise returns [`Either::Right`].
 ///
 /// # Examples
 /// ```rust,ignore

@@ -75,7 +75,7 @@ where
 {
     /// Sets the transition animation physics (fade, push, pop, slide, etc.) when switching views.
     ///
-    /// Accepts any [`PageTransition`] or preset [`Transition`].
+    /// Accepts any [`PageTransition`] or preset [`Transition`](crate::ui::transition::Transition).
     pub fn transition(mut self, transition: impl Into<PageTransition>) -> Self {
         self.transition = transition.into();
         self
