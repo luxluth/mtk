@@ -340,6 +340,113 @@ impl Color {
             a: self.a,
         }
     }
+
+    /// Adjusts the color toward black by a given factor or percentage.
+    ///
+    /// `by_percent` accepts either a normalized factor in `[0.0, 1.0]` (e.g. `0.2` for 20%)
+    /// or a percentage in `[0.0, 100.0]` (e.g. `20.0` for 20%). Values are clamped safely.
+    /// The alpha channel remains unchanged.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use mtk::Color;
+    ///
+    /// let red = Color::new(255, 0, 0, 255);
+    /// let darker_red = red.darker(0.2);
+    /// assert_eq!(darker_red, red.darker(20.0));
+    /// assert_eq!(darker_red.r, 204);
+    /// ```
+    pub fn darker(&self, by_percent: f32) -> Color {
+        let factor = if by_percent.is_nan() || by_percent <= 0.0 {
+            0.0
+        } else if by_percent > 1.0 {
+            (by_percent / 100.0).min(1.0)
+        } else {
+            by_percent
+        };
+        let scale = 1.0 - factor;
+        Color {
+            r: ((self.r as f32) * scale).round() as u8,
+            g: ((self.g as f32) * scale).round() as u8,
+            b: ((self.b as f32) * scale).round() as u8,
+            a: self.a,
+        }
+    }
+
+    /// Adjusts the color toward white by a given factor or percentage.
+    ///
+    /// `by_percent` accepts either a normalized factor in `[0.0, 1.0]` (e.g. `0.2` for 20%)
+    /// or a percentage in `[0.0, 100.0]` (e.g. `20.0` for 20%). Values are clamped safely.
+    /// The alpha channel remains unchanged.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use mtk::Color;
+    ///
+    /// let black = Color::black;
+    /// let lightened = black.lighter(0.2);
+    /// assert_eq!(lightened, black.lighter(20.0));
+    /// assert_eq!(lightened.r, 51);
+    /// ```
+    pub fn lighter(&self, by_percent: f32) -> Color {
+        let factor = if by_percent.is_nan() || by_percent <= 0.0 {
+            0.0
+        } else if by_percent > 1.0 {
+            (by_percent / 100.0).min(1.0)
+        } else {
+            by_percent
+        };
+        Color {
+            r: ((self.r as f32) + (255.0 - self.r as f32) * factor).round() as u8,
+            g: ((self.g as f32) + (255.0 - self.g as f32) * factor).round() as u8,
+            b: ((self.b as f32) + (255.0 - self.b as f32) * factor).round() as u8,
+            a: self.a,
+        }
+    }
+
+    /// Returns a copy of the color with its alpha channel multiplied by `factor` in `[0.0, 1.0]`.
+    pub fn fade(&self, factor: f32) -> Color {
+        let f = if factor.is_nan() || factor <= 0.0 {
+            0.0
+        } else if factor >= 1.0 {
+            1.0
+        } else {
+            factor
+        };
+        Color {
+            r: self.r,
+            g: self.g,
+            b: self.b,
+            a: ((self.a as f32) * f).round() as u8,
+        }
+    }
+
+    /// Converts this color to grayscale using standard ITU-R BT.709 luminance weights.
+    /// The alpha channel is preserved.
+    pub fn grayscale(&self) -> Color {
+        let gray = (0.2126 * self.r as f32 + 0.7152 * self.g as f32 + 0.0722 * self.b as f32)
+            .round() as u8;
+        Color {
+            r: gray,
+            g: gray,
+            b: gray,
+            a: self.a,
+        }
+    }
+
+    /// Returns `true` if the color is considered dark according to WCAG contrast threshold.
+    #[inline]
+    pub fn is_dark(&self) -> bool {
+        self.relative_luminance() < 0.179
+    }
+
+    /// Returns `true` if the color is considered light according to WCAG contrast threshold.
+    #[inline]
+    pub fn is_light(&self) -> bool {
+        !self.is_dark()
+    }
 }
 
 impl From<Color> for u32 {
@@ -435,6 +542,70 @@ impl Color {
     /// Firefox Blue - Firefox selection blue color
     pub const firefox_blue: Color = Color::Hex(0x3584e4ff);
 
+    /// Mid Gray color
+    pub const gray: Color = Color {
+        r: 128,
+        g: 128,
+        b: 128,
+        a: 255,
+    };
+
+    /// Light Gray color
+    pub const light_gray: Color = Color {
+        r: 211,
+        g: 211,
+        b: 211,
+        a: 255,
+    };
+
+    /// Dark Gray color
+    pub const dark_gray: Color = Color {
+        r: 80,
+        g: 80,
+        b: 80,
+        a: 255,
+    };
+
+    /// Yellow color
+    pub const yellow: Color = Color {
+        r: 255,
+        g: 255,
+        b: 0,
+        a: 255,
+    };
+
+    /// Orange color
+    pub const orange: Color = Color {
+        r: 255,
+        g: 165,
+        b: 0,
+        a: 255,
+    };
+
+    /// Purple color
+    pub const purple: Color = Color {
+        r: 128,
+        g: 0,
+        b: 128,
+        a: 255,
+    };
+
+    /// Cyan color
+    pub const cyan: Color = Color {
+        r: 0,
+        g: 255,
+        b: 255,
+        a: 255,
+    };
+
+    /// Magenta color
+    pub const magenta: Color = Color {
+        r: 255,
+        g: 0,
+        b: 255,
+        a: 255,
+    };
+
     /// Transform raw hex into RGBA componnent
     /// **FORMAT: RRGGBBAA**
     #[allow(non_snake_case)]
@@ -447,10 +618,74 @@ impl Color {
         Color { r, g, b, a }
     }
 
-    /// Set an alpha value for the color
-    pub fn with_alpha(mut self, value: u8) -> Self {
+    /// Set an alpha value for the color (0-255).
+    #[inline]
+    pub const fn with_alpha(mut self, value: u8) -> Self {
         self.a = value;
         self
+    }
+
+    /// Sets the alpha channel from a normalized float in `[0.0, 1.0]`.
+    /// Values outside `[0.0, 1.0]` or NaN are clamped safely.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use mtk::Color;
+    ///
+    /// let c = Color::white.with_alphaf(0.5);
+    /// assert_eq!(c.a, 128);
+    /// ```
+    #[inline]
+    pub fn with_alphaf(mut self, alpha: f32) -> Self {
+        let a = if alpha.is_nan() || alpha <= 0.0 {
+            0.0
+        } else if alpha >= 1.0 {
+            1.0
+        } else {
+            alpha
+        };
+        self.a = (a * 255.0).round() as u8;
+        self
+    }
+
+    /// Returns the alpha channel normalized to `[0.0, 1.0]`.
+    #[inline]
+    pub const fn alpha_f32(&self) -> f32 {
+        self.a as f32 / 255.0
+    }
+
+    /// Returns a copy with the red channel replaced.
+    #[inline]
+    pub const fn with_red(mut self, r: u8) -> Self {
+        self.r = r;
+        self
+    }
+
+    /// Returns a copy with the green channel replaced.
+    #[inline]
+    pub const fn with_green(mut self, g: u8) -> Self {
+        self.g = g;
+        self
+    }
+
+    /// Returns a copy with the blue channel replaced.
+    #[inline]
+    pub const fn with_blue(mut self, b: u8) -> Self {
+        self.b = b;
+        self
+    }
+
+    /// Returns `true` if this color is completely transparent (`a == 0`).
+    #[inline]
+    pub const fn is_transparent(&self) -> bool {
+        self.a == 0
+    }
+
+    /// Returns `true` if this color is completely opaque (`a == 255`).
+    #[inline]
+    pub const fn is_opaque(&self) -> bool {
+        self.a == 255
     }
 }
 
@@ -506,6 +741,97 @@ impl Color {
         color.a = (a * 255.0).round() as u8;
         color
     }
+
+    /// Converts this color into Hue, Saturation, and Lightness (HSL).
+    ///
+    /// * `h` - Hue in degrees `[0.0, 360.0)`
+    /// * `s` - Saturation `[0.0, 1.0]`
+    /// * `l` - Lightness `[0.0, 1.0]`
+    pub fn to_hsl(&self) -> (f32, f32, f32) {
+        let r = self.r as f32 / 255.0;
+        let g = self.g as f32 / 255.0;
+        let b = self.b as f32 / 255.0;
+
+        let max = r.max(g.max(b));
+        let min = r.min(g.min(b));
+        let delta = max - min;
+
+        let l = (max + min) / 2.0;
+
+        if delta.abs() < 1e-6 {
+            return (0.0, 0.0, l);
+        }
+
+        let s = if l > 0.5 {
+            delta / (2.0 - max - min)
+        } else {
+            delta / (max + min)
+        };
+
+        let mut h = if (max - r).abs() < 1e-6 {
+            (g - b) / delta + (if g < b { 6.0 } else { 0.0 })
+        } else if (max - g).abs() < 1e-6 {
+            (b - r) / delta + 2.0
+        } else {
+            (r - g) / delta + 4.0
+        };
+
+        h *= 60.0;
+        if h >= 360.0 {
+            h -= 360.0;
+        }
+
+        (h, s, l)
+    }
+
+    /// Converts this color into Hue, Saturation, Lightness, and Alpha (HSLA).
+    ///
+    /// * `h` - Hue in degrees `[0.0, 360.0)`
+    /// * `s` - Saturation `[0.0, 1.0]`
+    /// * `l` - Lightness `[0.0, 1.0]`
+    /// * `a` - Alpha `[0.0, 1.0]`
+    pub fn to_hsla(&self) -> (f32, f32, f32, f32) {
+        let (h, s, l) = self.to_hsl();
+        (h, s, l, self.alpha_f32())
+    }
+
+    /// Increases color saturation in HSL space.
+    ///
+    /// `by_percent` accepts either `[0.0, 1.0]` (e.g. `0.2` for +20%) or `[0.0, 100.0]`.
+    /// The alpha channel is preserved.
+    pub fn saturate(&self, by_percent: f32) -> Color {
+        let factor = if by_percent.is_nan() || by_percent <= 0.0 {
+            0.0
+        } else if by_percent > 1.0 {
+            (by_percent / 100.0).min(1.0)
+        } else {
+            by_percent
+        };
+        let (h, s, l) = self.to_hsl();
+        let new_s = (s + (1.0 - s) * factor).clamp(0.0, 1.0);
+        let mut c = Self::from_hsl(h, new_s, l);
+        c.a = self.a;
+        c
+    }
+
+    /// Decreases color saturation in HSL space.
+    ///
+    /// `by_percent` accepts either `[0.0, 1.0]` (e.g. `0.2` for -20%) or `[0.0, 100.0]`.
+    /// The alpha channel is preserved.
+    pub fn desaturate(&self, by_percent: f32) -> Color {
+        let factor = if by_percent.is_nan() || by_percent <= 0.0 {
+            0.0
+        } else if by_percent > 1.0 {
+            (by_percent / 100.0).min(1.0)
+        } else {
+            by_percent
+        };
+        let (h, s, l) = self.to_hsl();
+        let new_s = (s * (1.0 - factor)).clamp(0.0, 1.0);
+        let mut c = Self::from_hsl(h, new_s, l);
+        c.a = self.a;
+        c
+    }
 }
 
 // Helper function for HSL conversion
@@ -554,6 +880,43 @@ impl Color {
             self.a as f32 / 255.0,
         ]
     }
+
+    /// Creates a new `Color` from normalized floating-point channels in `[0.0, 1.0]`.
+    /// Values outside `[0.0, 1.0]` or NaN are clamped safely.
+    pub fn from_rgba_f32(r: f32, g: f32, b: f32, a: f32) -> Self {
+        let clamp_byte = |v: f32| -> u8 {
+            if v.is_nan() || v <= 0.0 {
+                0
+            } else if v >= 1.0 {
+                255
+            } else {
+                (v * 255.0).round() as u8
+            }
+        };
+        Self {
+            r: clamp_byte(r),
+            g: clamp_byte(g),
+            b: clamp_byte(b),
+            a: clamp_byte(a),
+        }
+    }
+
+    /// Creates an opaque `Color` from normalized RGB floating-point channels in `[0.0, 1.0]`.
+    #[inline]
+    pub fn from_rgb_f32(r: f32, g: f32, b: f32) -> Self {
+        Self::from_rgba_f32(r, g, b, 1.0)
+    }
+
+    /// Returns the RGBA channels as normalized floats in `[0.0, 1.0]`.
+    #[inline]
+    pub const fn to_rgba_f32(&self) -> [f32; 4] {
+        [
+            self.r as f32 / 255.0,
+            self.g as f32 / 255.0,
+            self.b as f32 / 255.0,
+            self.a as f32 / 255.0,
+        ]
+    }
 }
 
 impl From<Color> for [f32; 4] {
@@ -565,6 +928,122 @@ impl From<Color> for [f32; 4] {
 impl From<Color> for [u8; 4] {
     fn from(color: Color) -> Self {
         [color.r, color.g, color.b, color.a]
+    }
+}
+
+/// Error returned when parsing a hex color string fails.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParseColorError {
+    InvalidLength,
+    InvalidCharacter(char),
+}
+
+impl std::fmt::Display for ParseColorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidLength => write!(f, "invalid hex color string length"),
+            Self::InvalidCharacter(c) => write!(f, "invalid hex character '{c}'"),
+        }
+    }
+}
+
+impl std::error::Error for ParseColorError {}
+
+impl Color {
+    /// Parses a hexadecimal color string into a `Color`.
+    ///
+    /// Supports the following formats (case-insensitive, with or without `#` or `0x`):
+    /// - `RGB` (3 hex digits, 4-bit per channel, alpha = 255)
+    /// - `RGBA` (4 hex digits, 4-bit per channel)
+    /// - `RRGGBB` (6 hex digits, 8-bit per channel, alpha = 255)
+    /// - `RRGGBBAA` (8 hex digits, 8-bit per channel)
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use mtk::Color;
+    ///
+    /// assert_eq!(Color::from_hex_str("#ff0000").unwrap(), Color::red);
+    /// assert_eq!(Color::from_hex_str("00ff00").unwrap(), Color::green);
+    /// assert_eq!(Color::from_hex_str("#0000ff80").unwrap(), Color::blue.with_alpha(128));
+    /// assert_eq!(Color::from_hex_str("#f00").unwrap(), Color::red);
+    /// ```
+    pub fn from_hex_str(s: &str) -> Result<Self, ParseColorError> {
+        let s = s.trim();
+        let s = s.strip_prefix('#').unwrap_or(s);
+        let s = s
+            .strip_prefix("0x")
+            .or_else(|| s.strip_prefix("0X"))
+            .unwrap_or(s);
+
+        let parse_nibble = |c: char| -> Result<u8, ParseColorError> {
+            c.to_digit(16)
+                .map(|d| d as u8)
+                .ok_or(ParseColorError::InvalidCharacter(c))
+        };
+
+        match s.len() {
+            3 => {
+                let mut chars = s.chars();
+                let r = parse_nibble(chars.next().unwrap())?;
+                let g = parse_nibble(chars.next().unwrap())?;
+                let b = parse_nibble(chars.next().unwrap())?;
+                Ok(Color::new(r * 17, g * 17, b * 17, 255))
+            }
+            4 => {
+                let mut chars = s.chars();
+                let r = parse_nibble(chars.next().unwrap())?;
+                let g = parse_nibble(chars.next().unwrap())?;
+                let b = parse_nibble(chars.next().unwrap())?;
+                let a = parse_nibble(chars.next().unwrap())?;
+                Ok(Color::new(r * 17, g * 17, b * 17, a * 17))
+            }
+            6 => {
+                let bytes = s.as_bytes();
+                let r = hex_pair(bytes[0], bytes[1])?;
+                let g = hex_pair(bytes[2], bytes[3])?;
+                let b = hex_pair(bytes[4], bytes[5])?;
+                Ok(Color::new(r, g, b, 255))
+            }
+            8 => {
+                let bytes = s.as_bytes();
+                let r = hex_pair(bytes[0], bytes[1])?;
+                let g = hex_pair(bytes[2], bytes[3])?;
+                let b = hex_pair(bytes[4], bytes[5])?;
+                let a = hex_pair(bytes[6], bytes[7])?;
+                Ok(Color::new(r, g, b, a))
+            }
+            _ => Err(ParseColorError::InvalidLength),
+        }
+    }
+
+    /// Formats the color as an 8-character hex string prefixed with `#` (`#rrggbbaa`).
+    pub fn to_hex_string(&self) -> String {
+        format!("#{:02x}{:02x}{:02x}{:02x}", self.r, self.g, self.b, self.a)
+    }
+
+    /// Formats the RGB channels as a 6-character hex string prefixed with `#` (`#rrggbb`).
+    pub fn to_hex_rgb(&self) -> String {
+        format!("#{:02x}{:02x}{:02x}", self.r, self.g, self.b)
+    }
+}
+
+fn hex_pair(h: u8, l: u8) -> Result<u8, ParseColorError> {
+    let dh = (h as char)
+        .to_digit(16)
+        .ok_or(ParseColorError::InvalidCharacter(h as char))? as u8;
+    let dl = (l as char)
+        .to_digit(16)
+        .ok_or(ParseColorError::InvalidCharacter(l as char))? as u8;
+    Ok((dh << 4) | dl)
+}
+
+impl std::str::FromStr for Color {
+    type Err = ParseColorError;
+
+    #[inline]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::from_hex_str(s)
     }
 }
 
