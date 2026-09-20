@@ -2298,11 +2298,13 @@ impl LayoutEngine {
         self.render_list_dirty = true;
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn flatten_recursive(
         &self,
         node: NodeId,
         list: &mut Vec<(RenderCommand, usize)>,
         seq: &mut usize,
+        viewport: Rect,
         current_clip: Rect,
         has_clip: bool,
         inherited_z: i32,
@@ -2312,6 +2314,10 @@ impl LayoutEngine {
         }
 
         let cons = self.constraints.get(node);
+        let unclipped = cons.is_some_and(|c| c.unclipped);
+        let current_clip = if unclipped { viewport } else { current_clip };
+        let has_clip = if unclipped { true } else { has_clip };
+
         let z = cons
             .and_then(|c| {
                 if c.z_index != 0 {
@@ -2419,7 +2425,7 @@ impl LayoutEngine {
 
         let mut curr = self.first_child(node);
         while let Some(child) = curr {
-            self.flatten_recursive(child, list, seq, new_clip, new_has_clip, z);
+            self.flatten_recursive(child, list, seq, viewport, new_clip, new_has_clip, z);
             curr = self.next_sibling(child);
         }
 
@@ -2482,7 +2488,7 @@ impl LayoutEngine {
         temp_list.clear();
         let mut seq = 0;
 
-        self.flatten_recursive(root, &mut temp_list, &mut seq, viewport, true, 0);
+        self.flatten_recursive(root, &mut temp_list, &mut seq, viewport, viewport, true, 0);
 
         // Stable sort: primary z_index, secondary sequence
         temp_list.sort_by(|a, b| {
@@ -2991,5 +2997,82 @@ mod tests {
 
         let hit_outside = engine.pick(500.0, 500.0);
         assert!(hit_outside.is_empty());
+    }
+
+    #[test]
+    fn test_unclipped_child_escapes_overflow_hidden() {
+        let mut engine = LayoutEngine::new();
+        let root = engine.create_node();
+        let scroll_box = engine.create_node();
+        let clipped_child = engine.create_node();
+        let unclipped_overlay = engine.create_node();
+
+        let mut root_cons = Constraints::default();
+        root_cons.width = Size::Fixed(800);
+        root_cons.height = Size::Fixed(600);
+        engine.set_constraints(root, root_cons);
+
+        let mut sb_cons = Constraints::default();
+        sb_cons.width = Size::Fixed(100);
+        sb_cons.height = Size::Fixed(100);
+        sb_cons.overflow = Overflow::Hidden;
+        engine.set_constraints(scroll_box, sb_cons);
+
+        // Clipped child positioned outside parent scroll_box (at x=150, y=10)
+        let mut cc_cons = Constraints::default();
+        cc_cons.width = Size::Fixed(50);
+        cc_cons.height = Size::Fixed(50);
+        cc_cons.positioning = PositionStrategy::Absolute {
+            top: 10.0,
+            left: 150.0,
+            bottom: f32::NAN,
+            right: f32::NAN,
+        };
+        engine.set_constraints(clipped_child, cc_cons);
+
+        // Unclipped overlay positioned outside parent scroll_box (at x=150, y=70)
+        let mut uo_cons = Constraints::default();
+        uo_cons.width = Size::Fixed(50);
+        uo_cons.height = Size::Fixed(50);
+        uo_cons.unclipped = true;
+        uo_cons.z_index = 100;
+        uo_cons.positioning = PositionStrategy::Absolute {
+            top: 70.0,
+            left: 150.0,
+            bottom: f32::NAN,
+            right: f32::NAN,
+        };
+        engine.set_constraints(unclipped_overlay, uo_cons);
+
+        engine.append(root, scroll_box);
+        engine.append(scroll_box, clipped_child);
+        engine.append(scroll_box, unclipped_overlay);
+        engine.root_attach(root);
+
+        let dummy_measure = |_node: NodeId,
+                             _text: &str,
+                             _userdata: Option<&dyn std::any::Any>,
+                             _w: f32,
+                             _h: f32| TextMetrics::default();
+
+        let viewport = Rect::new(0.0, 0.0, 800.0, 600.0);
+        engine.compute_layout(800.0, 600.0, dummy_measure);
+        engine.build_render_list(viewport);
+
+        // Clipped child at (150, 10) is outside the (0, 0, 100, 100) clip, so pick fails:
+        let hit_clipped = engine.pick(160.0, 20.0);
+        assert!(!hit_clipped.contains(&clipped_child));
+
+        // Unclipped overlay at (150, 70) escapes scroll_box clipping and is hit:
+        let hit_unclipped = engine.pick(160.0, 80.0);
+        assert!(hit_unclipped.contains(&unclipped_overlay));
+
+        // Verify that the unclipped overlay's render command received viewport clipping
+        let uo_cmd = engine
+            .render_list
+            .iter()
+            .find(|c| c.node == unclipped_overlay)
+            .expect("unclipped_overlay should be in render_list");
+        assert_eq!(uo_cmd.clip, viewport);
     }
 }

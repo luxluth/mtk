@@ -43,10 +43,12 @@ pub use crate::ui::widgets::{
 };
 pub use crate::ui::{
     BoxedElement, BoxedView, BoxedViewExt, DragContext, DragPhase, Either, Focusable, FocusableExt,
-    KeyEvent, KeyEventContext, Keyed, KeyedViewSequence, Motion, MotionOffset, PageTransition,
+    KeyEvent, KeyEventContext, Keyed, KeyedViewSequence, Motion, MotionOffset, MouseActionKind,
+    MouseEventContext, MouseHandler, Overlay, OverlayElement, OverlayPlacement, PageTransition,
     Presence, PresenceViewExt, Router, ScrollContext, ScrollHandler, ScrollSource,
     ThumbScrollContext, ThumbScrollHandler, Transition, TransitionOrder, ViewEitherExt,
-    ViewEventExt, ViewStyleExt, boxed, either, keyed, keyed_sequence, presence, router,
+    ViewEventExt, ViewOverlayExt, ViewStyleExt, boxed, compute_overlay_position, either, keyed,
+    keyed_sequence, overlay, presence, router,
 };
 pub use accesskit::{Action, ActionData, ActionRequest, Role, TreeUpdate};
 use std::cell::RefCell;
@@ -142,6 +144,7 @@ pub struct Context {
     pub overlay_layer: InternalLayer,
     pub modal_layer: InternalLayer,
     pub active_layer: ActiveLayerId,
+    pub viewport_size: (f32, f32),
 }
 
 /// Policy specifying whether the OS cursor should remain free or be locked and hidden during pointer capture.
@@ -205,6 +208,7 @@ impl Context {
             overlay_layer: InternalLayer::new(false),
             modal_layer: InternalLayer::new(false),
             active_layer: ActiveLayerId::Base,
+            viewport_size: (800.0, 600.0),
         }
     }
 
@@ -310,6 +314,39 @@ impl Context {
                 self.clear_focus();
             }
         }
+    }
+
+    /// Returns the current layout viewport dimensions as `(width, height)`.
+    #[inline]
+    pub fn viewport_size(&self) -> (f32, f32) {
+        self.viewport_size
+    }
+
+    /// Activates the overlay layer and registers `node` as the root node of the overlay.
+    pub fn show_overlay(&mut self, node: Node) {
+        self.overlay_layer.state.visible = true;
+        self.overlay_layer.state.opacity = 1.0;
+        self.overlay_layer.state.root_node = Some(node);
+    }
+
+    /// Deactivates the overlay layer and unregisters the overlay root node.
+    pub fn hide_overlay(&mut self) {
+        self.overlay_layer.state.visible = false;
+        self.overlay_layer.state.opacity = 0.0;
+        self.overlay_layer.state.root_node = None;
+        self.clear_layer_focus(ActiveLayerId::Overlay);
+    }
+
+    /// Returns true if the overlay layer is currently active and visible.
+    #[inline]
+    pub fn is_overlay_open(&self) -> bool {
+        self.overlay_layer.state.visible && self.overlay_layer.state.root_node.is_some()
+    }
+
+    /// Returns the root node of the active overlay, if any.
+    #[inline]
+    pub fn overlay_node(&self) -> Option<Node> {
+        self.overlay_layer.state.root_node
     }
 
     /// Returns the elapsed delta time in seconds from the most recent frame tick.
@@ -668,6 +705,7 @@ impl Context {
 
     /// Computes the complete bottom-up and top-down layout pass across the node tree given `viewport_width` and `viewport_height`.
     pub fn compute_layout(&mut self, viewport_width: f32, viewport_height: f32) {
+        self.viewport_size = (viewport_width, viewport_height);
         let mut layout = std::mem::take(&mut self.layout);
         let mut sizing_func = self.text_sizing_func.take();
         let text_context = self.text_context.clone();

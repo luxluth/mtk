@@ -11,16 +11,26 @@ use std::rc::Rc;
 /// Categorizes high-level user interaction gesture triggers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EventKind {
-    /// Triggered on mouse button release while the cursor is over the view.
+    /// Triggered on mouse primary (left) button release while the cursor is over the view.
     Click,
+    /// Triggered on mouse secondary (right) button release while the cursor is over the view.
+    RightClick,
+    /// Triggered on mouse tertiary (middle) button release while the cursor is over the view.
+    MiddleClick,
+    /// Triggered on any mouse button release while the cursor is over the view.
+    ClickAny,
     /// Triggered when the mouse cursor enters the view's layout bounds.
     HoverIn,
     /// Triggered when the mouse cursor exits the view's layout bounds.
     HoverOut,
-    /// Triggered when a mouse button is pressed down over the view.
+    /// Triggered when the primary (left) mouse button is pressed down over the view.
     Press,
-    /// Triggered when a mouse button is released over the view.
+    /// Triggered when any mouse button is pressed down over the view.
+    PressAny,
+    /// Triggered when the primary (left) mouse button is released over the view.
     Release,
+    /// Triggered when any mouse button is released over the view.
+    ReleaseAny,
     /// Triggered when the user submits input (e.g., pressing Enter in a focused input field).
     Submit,
     /// Triggered when a scrollbar thumb is dragged or scrolled.
@@ -65,6 +75,7 @@ pub struct EventElement<VEl> {
     pub(crate) inner_element: VEl,
     pub(crate) is_hovered: bool,
     pub(crate) is_pressed: bool,
+    pub(crate) pressed_buttons: Vec<winit::event::MouseButton>,
 }
 
 impl<State, V: View<State>, F> View<State> for EventHandler<State, V, F>
@@ -79,6 +90,7 @@ where
             inner_element: self.inner.build(ctx),
             is_hovered: false,
             is_pressed: false,
+            pressed_buttons: Vec::new(),
         }
     }
 
@@ -121,12 +133,18 @@ where
     ) -> (EventResult, Option<Self::Message>) {
         let self_node = self.get_node(element);
 
-        // Pre-track is_pressed on mouse-down for this node regardless of whether inner handles it
+        // Pre-track is_pressed and pressed_buttons on mouse-down for this node regardless of whether inner handles it
         if let Event::MouseInput {
-            pressed, hit_nodes, ..
+            button,
+            pressed,
+            hit_nodes,
+            ..
         } = &event
         {
             if *pressed && hit_nodes.contains(&self_node) {
+                if !element.pressed_buttons.contains(button) {
+                    element.pressed_buttons.push(*button);
+                }
                 element.is_pressed = true;
             }
         }
@@ -137,10 +155,16 @@ where
 
         // If an inner child already produced a message, prioritize child and avoid duplicate parent actions
         if inner_msg.is_some() {
-            if let Event::MouseInput { pressed, .. } = &event {
-                if !*pressed {
-                    element.is_pressed = false;
+            if let Event::MouseInput {
+                pressed: false,
+                button,
+                ..
+            } = &event
+            {
+                if let Some(pos) = element.pressed_buttons.iter().position(|b| b == button) {
+                    element.pressed_buttons.swap_remove(pos);
                 }
+                element.is_pressed = !element.pressed_buttons.is_empty();
             }
             return (inner_res, inner_msg);
         }
@@ -152,19 +176,37 @@ where
         if inner_res == EventResult::Handled {
             let allow_outer_processing = match &event {
                 Event::KeyboardInput { .. } => self.kind == EventKind::Submit,
-                Event::MouseInput { pressed: false, .. } => {
-                    element.is_pressed
-                        && (self.kind == EventKind::Release || self.kind == EventKind::Click)
+                Event::MouseInput {
+                    pressed: false,
+                    button,
+                    ..
+                } => {
+                    element.pressed_buttons.contains(button)
+                        && matches!(
+                            self.kind,
+                            EventKind::Release
+                                | EventKind::ReleaseAny
+                                | EventKind::Click
+                                | EventKind::RightClick
+                                | EventKind::MiddleClick
+                                | EventKind::ClickAny
+                        )
                 }
                 Event::FocusLost { .. } => self.kind == EventKind::FocusLost,
                 _ => false,
             };
 
             if !allow_outer_processing {
-                if let Event::MouseInput { pressed, .. } = &event {
-                    if !*pressed {
-                        element.is_pressed = false;
+                if let Event::MouseInput {
+                    pressed: false,
+                    button,
+                    ..
+                } = &event
+                {
+                    if let Some(pos) = element.pressed_buttons.iter().position(|b| b == button) {
+                        element.pressed_buttons.swap_remove(pos);
                     }
+                    element.is_pressed = !element.pressed_buttons.is_empty();
                 }
                 return (inner_res, inner_msg);
             }
@@ -195,27 +237,69 @@ where
                 }
             }
             Event::MouseInput {
-                pressed, hit_nodes, ..
+                button,
+                pressed,
+                hit_nodes,
+                ..
             } => {
                 let is_hit = hit_nodes.contains(&self_node);
                 if *pressed {
                     if is_hit {
+                        if !element.pressed_buttons.contains(button) {
+                            element.pressed_buttons.push(*button);
+                        }
                         element.is_pressed = true;
-                        if self.kind == EventKind::Press {
+                        let matches_press = match self.kind {
+                            EventKind::Press => *button == winit::event::MouseButton::Left,
+                            EventKind::PressAny => true,
+                            _ => false,
+                        };
+                        if matches_press {
                             emitted_msg = (self.handler)(state);
                             handled = EventResult::Handled;
                         }
                     }
-                } else if element.is_pressed {
-                    element.is_pressed = false;
-                    if is_hit {
-                        if self.kind == EventKind::Click || self.kind == EventKind::Release {
-                            emitted_msg = (self.handler)(state);
-                            handled = EventResult::Handled;
+                } else {
+                    let was_pressed = if let Some(pos) =
+                        element.pressed_buttons.iter().position(|b| b == button)
+                    {
+                        element.pressed_buttons.swap_remove(pos);
+                        true
+                    } else {
+                        false
+                    };
+                    element.is_pressed = !element.pressed_buttons.is_empty();
+
+                    if was_pressed {
+                        if is_hit {
+                            let matches_click = match self.kind {
+                                EventKind::Click => *button == winit::event::MouseButton::Left,
+                                EventKind::RightClick => {
+                                    *button == winit::event::MouseButton::Right
+                                }
+                                EventKind::MiddleClick => {
+                                    *button == winit::event::MouseButton::Middle
+                                }
+                                EventKind::ClickAny => true,
+                                EventKind::Release => *button == winit::event::MouseButton::Left,
+                                EventKind::ReleaseAny => true,
+                                _ => false,
+                            };
+                            if matches_click {
+                                emitted_msg = (self.handler)(state);
+                                handled = EventResult::Handled;
+                            }
+                        } else if self.kind == EventKind::Release
+                            || self.kind == EventKind::ReleaseAny
+                        {
+                            let matches_rel = self.kind == EventKind::ReleaseAny
+                                || (self.kind == EventKind::Release
+                                    && *button == winit::event::MouseButton::Left);
+                            if matches_rel {
+                                emitted_msg = (self.handler)(state);
+                                handled = EventResult::Handled;
+                            }
                         }
-                    } else if self.kind == EventKind::Release {
-                        emitted_msg = (self.handler)(state);
-                        handled = EventResult::Handled;
                     }
                 }
             }
@@ -243,6 +327,281 @@ where
     }
 }
 
+/// Contextual mouse event payload delivered to mouse click and button interaction listeners.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MouseEventContext {
+    /// The mouse button involved in this interaction.
+    pub button: winit::event::MouseButton,
+    /// Absolute horizontal pixel position of the cursor in window coordinates.
+    pub x: f32,
+    /// Absolute vertical pixel position of the cursor in window coordinates.
+    pub y: f32,
+    /// Active keyboard modifier state (Shift, Ctrl, Alt, Super).
+    pub modifiers: winit::keyboard::ModifiersState,
+}
+
+impl MouseEventContext {
+    /// Returns true if the interaction was triggered by the primary (left) mouse button.
+    #[inline]
+    pub fn is_left(&self) -> bool {
+        self.button == winit::event::MouseButton::Left
+    }
+
+    /// Returns true if the interaction was triggered by the secondary (right) mouse button.
+    #[inline]
+    pub fn is_right(&self) -> bool {
+        self.button == winit::event::MouseButton::Right
+    }
+
+    /// Returns true if the interaction was triggered by the tertiary (middle) mouse button.
+    #[inline]
+    pub fn is_middle(&self) -> bool {
+        self.button == winit::event::MouseButton::Middle
+    }
+
+    /// Returns the absolute cursor position as `(x, y)`.
+    #[inline]
+    pub fn pos(&self) -> (f32, f32) {
+        (self.x, self.y)
+    }
+
+    /// Returns true if the Shift modifier key was pressed during the event.
+    #[inline]
+    pub fn shift(&self) -> bool {
+        self.modifiers.shift_key()
+    }
+
+    /// Returns true if the Control modifier key was pressed during the event.
+    #[inline]
+    pub fn control(&self) -> bool {
+        self.modifiers.control_key()
+    }
+
+    /// Returns true if the Alt modifier key was pressed during the event.
+    #[inline]
+    pub fn alt(&self) -> bool {
+        self.modifiers.alt_key()
+    }
+
+    /// Returns true if the Super / Command / Windows modifier key was pressed during the event.
+    #[inline]
+    pub fn super_key(&self) -> bool {
+        self.modifiers.meta_key()
+    }
+}
+
+/// Interaction kind filter for mouse events with context.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MouseActionKind {
+    /// Primary (left) button click.
+    Click,
+    /// Secondary (right) button click.
+    RightClick,
+    /// Tertiary (middle) button click.
+    MiddleClick,
+    /// Any mouse button click.
+    ClickAny,
+    /// Any mouse button pressed down.
+    Down,
+    /// Any mouse button released.
+    Up,
+}
+
+/// A wrapper view that attaches a contextual mouse event listener closure to an inner view.
+///
+/// Created via [`ViewEventExt::on_click`], [`ViewEventExt::on_right_click`],
+/// [`ViewEventExt::on_click_any`], etc.
+pub struct MouseHandler<State, V, F> {
+    pub(crate) inner: V,
+    pub(crate) action: MouseActionKind,
+    pub(crate) handler: Rc<F>,
+    pub(crate) _marker: std::marker::PhantomData<State>,
+}
+
+/// Persistent element state for a [`MouseHandler`].
+pub struct MouseElement<VEl> {
+    pub(crate) inner_element: VEl,
+    pub(crate) pressed_buttons: Vec<winit::event::MouseButton>,
+}
+
+impl<State, V: View<State>, F> View<State> for MouseHandler<State, V, F>
+where
+    F: Fn(&State, MouseEventContext) -> Option<V::Message> + 'static,
+{
+    type Element = MouseElement<V::Element>;
+    type Message = V::Message;
+
+    fn build(&self, ctx: &mut Context) -> Self::Element {
+        MouseElement {
+            inner_element: self.inner.build(ctx),
+            pressed_buttons: Vec::new(),
+        }
+    }
+
+    fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
+        self.inner
+            .rebuild(&prev.inner, ctx, &mut element.inner_element);
+    }
+
+    fn rebuild_with_parent(
+        &self,
+        prev: &Self,
+        ctx: &mut Context,
+        element: &mut Self::Element,
+        parent: Node,
+        next_sibling: Option<Node>,
+    ) {
+        self.inner.rebuild_with_parent(
+            &prev.inner,
+            ctx,
+            &mut element.inner_element,
+            parent,
+            next_sibling,
+        );
+    }
+
+    fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
+        self.inner.teardown(ctx, &mut element.inner_element);
+    }
+
+    fn get_node(&self, element: &Self::Element) -> Node {
+        self.inner.get_node(&element.inner_element)
+    }
+
+    fn handle_event(
+        &self,
+        element: &mut Self::Element,
+        state: &State,
+        event: Event,
+        ctx: &mut Context,
+    ) -> (EventResult, Option<Self::Message>) {
+        let self_node = self.get_node(element);
+
+        if let Event::MouseInput {
+            button,
+            pressed,
+            hit_nodes,
+            ..
+        } = &event
+        {
+            if *pressed && hit_nodes.contains(&self_node) {
+                if !element.pressed_buttons.contains(button) {
+                    element.pressed_buttons.push(*button);
+                }
+            }
+        }
+
+        let (inner_res, inner_msg) =
+            self.inner
+                .handle_event(&mut element.inner_element, state, event.clone(), ctx);
+
+        if inner_msg.is_some() {
+            if let Event::MouseInput {
+                pressed: false,
+                button,
+                ..
+            } = &event
+            {
+                if let Some(pos) = element.pressed_buttons.iter().position(|b| b == button) {
+                    element.pressed_buttons.swap_remove(pos);
+                }
+            }
+            return (inner_res, inner_msg);
+        }
+
+        if inner_res == EventResult::Handled {
+            let allow_outer_processing = match &event {
+                Event::MouseInput {
+                    pressed: false,
+                    button,
+                    ..
+                } => element.pressed_buttons.contains(button),
+                _ => false,
+            };
+
+            if !allow_outer_processing {
+                if let Event::MouseInput {
+                    pressed: false,
+                    button,
+                    ..
+                } = &event
+                {
+                    if let Some(pos) = element.pressed_buttons.iter().position(|b| b == button) {
+                        element.pressed_buttons.swap_remove(pos);
+                    }
+                }
+                return (inner_res, inner_msg);
+            }
+        }
+
+        let mut handled = EventResult::Ignored;
+        let mut emitted_msg = None;
+
+        if let Event::MouseInput {
+            button,
+            pressed,
+            hit_nodes,
+            x,
+            y,
+        } = &event
+        {
+            let is_hit = hit_nodes.contains(&self_node);
+            let mouse_ctx = MouseEventContext {
+                button: *button,
+                x: *x,
+                y: *y,
+                modifiers: ctx.modifiers,
+            };
+
+            if *pressed {
+                if is_hit {
+                    if !element.pressed_buttons.contains(button) {
+                        element.pressed_buttons.push(*button);
+                    }
+                    if self.action == MouseActionKind::Down {
+                        emitted_msg = (self.handler)(state, mouse_ctx);
+                        handled = EventResult::Handled;
+                    }
+                }
+            } else {
+                let was_pressed =
+                    if let Some(pos) = element.pressed_buttons.iter().position(|b| b == button) {
+                        element.pressed_buttons.swap_remove(pos);
+                        true
+                    } else {
+                        false
+                    };
+
+                if was_pressed {
+                    if is_hit {
+                        let matches_action = match self.action {
+                            MouseActionKind::Click => *button == winit::event::MouseButton::Left,
+                            MouseActionKind::RightClick => {
+                                *button == winit::event::MouseButton::Right
+                            }
+                            MouseActionKind::MiddleClick => {
+                                *button == winit::event::MouseButton::Middle
+                            }
+                            MouseActionKind::ClickAny => true,
+                            MouseActionKind::Up => true,
+                            MouseActionKind::Down => false,
+                        };
+                        if matches_action {
+                            emitted_msg = (self.handler)(state, mouse_ctx);
+                            handled = EventResult::Handled;
+                        }
+                    } else if self.action == MouseActionKind::Up {
+                        emitted_msg = (self.handler)(state, mouse_ctx);
+                        handled = EventResult::Handled;
+                    }
+                }
+            }
+        }
+
+        (handled.or(inner_res), inner_msg.or(emitted_msg))
+    }
+}
+
 /// Extension trait for [`View`] providing event handling combinators.
 pub trait ViewEventExt<State>: View<State> + Sized {
     /// Attaches an event listener closure that runs when `event` occurs on this view.
@@ -253,6 +612,36 @@ pub trait ViewEventExt<State>: View<State> + Sized {
     fn on_event<F>(self, event: EventKind, handler: F) -> EventHandler<State, Self, F>
     where
         F: Fn(&State) -> Option<Self::Message> + 'static;
+
+    /// Attaches a primary (left) mouse click listener receiving current state and mouse context.
+    fn on_click<F>(self, handler: F) -> MouseHandler<State, Self, F>
+    where
+        F: Fn(&State, MouseEventContext) -> Option<Self::Message> + 'static;
+
+    /// Attaches a secondary (right) mouse click listener receiving current state and mouse context.
+    fn on_right_click<F>(self, handler: F) -> MouseHandler<State, Self, F>
+    where
+        F: Fn(&State, MouseEventContext) -> Option<Self::Message> + 'static;
+
+    /// Attaches a tertiary (middle) mouse click listener receiving current state and mouse context.
+    fn on_middle_click<F>(self, handler: F) -> MouseHandler<State, Self, F>
+    where
+        F: Fn(&State, MouseEventContext) -> Option<Self::Message> + 'static;
+
+    /// Attaches a click listener triggered by any mouse button receiving current state and mouse context.
+    fn on_click_any<F>(self, handler: F) -> MouseHandler<State, Self, F>
+    where
+        F: Fn(&State, MouseEventContext) -> Option<Self::Message> + 'static;
+
+    /// Attaches a mouse-down listener triggered on button press receiving current state and mouse context.
+    fn on_mouse_down<F>(self, handler: F) -> MouseHandler<State, Self, F>
+    where
+        F: Fn(&State, MouseEventContext) -> Option<Self::Message> + 'static;
+
+    /// Attaches a mouse-up listener triggered on button release receiving current state and mouse context.
+    fn on_mouse_up<F>(self, handler: F) -> MouseHandler<State, Self, F>
+    where
+        F: Fn(&State, MouseEventContext) -> Option<Self::Message> + 'static;
 
     /// Attaches an automatic pointer-captured drag gesture to this view.
     fn on_drag<F>(self, handler: F) -> DragHandler<State, Self, F>
@@ -318,6 +707,78 @@ impl<State, V: View<State>> ViewEventExt<State> for V {
         EventHandler {
             inner: self,
             kind: event,
+            handler: Rc::new(handler),
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    fn on_click<F>(self, handler: F) -> MouseHandler<State, Self, F>
+    where
+        F: Fn(&State, MouseEventContext) -> Option<Self::Message> + 'static,
+    {
+        MouseHandler {
+            inner: self,
+            action: MouseActionKind::Click,
+            handler: Rc::new(handler),
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    fn on_right_click<F>(self, handler: F) -> MouseHandler<State, Self, F>
+    where
+        F: Fn(&State, MouseEventContext) -> Option<Self::Message> + 'static,
+    {
+        MouseHandler {
+            inner: self,
+            action: MouseActionKind::RightClick,
+            handler: Rc::new(handler),
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    fn on_middle_click<F>(self, handler: F) -> MouseHandler<State, Self, F>
+    where
+        F: Fn(&State, MouseEventContext) -> Option<Self::Message> + 'static,
+    {
+        MouseHandler {
+            inner: self,
+            action: MouseActionKind::MiddleClick,
+            handler: Rc::new(handler),
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    fn on_click_any<F>(self, handler: F) -> MouseHandler<State, Self, F>
+    where
+        F: Fn(&State, MouseEventContext) -> Option<Self::Message> + 'static,
+    {
+        MouseHandler {
+            inner: self,
+            action: MouseActionKind::ClickAny,
+            handler: Rc::new(handler),
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    fn on_mouse_down<F>(self, handler: F) -> MouseHandler<State, Self, F>
+    where
+        F: Fn(&State, MouseEventContext) -> Option<Self::Message> + 'static,
+    {
+        MouseHandler {
+            inner: self,
+            action: MouseActionKind::Down,
+            handler: Rc::new(handler),
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    fn on_mouse_up<F>(self, handler: F) -> MouseHandler<State, Self, F>
+    where
+        F: Fn(&State, MouseEventContext) -> Option<Self::Message> + 'static,
+    {
+        MouseHandler {
+            inner: self,
+            action: MouseActionKind::Up,
             handler: Rc::new(handler),
             _marker: std::marker::PhantomData,
         }
@@ -1804,5 +2265,379 @@ mod tests {
         assert_eq!(scroll_ctx.source, ScrollSource::Kinetic);
         assert_eq!(scroll_ctx.viewport_w, 200.0);
         assert_eq!(scroll_ctx.viewport_h, 100.0);
+    }
+
+    #[test]
+    fn test_mouse_button_discrimination_left_right_middle() {
+        #[derive(Clone, Debug, PartialEq)]
+        enum ClickMsg {
+            Left,
+            Right,
+            Middle,
+            Any,
+        }
+
+        let mut ctx = Context::new();
+        let target = text::<_, ClickMsg>("Button")
+            .on_event(EventKind::Click, |_| Some(ClickMsg::Left))
+            .on_event(EventKind::RightClick, |_| Some(ClickMsg::Right))
+            .on_event(EventKind::MiddleClick, |_| Some(ClickMsg::Middle));
+
+        let mut element = View::<()>::build(&target, &mut ctx);
+        let node = View::<()>::get_node(&target, &element);
+
+        // 1. Right click: must fire RightClick, and MUST NOT fire Click
+        let (down_res, down_msg) = View::<()>::handle_event(
+            &target,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Right,
+                pressed: true,
+                hit_nodes: vec![node],
+                x: 10.0,
+                y: 20.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(down_res, EventResult::Ignored);
+        assert_eq!(down_msg, None);
+
+        let (up_res, up_msg) = View::<()>::handle_event(
+            &target,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Right,
+                pressed: false,
+                hit_nodes: vec![node],
+                x: 10.0,
+                y: 20.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(up_res, EventResult::Handled);
+        assert_eq!(up_msg, Some(ClickMsg::Right));
+
+        // 2. Left click: must fire Left, and NOT Right
+        let _ = View::<()>::handle_event(
+            &target,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Left,
+                pressed: true,
+                hit_nodes: vec![node],
+                x: 10.0,
+                y: 20.0,
+            },
+            &mut ctx,
+        );
+        let (l_res, l_msg) = View::<()>::handle_event(
+            &target,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Left,
+                pressed: false,
+                hit_nodes: vec![node],
+                x: 10.0,
+                y: 20.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(l_res, EventResult::Handled);
+        assert_eq!(l_msg, Some(ClickMsg::Left));
+
+        // 3. Middle click: must fire Middle
+        let _ = View::<()>::handle_event(
+            &target,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Middle,
+                pressed: true,
+                hit_nodes: vec![node],
+                x: 10.0,
+                y: 20.0,
+            },
+            &mut ctx,
+        );
+        let (m_res, m_msg) = View::<()>::handle_event(
+            &target,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Middle,
+                pressed: false,
+                hit_nodes: vec![node],
+                x: 10.0,
+                y: 20.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(m_res, EventResult::Handled);
+        assert_eq!(m_msg, Some(ClickMsg::Middle));
+
+        // 4. ClickAny triggers on secondary button too
+        let any_target =
+            text::<_, ClickMsg>("AnyButton").on_event(EventKind::ClickAny, |_| Some(ClickMsg::Any));
+        let mut any_element = View::<()>::build(&any_target, &mut ctx);
+        let any_node = View::<()>::get_node(&any_target, &any_element);
+
+        let _ = View::<()>::handle_event(
+            &any_target,
+            &mut any_element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Right,
+                pressed: true,
+                hit_nodes: vec![any_node],
+                x: 10.0,
+                y: 20.0,
+            },
+            &mut ctx,
+        );
+        let (any_res, any_msg) = View::<()>::handle_event(
+            &any_target,
+            &mut any_element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Right,
+                pressed: false,
+                hit_nodes: vec![any_node],
+                x: 10.0,
+                y: 20.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(any_res, EventResult::Handled);
+        assert_eq!(any_msg, Some(ClickMsg::Any));
+    }
+
+    #[test]
+    fn test_mouse_handler_contextual_methods_and_payload() {
+        #[derive(Clone, Debug, PartialEq)]
+        enum ActionMsg {
+            LeftClick(f32, f32),
+            RightClick(f32, f32),
+            AnyClick(winit::event::MouseButton, f32, f32),
+            Down(winit::event::MouseButton),
+            Up(winit::event::MouseButton),
+        }
+
+        let mut ctx = Context::new();
+        let target = text::<_, ActionMsg>("Action")
+            .on_click(|_state, mouse| Some(ActionMsg::LeftClick(mouse.x, mouse.y)))
+            .on_right_click(|_state, mouse| Some(ActionMsg::RightClick(mouse.x, mouse.y)))
+            .on_click_any(|_state, mouse| {
+                Some(ActionMsg::AnyClick(mouse.button, mouse.x, mouse.y))
+            });
+
+        let mut element = View::<()>::build(&target, &mut ctx);
+        let node = View::<()>::get_node(&target, &element);
+
+        // Right click down & up
+        let (d_res, d_msg) = View::<()>::handle_event(
+            &target,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Right,
+                pressed: true,
+                hit_nodes: vec![node],
+                x: 120.0,
+                y: 45.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(d_res, EventResult::Ignored);
+        assert_eq!(d_msg, None);
+
+        let (u_res, u_msg) = View::<()>::handle_event(
+            &target,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Right,
+                pressed: false,
+                hit_nodes: vec![node],
+                x: 120.0,
+                y: 45.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(u_res, EventResult::Handled);
+        // Inner on_right_click takes priority over outer on_click_any
+        assert_eq!(u_msg, Some(ActionMsg::RightClick(120.0, 45.0)));
+
+        // Left click down & up
+        let _ = View::<()>::handle_event(
+            &target,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Left,
+                pressed: true,
+                hit_nodes: vec![node],
+                x: 50.0,
+                y: 25.0,
+            },
+            &mut ctx,
+        );
+        let (l_res, l_msg) = View::<()>::handle_event(
+            &target,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Left,
+                pressed: false,
+                hit_nodes: vec![node],
+                x: 50.0,
+                y: 25.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(l_res, EventResult::Handled);
+        assert_eq!(l_msg, Some(ActionMsg::LeftClick(50.0, 25.0)));
+
+        // Test on_mouse_down and on_mouse_up
+        let down_up_target = text::<_, ActionMsg>("DownUp")
+            .on_mouse_down(|_state, mouse| Some(ActionMsg::Down(mouse.button)))
+            .on_mouse_up(|_state, mouse| Some(ActionMsg::Up(mouse.button)));
+        let mut du_element = View::<()>::build(&down_up_target, &mut ctx);
+        let du_node = View::<()>::get_node(&down_up_target, &du_element);
+
+        let (du_d_res, du_d_msg) = View::<()>::handle_event(
+            &down_up_target,
+            &mut du_element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Middle,
+                pressed: true,
+                hit_nodes: vec![du_node],
+                x: 10.0,
+                y: 10.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(du_d_res, EventResult::Handled);
+        assert_eq!(
+            du_d_msg,
+            Some(ActionMsg::Down(winit::event::MouseButton::Middle))
+        );
+
+        let (du_u_res, du_u_msg) = View::<()>::handle_event(
+            &down_up_target,
+            &mut du_element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Middle,
+                pressed: false,
+                hit_nodes: vec![du_node],
+                x: 10.0,
+                y: 10.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(du_u_res, EventResult::Handled);
+        assert_eq!(
+            du_u_msg,
+            Some(ActionMsg::Up(winit::event::MouseButton::Middle))
+        );
+    }
+
+    #[test]
+    fn test_mouse_event_context_helpers() {
+        let mouse = MouseEventContext {
+            button: winit::event::MouseButton::Right,
+            x: 100.0,
+            y: 200.0,
+            modifiers: winit::keyboard::ModifiersState::SHIFT,
+        };
+
+        assert!(!mouse.is_left());
+        assert!(mouse.is_right());
+        assert!(!mouse.is_middle());
+        assert_eq!(mouse.pos(), (100.0, 200.0));
+        assert!(mouse.shift());
+        assert!(!mouse.control());
+        assert!(!mouse.alt());
+        assert!(!mouse.super_key());
+    }
+
+    #[test]
+    fn test_mouse_button_chording() {
+        let mut ctx = Context::new();
+        let target = text::<_, (winit::event::MouseButton, bool)>("Chord")
+            .on_mouse_down(|_state, mouse| Some((mouse.button, true)))
+            .on_mouse_up(|_state, mouse| Some((mouse.button, false)));
+
+        let mut element = View::<()>::build(&target, &mut ctx);
+        let node = View::<()>::get_node(&target, &element);
+
+        // Press Left button down
+        let (_, msg) = View::<()>::handle_event(
+            &target,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Left,
+                pressed: true,
+                hit_nodes: vec![node],
+                x: 10.0,
+                y: 10.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(msg, Some((winit::event::MouseButton::Left, true)));
+
+        // Press Right button down while Left is still held
+        let (_, msg) = View::<()>::handle_event(
+            &target,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Right,
+                pressed: true,
+                hit_nodes: vec![node],
+                x: 10.0,
+                y: 10.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(msg, Some((winit::event::MouseButton::Right, true)));
+
+        // Release Left button - Right button should still be tracked as pressed
+        let (_, msg) = View::<()>::handle_event(
+            &target,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Left,
+                pressed: false,
+                hit_nodes: vec![node],
+                x: 10.0,
+                y: 10.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(msg, Some((winit::event::MouseButton::Left, false)));
+
+        // Release Right button
+        let (_, msg) = View::<()>::handle_event(
+            &target,
+            &mut element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Right,
+                pressed: false,
+                hit_nodes: vec![node],
+                x: 10.0,
+                y: 10.0,
+            },
+            &mut ctx,
+        );
+        assert_eq!(msg, Some((winit::event::MouseButton::Right, false)));
     }
 }

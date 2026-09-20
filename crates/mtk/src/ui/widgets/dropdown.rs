@@ -201,6 +201,7 @@ where
                     .offset(0.0, 4.0),
             )
             .z_index(2000)
+            .unclipped(true)
             .apply_to_node(ctx, menu_node);
 
         let is_dark = self.bg_color.r < 100 && self.bg_color.g < 100 && self.bg_color.b < 100;

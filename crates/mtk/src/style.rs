@@ -429,6 +429,7 @@ impl StyleFlags {
     pub const SELECTION_BG: Self = Self(1 << 41);
 
     pub const SCROLLBAR: Self = Self(1 << 42);
+    pub const UNCLIPPED: Self = Self(1 << 43);
 
     #[inline]
     pub const fn is_empty(self) -> bool {
@@ -599,6 +600,9 @@ impl Style {
             if other.flags.contains(StyleFlags::OVERFLOW) {
                 self.base_constraints.overflow = other.base_constraints.overflow;
             }
+            if other.flags.contains(StyleFlags::UNCLIPPED) {
+                self.base_constraints.unclipped = other.base_constraints.unclipped;
+            }
             if other.flags.contains(StyleFlags::POSITIONING) {
                 self.base_constraints.positioning = other.base_constraints.positioning;
             }
@@ -731,6 +735,10 @@ impl Style {
             let overflow = c.overflow;
             let scroll = c.scroll;
             let flex_dir = self.flex_direction.unwrap_or(c.flex_direction);
+            let positioning = c.positioning;
+            let unclipped = c.unclipped;
+            let z_index = c.z_index;
+
             *c = self.base_constraints;
             c.flex_direction = flex_dir;
             if self.base_constraints.overflow == Overflow::Visible && overflow != Overflow::Visible
@@ -738,6 +746,18 @@ impl Style {
                 c.overflow = overflow;
             }
             c.scroll = scroll;
+
+            if !self.flags.contains(StyleFlags::UNCLIPPED) && unclipped {
+                c.unclipped = true;
+            }
+            if !self.flags.contains(StyleFlags::Z_INDEX) && z_index != 0 {
+                c.z_index = z_index;
+            }
+            if !self.flags.contains(StyleFlags::POSITIONING)
+                && !matches!(positioning, PositionStrategy::Inflow)
+            {
+                c.positioning = positioning;
+            }
         });
 
         node.set_effects(ctx, self.base_effects.clone());
@@ -1019,6 +1039,13 @@ impl Style {
     pub fn overflow(mut self, overflow: Overflow) -> Self {
         self.base_constraints.overflow = overflow;
         self.flags.insert(StyleFlags::OVERFLOW);
+        self
+    }
+
+    /// Sets whether this view escapes ancestor clipping (e.g. for floating overlays, flyouts, and tooltips).
+    pub fn unclipped(mut self, unclipped: bool) -> Self {
+        self.base_constraints.unclipped = unclipped;
+        self.flags.insert(StyleFlags::UNCLIPPED);
         self
     }
 

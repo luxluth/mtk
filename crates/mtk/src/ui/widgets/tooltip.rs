@@ -179,6 +179,7 @@ impl<V> Tooltip<V> {
                 ..Default::default()
             })
             .z_index(3000)
+            .unclipped(true)
     }
 
     pub(crate) fn resolve_style(&self) -> Style {

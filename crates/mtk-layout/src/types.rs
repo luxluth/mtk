@@ -313,6 +313,7 @@ pub struct Constraints {
     pub border: Edges,
 
     pub overflow: Overflow,
+    pub unclipped: bool,
     pub scroll: Vector2,
     pub scrollbar_visible: bool,
     pub z_index: i32,
@@ -345,6 +346,7 @@ impl Default for Constraints {
             border: Edges::default(),
 
             overflow: Overflow::Visible,
+            unclipped: false,
             scroll: Vector2 { x: 0.0, y: 0.0 },
             scrollbar_visible: true,
             z_index: 0,
@@ -353,6 +355,11 @@ impl Default for Constraints {
 }
 
 impl Constraints {
+    /// Sets whether this node bypasses ancestor scissor clipping, escaping to viewport boundaries.
+    pub fn with_unclipped(mut self, unclipped: bool) -> Self {
+        self.unclipped = unclipped;
+        self
+    }
     /// Resolves the vertical scroll offset in pixels, decoding percentage-encoded values (`< 0.0`) against `max_scroll_y`.
     pub fn resolved_scroll_y(&self, max_scroll_y: f32) -> f32 {
         if self.scroll.y < 0.0 {
@@ -428,6 +435,9 @@ impl Constraints {
         }
         if other.overflow != Overflow::Visible {
             self.overflow = other.overflow;
+        }
+        if other.unclipped {
+            self.unclipped = true;
         }
         if !other.scrollbar_visible {
             self.scrollbar_visible = false;

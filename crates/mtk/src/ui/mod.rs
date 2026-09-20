@@ -16,6 +16,7 @@ pub mod layer;
 pub mod lens;
 pub mod memoize;
 pub mod morph;
+pub mod overlay;
 pub mod presence;
 pub mod router;
 pub mod style;
@@ -28,8 +29,8 @@ pub use boxed::{BoxedElement, BoxedView, BoxedViewExt, boxed};
 pub use either::{Either, ViewEitherExt, either};
 pub use event::{
     DragContext, DragElement, DragHandler, DragPhase, EventKind, KeyActionKind, KeyEventContext,
-    KeyHandler, KeyScope, ScrollContext, ScrollHandler, ScrollSource, ThumbScrollContext,
-    ThumbScrollHandler, TickHandler, ViewEventExt,
+    KeyHandler, KeyScope, MouseActionKind, MouseEventContext, MouseHandler, ScrollContext,
+    ScrollHandler, ScrollSource, ThumbScrollContext, ThumbScrollHandler, TickHandler, ViewEventExt,
 };
 pub use focus::{Focusable, FocusableExt};
 pub use keyed::{Keyed, KeyedViewSequence, keyed, keyed_sequence};
@@ -37,6 +38,9 @@ pub use kinetic::KineticTracker;
 pub use layer::{Layer, ViewLayerExt, layer};
 pub use lens::Lens;
 pub use morph::{MorphId, MorphTransition, MorphViewExt, Morphable, morphable};
+pub use overlay::{
+    Overlay, OverlayElement, OverlayPlacement, ViewOverlayExt, compute_overlay_position, overlay,
+};
 pub use presence::{Presence, PresenceViewExt, presence};
 pub use router::{Router, router};
 pub use style::ViewStyleExt;

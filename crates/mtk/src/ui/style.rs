@@ -7,6 +7,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::animation::{AnimatedValue, Curve, Keyframes};
+use crate::style::{PositionStrategy, StyleFlags};
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
 use crate::{
@@ -398,6 +399,9 @@ impl<V> StyledView<V> {
             let overflow = c.overflow;
             let scroll = c.scroll;
             let flex_dir = active_style.flex_direction.unwrap_or(c.flex_direction);
+            let positioning = c.positioning;
+            let unclipped = c.unclipped;
+            let z_index = c.z_index;
             let is_both_fixed = matches!(
                 active_style.base_constraints.width,
                 Size::Fixed(_) | Size::Percent(_)
@@ -422,6 +426,18 @@ impl<V> StyledView<V> {
                 c.overflow = overflow;
             }
             c.scroll = scroll;
+
+            if !active_style.flags.contains(StyleFlags::UNCLIPPED) && unclipped {
+                c.unclipped = true;
+            }
+            if !active_style.flags.contains(StyleFlags::Z_INDEX) && z_index != 0 {
+                c.z_index = z_index;
+            }
+            if !active_style.flags.contains(StyleFlags::POSITIONING)
+                && !matches!(positioning, PositionStrategy::Inflow)
+            {
+                c.positioning = positioning;
+            }
         });
 
         // Apply effects
@@ -555,6 +571,9 @@ impl<V> KeyframedView<V> {
             let overflow = c.overflow;
             let scroll = c.scroll;
             let flex_dir = style.flex_direction.unwrap_or(c.flex_direction);
+            let positioning = c.positioning;
+            let unclipped = c.unclipped;
+            let z_index = c.z_index;
             *c = style.base_constraints;
             c.flex_direction = flex_dir;
 
@@ -563,6 +582,18 @@ impl<V> KeyframedView<V> {
                 c.overflow = overflow;
             }
             c.scroll = scroll;
+
+            if !style.flags.contains(StyleFlags::UNCLIPPED) && unclipped {
+                c.unclipped = true;
+            }
+            if !style.flags.contains(StyleFlags::Z_INDEX) && z_index != 0 {
+                c.z_index = z_index;
+            }
+            if !style.flags.contains(StyleFlags::POSITIONING)
+                && !matches!(positioning, PositionStrategy::Inflow)
+            {
+                c.positioning = positioning;
+            }
         });
 
         node.set_effects(ctx, style.base_effects.clone());
