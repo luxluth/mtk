@@ -423,6 +423,14 @@ impl Animatable for Style {
                 .base_constraints
                 .border
                 .is_finished(&target.base_constraints.border)
+            && self
+                .base_constraints
+                .width
+                .is_finished(&target.base_constraints.width)
+            && self
+                .base_constraints
+                .height
+                .is_finished(&target.base_constraints.height)
             && (self.base_constraints.gap - target.base_constraints.gap).abs() < 1e-4
             && (self.base_text_style.font_size - target.base_text_style.font_size).abs() < 1e-4
             && self

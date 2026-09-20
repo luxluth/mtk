@@ -1155,4 +1155,60 @@ mod tests {
         assert_eq!(anim.duration, 150.0);
         assert_eq!(anim.curve, Curve::ease_in_out());
     }
+
+    #[test]
+    fn test_sizing_transition_width_and_height() {
+        let mut ctx = Context::new();
+        let styled = crate::ui::widgets::container((crate::ui::widgets::text::<_, ()>("test"),))
+            .style(
+                Style::new()
+                    .width(Size::Fixed(100))
+                    .height(Size::Fixed(50))
+                    .on_hover(|s| s.width(Size::Fixed(200)).height(Size::Fixed(100)))
+                    .transition(TransitionProperty::Size, 200.0, Curve::ease_out()),
+            );
+
+        let mut el = View::<()>::build(&styled, &mut ctx);
+        let node = View::<()>::get_node(&styled, &el);
+
+        let cons_initial = node.get_constraints(&ctx).unwrap();
+        assert_eq!(cons_initial.width, Size::Fixed(100));
+        assert_eq!(cons_initial.height, Size::Fixed(50));
+
+        // Hover over the container
+        let _ = View::<()>::handle_event(
+            &styled,
+            &mut el,
+            &(),
+            Event::CursorMoved {
+                x: 10.0,
+                y: 10.0,
+                delta_x: 0.0,
+                delta_y: 0.0,
+                hit_nodes: vec![node],
+            },
+            &mut ctx,
+        );
+
+        assert!(el.1.is_hovered);
+        assert!(el.1.is_animating);
+        assert!(el.1.style_anim.is_some());
+
+        // Advance animation by tick
+        let _ = View::<()>::handle_event(&styled, &mut el, &(), Event::Tick { dt: 0.05 }, &mut ctx);
+
+        let cons_mid = node.get_constraints(&ctx).unwrap();
+        if let (Size::Fixed(w), Size::Fixed(h)) = (cons_mid.width, cons_mid.height) {
+            assert!(
+                (100..=200).contains(&w),
+                "w={w} should be between 100 and 200"
+            );
+            assert!(
+                (50..=100).contains(&h),
+                "h={h} should be between 50 and 100"
+            );
+        } else {
+            panic!("Expected Size::Fixed during interpolation");
+        }
+    }
 }
