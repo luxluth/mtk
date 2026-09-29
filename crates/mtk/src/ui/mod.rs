@@ -24,13 +24,15 @@ pub mod transition;
 pub mod widgets;
 
 pub use crate::switch;
+pub use ::winit::window::Theme;
 pub use adapter::{ViewAdaptExt, adapt};
 pub use boxed::{BoxedElement, BoxedView, BoxedViewExt, boxed};
 pub use either::{Either, ViewEitherExt, either};
 pub use event::{
     DragContext, DragElement, DragHandler, DragPhase, EventKind, KeyActionKind, KeyEventContext,
     KeyHandler, KeyScope, MouseActionKind, MouseEventContext, MouseHandler, ScrollContext,
-    ScrollHandler, ScrollSource, ThumbScrollContext, ThumbScrollHandler, TickHandler, ViewEventExt,
+    ScrollHandler, ScrollSource, ThemeHandler, ThumbScrollContext, ThumbScrollHandler, TickHandler,
+    ViewEventExt,
 };
 pub use focus::{Focusable, FocusableExt};
 pub use keyed::{Keyed, KeyedViewSequence, keyed, keyed_sequence};
@@ -49,6 +51,8 @@ pub use transition::{Motion, MotionOffset, PageTransition, Transition, Transitio
 /// Represents user interaction, layout lifecycle, and system input events dispatched down the view tree.
 #[derive(Clone, Debug)]
 pub enum Event {
+    /// Dispatched when the operating system interface theme changes (e.g. Light or Dark mode).
+    ThemeChanged(::winit::window::Theme),
     /// Dispatched when the mouse cursor moves across the viewport.
     CursorMoved {
         /// Absolute horizontal pixel position.

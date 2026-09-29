@@ -18,6 +18,7 @@ pub mod windowing;
 
 use crate::ui::morph::{MorphId, MorphInfo, MorphPair, MorphTransition};
 use ::winit::keyboard::ModifiersState;
+pub use ::winit::window::Theme;
 use ::winit::window::Window;
 pub use mtk_macro::Lens;
 
@@ -123,7 +124,10 @@ pub struct Context {
     pub window: Option<Arc<dyn Window>>,
     pub modifiers: ModifiersState,
     pub ensure_visible_requests: HashMap<Node, crate::style::Rect>,
+    #[cfg(not(target_os = "android"))]
     pub clipboard: Arc<Mutex<Option<arboard::Clipboard>>>,
+    #[cfg(target_os = "android")]
+    pub clipboard: Arc<Mutex<Option<()>>>,
     pub canvases: RefCell<HashMap<Node, CanvasData>>,
     pub images: RefCell<HashMap<Node, (ImageData, ObjectFit)>>,
     pub svgs: RefCell<HashMap<Node, (SvgData, ObjectFit)>>,
@@ -131,7 +135,9 @@ pub struct Context {
     pub node_sources: HashMap<Node, SourceLocation>,
     pub highlight_node: Option<Node>,
     pub scale_factor: f32,
+    pub safe_area: Edges,
     pub captured_pointer: Option<PointerCapture>,
+    pub theme: Option<Theme>,
 
     // Shared element morph registry
     pub morph_registry: HashMap<Node, MorphInfo>,
@@ -197,7 +203,9 @@ impl Context {
             node_sources: HashMap::new(),
             highlight_node: None,
             scale_factor: 1.0,
+            safe_area: Edges::all(0.0),
             captured_pointer: None,
+            theme: None,
 
             morph_registry: HashMap::new(),
             morph_nodes_by_id: HashMap::new(),
@@ -532,6 +540,11 @@ impl Context {
         self.modifiers
     }
 
+    /// Returns the active operating system theme (Light or Dark), if reported by the windowing backend.
+    pub fn theme(&self) -> Option<Theme> {
+        self.theme
+    }
+
     /// Copies payload data to the persistent system clipboard.
     ///
     /// Keeps the underlying system clipboard handle alive across application frames to prevent
@@ -541,6 +554,7 @@ impl Context {
     /// ```rust,ignore
     /// ctx.clipboard_copy(ClipboardData::Text("Hello, World!".to_string()));
     /// ```
+    #[cfg(not(target_os = "android"))]
     pub fn clipboard_copy(&self, data: ClipboardData) {
         if let Ok(mut guard) = self.clipboard.lock() {
             if guard.is_none() {
@@ -563,6 +577,9 @@ impl Context {
         }
     }
 
+    #[cfg(target_os = "android")]
+    pub fn clipboard_copy(&self, _data: ClipboardData) {}
+
     /// Retrieves payload data from the persistent system clipboard.
     ///
     /// Returns `Some(ClipboardData)` if clipboard content is available, or `None` if
@@ -574,6 +591,7 @@ impl Context {
     ///     println!("Pasted: {text}");
     /// }
     /// ```
+    #[cfg(not(target_os = "android"))]
     pub fn clipboard_get(&self) -> Option<ClipboardData> {
         if let Ok(mut guard) = self.clipboard.lock() {
             if guard.is_none() {
@@ -594,6 +612,11 @@ impl Context {
                 *guard = Some(new_cb);
             }
         }
+        None
+    }
+
+    #[cfg(target_os = "android")]
+    pub fn clipboard_get(&self) -> Option<ClipboardData> {
         None
     }
 

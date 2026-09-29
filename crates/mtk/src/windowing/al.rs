@@ -61,6 +61,15 @@ struct TouchScrollState {
     last_move_time: Instant,
 }
 
+#[derive(Clone, Debug)]
+struct TouchContentDrag {
+    node: Node,
+    start_pos: (f32, f32),
+    start_scroll: (f32, f32),
+    has_dragged: bool,
+    tracker: crate::ui::KineticTracker,
+}
+
 pub struct Window<S, V>
 where
     V: View<S>,
@@ -88,6 +97,7 @@ where
     touch_scroll_states: HashMap<Node, TouchScrollState>,
     drag_scroll_node: Option<(Node, f32, f32)>,
     drag_scroll_x_node: Option<(Node, f32, f32)>,
+    touch_content_drag: Option<TouchContentDrag>,
 
     debug_tx: Option<std::sync::mpsc::Sender<crate::debugger::DebugEvent>>,
     debug_rx_cmd: Option<std::sync::mpsc::Receiver<crate::debugger::DebugCommand>>,
@@ -277,6 +287,7 @@ where
             touch_scroll_states: HashMap::new(),
             drag_scroll_node: None,
             drag_scroll_x_node: None,
+            touch_content_drag: None,
             debug_tx: None,
             debug_rx_cmd: None,
             hovered_node: None,
@@ -349,8 +360,7 @@ where
         Ok(self)
     }
 
-    pub fn present(self) {
-        let event_loop = EventLoop::new().unwrap();
+    pub fn present_with_event_loop(self, event_loop: EventLoop) {
         if let Ok(mut guard) = self.event_proxy.lock() {
             *guard = Some(event_loop.create_proxy());
         }
@@ -364,9 +374,34 @@ where
         event_loop.run_app(self).unwrap();
     }
 
+    pub fn present(self) {
+        let event_loop = EventLoop::new().unwrap();
+        self.present_with_event_loop(event_loop);
+    }
+
     pub fn present_with(mut self, attr: WindowAttributes) {
         self.attr = attr;
         self.present();
+    }
+
+    #[cfg(target_os = "android")]
+    pub fn present_android(self, app: winit::platform::android::activity::AndroidApp) {
+        use winit::platform::android::EventLoopBuilderExtAndroid;
+
+        let mut builder = EventLoop::builder();
+        builder.with_android_app(app);
+        let event_loop = builder.build().expect("Failed to build Android EventLoop");
+        self.present_with_event_loop(event_loop);
+    }
+
+    #[cfg(target_os = "android")]
+    pub fn present_with_android(
+        mut self,
+        app: winit::platform::android::activity::AndroidApp,
+        attr: WindowAttributes,
+    ) {
+        self.attr = attr;
+        self.present_android(app);
     }
 
     fn dispatch_and_rebuild(&mut self, mtk_event: Event) {
@@ -480,6 +515,7 @@ where
             }
 
             let mut thumb_scroll_event: Option<Event> = None;
+            let mut was_content_drag = false;
 
             // B) Scrollbar thumb drag start
             if let Event::MouseInput {
@@ -590,7 +626,54 @@ where
                             }
                         }
                     }
+
+                    if self.drag_scroll_node.is_none() && self.drag_scroll_x_node.is_none() {
+                        for node in hit_nodes.iter() {
+                            let constraints =
+                                node.get_constraints(&self.context).unwrap_or_default();
+                            if constraints.overflow == crate::Overflow::Scroll
+                                || constraints.overflow == crate::Overflow::Auto
+                            {
+                                if let Some(computed) = node.get_computed(&self.context) {
+                                    let content_h = node.compute_content_height(&self.context);
+                                    let max_scroll_y = (content_h - computed.h).max(0.0);
+                                    let content_w = computed.content_w.max(computed.w);
+                                    let max_scroll_x = (content_w - computed.w).max(0.0);
+                                    if max_scroll_y > 0.0 || max_scroll_x > 0.0 {
+                                        let cur_y = constraints.resolved_scroll_y(max_scroll_y);
+                                        let cur_x = constraints.resolved_scroll_x(max_scroll_x);
+                                        let mut tracker = crate::ui::KineticTracker::new(4.8);
+                                        tracker.on_press(x, y);
+                                        self.touch_content_drag = Some(TouchContentDrag {
+                                            node: *node,
+                                            start_pos: (x, y),
+                                            start_scroll: (cur_x, cur_y),
+                                            has_dragged: false,
+                                            tracker,
+                                        });
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
                 } else {
+                    if let Some(mut drag) = self.touch_content_drag.take() {
+                        if drag.has_dragged {
+                            was_content_drag = true;
+                            let (vx, vy) = drag.tracker.on_release();
+                            if vx.abs() > 30.0 || vy.abs() > 30.0 {
+                                let mut tracker = crate::ui::KineticTracker::new(4.8);
+                                tracker.set_velocity(-vx, -vy);
+                                self.scroll_trackers.insert(drag.node, tracker);
+                                self.scroll_tracker_sources
+                                    .insert(drag.node, ScrollSource::Kinetic);
+                                if let Some(window) = &self.window {
+                                    window.request_redraw();
+                                }
+                            }
+                        }
+                    }
                     if let Some((node, _, _)) = self.drag_scroll_node.take() {
                         if let Some(computed) = node.get_computed(&self.context) {
                             let constraints =
@@ -816,6 +899,62 @@ where
                         }
                     }
                 }
+                if let Some(drag) = &mut self.touch_content_drag {
+                    let delta_x = x - drag.start_pos.0;
+                    let delta_y = y - drag.start_pos.1;
+                    if !drag.has_dragged && (delta_x * delta_x + delta_y * delta_y) > 64.0 {
+                        drag.has_dragged = true;
+                    }
+                    if drag.has_dragged {
+                        if let Some(computed) = drag.node.get_computed(&self.context) {
+                            let constraints =
+                                drag.node.get_constraints(&self.context).unwrap_or_default();
+                            let content_h = drag.node.compute_content_height(&self.context);
+                            let max_scroll_y = (content_h - computed.h).max(0.0);
+                            let content_w = computed.content_w.max(computed.w);
+                            let max_scroll_x = (content_w - computed.w).max(0.0);
+
+                            let cur_y = constraints.resolved_scroll_y(max_scroll_y);
+                            let cur_x = constraints.resolved_scroll_x(max_scroll_x);
+
+                            let new_scroll_y = if max_scroll_y > 0.0 {
+                                (drag.start_scroll.1 - delta_y).clamp(0.0, max_scroll_y)
+                            } else {
+                                0.0
+                            };
+                            let new_scroll_x = if max_scroll_x > 0.0 {
+                                (drag.start_scroll.0 - delta_x).clamp(0.0, max_scroll_x)
+                            } else {
+                                0.0
+                            };
+
+                            if (new_scroll_y - cur_y).abs() > 0.001
+                                || (new_scroll_x - cur_x).abs() > 0.001
+                            {
+                                drag.node.update_constraints(&mut self.context, |c| {
+                                    c.scroll.y = new_scroll_y;
+                                    c.scroll.x = new_scroll_x;
+                                });
+                                drag.tracker.on_move(x, y);
+                                if let Some(window) = &self.window {
+                                    window.request_redraw();
+                                }
+                                if let Some(context) = ScrollContext::from_node(
+                                    drag.node,
+                                    &self.context,
+                                    cur_x,
+                                    cur_y,
+                                    ScrollSource::Touchpad,
+                                ) {
+                                    scroll_events.push(Event::Scroll {
+                                        node: drag.node,
+                                        context,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             if let Some(ref focus_ev) = focus_lost_event {
@@ -836,6 +975,9 @@ where
             // Pass 1 - READONLY state down
             let (result, mut optional_msg) =
                 view.handle_event(element, &self.state, mtk_event.clone(), &mut self.context);
+            if was_content_drag {
+                optional_msg = None;
+            }
 
             if let Some(thumb_ev) = thumb_scroll_event {
                 let (_thumb_res, thumb_msg) =
@@ -1426,6 +1568,22 @@ where
 
         let scale_factor = window.scale_factor() as f32;
         self.context.scale_factor = scale_factor;
+        self.context.theme = window.theme();
+
+        #[cfg(target_os = "android")]
+        {
+            use winit::platform::android::WindowExtAndroid;
+            let content = window.content_rect();
+            let phys = window.surface_size();
+            if content.right > 0 && content.bottom > 0 {
+                self.context.safe_area = crate::style::Edges {
+                    top: content.top as f32 / scale_factor,
+                    bottom: (phys.height as i32 - content.bottom).max(0) as f32 / scale_factor,
+                    left: content.left as f32 / scale_factor,
+                    right: (phys.width as i32 - content.right).max(0) as f32 / scale_factor,
+                };
+            }
+        }
 
         let phys_size = window.surface_size();
         let logical_w = phys_size.width as f32 / scale_factor;
@@ -1455,13 +1613,51 @@ where
             }
         }
 
+        if let (Some(view), Some(element), Some(app_view_fn)) =
+            (&self.view, &mut self.element, &mut self.app_view_fn)
+        {
+            let new_view = app_view_fn(&self.state);
+            new_view.rebuild(view, &mut self.context, element);
+            self.view = Some(new_view);
+        }
+
+        if let Some(theme) = self.context.theme {
+            self.dispatch_and_rebuild(Event::ThemeChanged(theme));
+        }
+
         window.request_redraw();
+    }
+
+    fn destroy_surfaces(&mut self, _event_loop: &dyn ActiveEventLoop) {
+        self.renderer = None;
+        self.window = None;
+        self.context.window = None;
     }
 
     fn about_to_wait(&mut self, _event_loop: &dyn ActiveEventLoop) {
         self.process_pending_messages();
         #[cfg(feature = "accessibility")]
         self.process_a11y_events();
+
+        #[cfg(target_os = "android")]
+        if let Some(window) = &self.window {
+            use winit::platform::android::WindowExtAndroid;
+            let content = window.content_rect();
+            let size = window.surface_size();
+            let s = window.scale_factor() as f32;
+            if content.right > 0 && content.bottom > 0 {
+                let new_safe_area = crate::style::Edges {
+                    top: content.top as f32 / s,
+                    bottom: (size.height as i32 - content.bottom).max(0) as f32 / s,
+                    left: content.left as f32 / s,
+                    right: (size.width as i32 - content.right).max(0) as f32 / s,
+                };
+                if self.context.safe_area != new_safe_area {
+                    window.request_redraw();
+                }
+            }
+        }
+
         if self.debug_tx.is_some() {
             if let Some(window) = &self.window {
                 window.request_redraw();
@@ -1495,7 +1691,9 @@ where
     }
 
     fn window_event(&mut self, event_loop: &dyn ActiveEventLoop, id: WindowId, event: WindowEvent) {
-        let window = self.window.as_ref().unwrap().clone();
+        let Some(window) = self.window.clone() else {
+            return;
+        };
         if id != window.id() {
             return;
         }
@@ -1527,16 +1725,66 @@ where
                 let mtk_event = Event::Ime(ime);
                 self.dispatch_and_rebuild(mtk_event);
             }
-            WindowEvent::Focused(_is_focused) =>
-            {
+            WindowEvent::Focused(is_focused) => {
                 #[cfg(feature = "accessibility")]
                 if let Some(adapter) = &mut self.a11y_adapter {
-                    adapter.set_focus(_is_focused);
+                    adapter.set_focus(is_focused);
                 }
+                if is_focused {
+                    #[cfg(target_os = "android")]
+                    {
+                        use winit::platform::android::WindowExtAndroid;
+                        let content = window.content_rect();
+                        let size = window.surface_size();
+                        let s = window.scale_factor() as f32;
+                        self.context.safe_area = crate::style::Edges {
+                            top: content.top as f32 / s,
+                            bottom: (size.height as i32 - content.bottom).max(0) as f32 / s,
+                            left: content.left as f32 / s,
+                            right: (size.width as i32 - content.right).max(0) as f32 / s,
+                        };
+                    }
+                    if let (Some(view), Some(element)) = (&self.view, &self.element) {
+                        let root = view.get_node(element);
+                        root.set_dirty(&mut self.context);
+                    }
+                    window.request_redraw();
+                }
+            }
+            WindowEvent::Occluded(occluded) => {
+                if !occluded {
+                    if let (Some(view), Some(element)) = (&self.view, &self.element) {
+                        let root = view.get_node(element);
+                        root.set_dirty(&mut self.context);
+                    }
+                    window.request_redraw();
+                }
+            }
+            WindowEvent::ThemeChanged(theme) => {
+                self.context.theme = Some(theme);
+                if let (Some(view), Some(element)) = (&self.view, &self.element) {
+                    let root = view.get_node(element);
+                    root.set_dirty(&mut self.context);
+                }
+                let mtk_event = Event::ThemeChanged(theme);
+                self.dispatch_and_rebuild(mtk_event);
+                window.request_redraw();
             }
             WindowEvent::SurfaceResized(size) => {
                 let scale_factor = window.scale_factor() as f32;
                 self.context.scale_factor = scale_factor;
+
+                #[cfg(target_os = "android")]
+                {
+                    use winit::platform::android::WindowExtAndroid;
+                    let content = window.content_rect();
+                    self.context.safe_area = crate::style::Edges {
+                        top: content.top as f32 / scale_factor,
+                        bottom: (size.height as i32 - content.bottom).max(0) as f32 / scale_factor,
+                        left: content.left as f32 / scale_factor,
+                        right: (size.width as i32 - content.right).max(0) as f32 / scale_factor,
+                    };
+                }
 
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize(size);
@@ -1553,9 +1801,12 @@ where
                     adapter.set_window_bounds(outer, outer);
                 }
 
-                if let (Some(view), Some(element)) = (&self.view, &self.element) {
-                    let root = view.get_node(element);
-                    root.set_dirty(&mut self.context);
+                if let (Some(view), Some(element), Some(app_view_fn)) =
+                    (&self.view, &mut self.element, &mut self.app_view_fn)
+                {
+                    let new_view = app_view_fn(&self.state);
+                    new_view.rebuild(view, &mut self.context, element);
+                    self.view = Some(new_view);
                 }
 
                 let logical_w = (size.width as f32 / scale_factor).round() as u32;
@@ -1569,7 +1820,22 @@ where
                 window.request_redraw();
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                self.context.scale_factor = scale_factor as f32;
+                let s = scale_factor as f32;
+                self.context.scale_factor = s;
+
+                #[cfg(target_os = "android")]
+                {
+                    use winit::platform::android::WindowExtAndroid;
+                    let content = window.content_rect();
+                    let size = window.surface_size();
+                    self.context.safe_area = crate::style::Edges {
+                        top: content.top as f32 / s,
+                        bottom: (size.height as i32 - content.bottom).max(0) as f32 / s,
+                        left: content.left as f32 / s,
+                        right: (size.width as i32 - content.right).max(0) as f32 / s,
+                    };
+                }
+
                 if let (Some(view), Some(element)) = (&self.view, &self.element) {
                     let root = view.get_node(element);
                     root.set_dirty(&mut self.context);
@@ -1768,6 +2034,32 @@ where
                 let phys_size = window.surface_size();
                 let logical_w = phys_size.width as f32 / scale_factor;
                 let logical_h = phys_size.height as f32 / scale_factor;
+
+                #[cfg(target_os = "android")]
+                {
+                    use winit::platform::android::WindowExtAndroid;
+                    let content = window.content_rect();
+                    let size = window.surface_size();
+                    let s = scale_factor;
+                    if content.right > 0 && content.bottom > 0 {
+                        let new_safe_area = crate::style::Edges {
+                            top: content.top as f32 / s,
+                            bottom: (size.height as i32 - content.bottom).max(0) as f32 / s,
+                            left: content.left as f32 / s,
+                            right: (size.width as i32 - content.right).max(0) as f32 / s,
+                        };
+                        if self.context.safe_area != new_safe_area {
+                            self.context.safe_area = new_safe_area;
+                            if let (Some(view), Some(element), Some(app_view_fn)) =
+                                (&self.view, &mut self.element, &mut self.app_view_fn)
+                            {
+                                let new_view = app_view_fn(&self.state);
+                                new_view.rebuild(view, &mut self.context, element);
+                                self.view = Some(new_view);
+                            }
+                        }
+                    }
+                }
 
                 self.context.compute_layout(logical_w, logical_h);
 

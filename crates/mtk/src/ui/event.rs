@@ -39,6 +39,8 @@ pub enum EventKind {
     FocusLost,
     /// Triggered when the view is scrolled (via mouse wheel, touchpad gesture, scrollbar thumb, or kinetic decay).
     Scroll,
+    /// Triggered when the operating system interface theme changes (e.g. Light or Dark mode).
+    ThemeChanged,
 }
 
 /// Indicates whether a view successfully processed or ignored an incoming event.
@@ -318,6 +320,12 @@ where
                             handled = EventResult::Handled;
                         }
                     }
+                }
+            }
+            Event::ThemeChanged(_) => {
+                if self.kind == EventKind::ThemeChanged {
+                    emitted_msg = (self.handler)(state);
+                    handled = EventResult::Handled;
                 }
             }
             _ => {}
@@ -697,6 +705,11 @@ pub trait ViewEventExt<State>: View<State> + Sized {
     fn on_blur<F>(self, handler: F) -> EventHandler<State, Self, F>
     where
         F: Fn(&State) -> Option<Self::Message> + 'static;
+
+    /// Attaches an OS theme change listener fired when the system switches between Light and Dark mode.
+    fn on_theme_changed<F>(self, handler: F) -> ThemeHandler<State, Self, F>
+    where
+        F: Fn(&State, ::winit::window::Theme) -> Option<Self::Message> + 'static;
 }
 
 impl<State, V: View<State>> ViewEventExt<State> for V {
@@ -905,6 +918,17 @@ impl<State, V: View<State>> ViewEventExt<State> for V {
         F: Fn(&State) -> Option<Self::Message> + 'static,
     {
         self.on_focus_lost(handler)
+    }
+
+    fn on_theme_changed<F>(self, handler: F) -> ThemeHandler<State, Self, F>
+    where
+        F: Fn(&State, ::winit::window::Theme) -> Option<Self::Message> + 'static,
+    {
+        ThemeHandler {
+            inner: self,
+            handler: Rc::new(handler),
+            _marker: std::marker::PhantomData,
+        }
     }
 }
 
@@ -1241,6 +1265,70 @@ where
 
         if let Event::Tick { dt } = event {
             if let Some(msg) = (self.handler)(state, dt) {
+                return (EventResult::Handled, Some(msg));
+            }
+        }
+
+        (inner_res, None)
+    }
+}
+
+/// A wrapper view that attaches an OS theme change listener to an inner view.
+pub struct ThemeHandler<State, V, F> {
+    pub(crate) inner: V,
+    pub(crate) handler: Rc<F>,
+    pub(crate) _marker: std::marker::PhantomData<State>,
+}
+
+impl<State, V: View<State>, F> View<State> for ThemeHandler<State, V, F>
+where
+    F: Fn(&State, ::winit::window::Theme) -> Option<V::Message> + 'static,
+{
+    type Element = V::Element;
+    type Message = V::Message;
+
+    fn build(&self, ctx: &mut Context) -> Self::Element {
+        self.inner.build(ctx)
+    }
+
+    fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
+        self.inner.rebuild(&prev.inner, ctx, element);
+    }
+
+    fn rebuild_with_parent(
+        &self,
+        prev: &Self,
+        ctx: &mut Context,
+        element: &mut Self::Element,
+        parent: Node,
+        next_sibling: Option<Node>,
+    ) {
+        self.inner
+            .rebuild_with_parent(&prev.inner, ctx, element, parent, next_sibling);
+    }
+
+    fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
+        self.inner.teardown(ctx, element);
+    }
+
+    fn get_node(&self, element: &Self::Element) -> Node {
+        self.inner.get_node(element)
+    }
+
+    fn handle_event(
+        &self,
+        element: &mut Self::Element,
+        state: &State,
+        event: Event,
+        ctx: &mut Context,
+    ) -> (EventResult, Option<Self::Message>) {
+        let (inner_res, inner_msg) = self.inner.handle_event(element, state, event.clone(), ctx);
+        if inner_msg.is_some() {
+            return (inner_res, inner_msg);
+        }
+
+        if let Event::ThemeChanged(theme) = event {
+            if let Some(msg) = (self.handler)(state, theme) {
                 return (EventResult::Handled, Some(msg));
             }
         }
