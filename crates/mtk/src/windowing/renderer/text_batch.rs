@@ -194,9 +194,15 @@ impl TextBatch {
                         let font_ptr = font_data.data.as_ref().as_ptr() as usize;
                         let brush = glyph_run.style().brush;
 
-                        let norm_coords = glyph_run.run().normalized_coords();
+                        let norm_coords: Vec<_> = glyph_run
+                            .run()
+                            .normalized_coords()
+                            .iter()
+                            .map(move |x| x.to_bits())
+                            .collect();
+                        let norm_coords_slice = &norm_coords[..];
                         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                        norm_coords.hash(&mut hasher);
+                        norm_coords_slice.hash(&mut hasher);
                         let coords_hash = hasher.finish();
 
                         let should_hint = false;
@@ -235,7 +241,7 @@ impl TextBatch {
                                             .builder(swash_font)
                                             .size(font_size)
                                             .hint(should_hint)
-                                            .normalized_coords(norm_coords)
+                                            .normalized_coords(norm_coords_slice)
                                             .build(),
                                     );
                                 }

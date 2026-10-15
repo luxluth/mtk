@@ -22,8 +22,8 @@ fn main() {
             "Line baseline: {}, height: {}, asc: {}, desc: {}",
             line.metrics().baseline,
             line.metrics().line_height,
-            line.metrics().ascent,
-            line.metrics().descent
+            line.metrics().inline_min_coord,
+            line.metrics().inline_max_coord
         );
         for item in line.items() {
             if let PositionedLayoutItem::GlyphRun(glyph_run) = item {

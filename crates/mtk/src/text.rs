@@ -578,7 +578,7 @@ pub fn measure_text(
             .layout
             .lines()
             .next()
-            .map(|l| l.metrics().ascent)
+            .map(|l| l.metrics().inline_min_coord)
             .unwrap_or(text_style.font_size),
     }
 }
