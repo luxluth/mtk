@@ -39,7 +39,10 @@ pub use keyed::{Keyed, KeyedViewSequence, keyed, keyed_sequence};
 pub use kinetic::KineticTracker;
 pub use layer::{Layer, ViewLayerExt, layer};
 pub use lens::Lens;
-pub use morph::{MorphId, MorphTransition, MorphViewExt, Morphable, morphable};
+pub use morph::{
+    ActiveMorphFlight, MorphId, MorphScope, MorphScopeExt, MorphTransition, MorphViewExt,
+    Morphable, morph_scope, morphable,
+};
 pub use overlay::{
     Overlay, OverlayElement, OverlayPlacement, ViewOverlayExt, compute_overlay_position, overlay,
 };

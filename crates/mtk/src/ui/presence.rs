@@ -416,54 +416,77 @@ where
                 if element.is_entering {
                     if let Some((node, _)) = &element.child {
                         let node = *node;
-                        let (w, h) = resolve_node_bounds(ctx, node);
+                        if ctx.is_morph_active_for(node) {
+                            if !animating || progress >= 0.999 {
+                                element.is_entering = false;
+                            } else {
+                                ctx.request_frame();
+                            }
+                        } else {
+                            let (w, h) = resolve_node_bounds(ctx, node);
+                            apply_motion_step(
+                                ctx,
+                                &self.enter_motion,
+                                progress,
+                                node,
+                                w,
+                                h,
+                                element.child_orig_positioning,
+                                element.inflow_pos,
+                            );
+                            if !animating || progress >= 0.999 {
+                                node.update_constraints(ctx, |c| {
+                                    c.positioning = element.child_orig_positioning;
+                                });
+                                let final_opacity = self.enter_motion.resolve_opacity(1.0);
+                                let final_scale = self.enter_motion.resolve_scale(1.0);
+                                node.update_effects(ctx, |eff| {
+                                    eff.opacity = final_opacity.clamp(0.0, 1.0);
+                                    eff.scale = final_scale;
+                                });
+                            } else {
+                                ctx.request_frame();
+                            }
+                        }
+                    }
+                } else if let Some((out_node, _)) = &element.outgoing {
+                    let out_node = *out_node;
+                    if ctx.is_morph_active_for(out_node) {
+                        ctx.request_frame();
+                    } else {
+                        let (w, h) = resolve_node_bounds(ctx, out_node);
                         apply_motion_step(
                             ctx,
-                            &self.enter_motion,
+                            &self.exit_motion,
                             progress,
-                            node,
+                            out_node,
                             w,
                             h,
                             element.child_orig_positioning,
                             element.inflow_pos,
                         );
                         if !animating || progress >= 0.999 {
-                            node.update_constraints(ctx, |c| {
-                                c.positioning = element.child_orig_positioning;
-                            });
-                            let final_opacity = self.enter_motion.resolve_opacity(1.0);
-                            let final_scale = self.enter_motion.resolve_scale(1.0);
-                            node.update_effects(ctx, |eff| {
-                                eff.opacity = final_opacity.clamp(0.0, 1.0);
-                                eff.scale = final_scale;
-                            });
+                            if let Some((node, mut el)) = element.outgoing.take() {
+                                self.view.teardown(ctx, &mut el);
+                                if node.is_valid() {
+                                    node.remove(ctx);
+                                    ctx.destroy_node(node);
+                                }
+                            }
                         } else {
                             ctx.request_frame();
                         }
                     }
-                } else if let Some((out_node, _)) = &element.outgoing {
-                    let out_node = *out_node;
-                    let (w, h) = resolve_node_bounds(ctx, out_node);
-                    apply_motion_step(
-                        ctx,
-                        &self.exit_motion,
-                        progress,
-                        out_node,
-                        w,
-                        h,
-                        element.child_orig_positioning,
-                        element.inflow_pos,
-                    );
-                    if !animating || progress >= 0.999 {
-                        if let Some((node, mut el)) = element.outgoing.take() {
-                            self.view.teardown(ctx, &mut el);
-                            if node.is_valid() {
-                                node.remove(ctx);
-                                ctx.destroy_node(node);
-                            }
-                        }
-                    } else {
-                        ctx.request_frame();
+                }
+            } else if let Some((out_node, _)) = &element.outgoing {
+                let out_node = *out_node;
+                if ctx.is_morph_active_for(out_node) {
+                    ctx.request_frame();
+                } else if let Some((node, mut el)) = element.outgoing.take() {
+                    self.view.teardown(ctx, &mut el);
+                    if node.is_valid() {
+                        node.remove(ctx);
+                        ctx.destroy_node(node);
                     }
                 }
             }

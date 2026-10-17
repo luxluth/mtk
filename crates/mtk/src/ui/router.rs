@@ -6,33 +6,14 @@
 use std::marker::PhantomData;
 use std::time::Instant;
 
-use crate::animation::{Animatable, AnimatedValue};
+use crate::animation::AnimatedValue;
 use crate::debugger::SourceLocation;
-use crate::effects::Effects;
-use crate::style::{AlignItems, JustifyContent, Overflow, PositionStrategy, Rect, Size, Style};
+use crate::style::{Overflow, PositionStrategy, Size, Style};
 use crate::ui::event::EventResult;
-use crate::ui::morph::{MorphId, MorphTransition};
+use crate::ui::morph::{ActiveMorphFlight, apply_morph_step, settle_morphs};
 use crate::ui::transition::{PageTransition, TransitionOrder};
 use crate::ui::{Event, View};
-use crate::{BoxShadow, Color, Context, Node};
-
-/// Tracks active state for an ongoing shared element morph flight.
-pub(crate) struct ActiveMorphFlight {
-    #[allow(dead_code)]
-    pub(crate) id: MorphId,
-    pub(crate) source_node: Node,
-    pub(crate) target_node: Node,
-    pub(crate) source_placeholder: Option<Node>,
-    pub(crate) target_placeholder: Option<Node>,
-    pub(crate) transition: MorphTransition,
-    pub(crate) source_rect: Option<Rect>,
-    pub(crate) target_rect: Option<Rect>,
-    pub(crate) source_effects: Option<Effects>,
-    pub(crate) target_effects: Option<Effects>,
-    pub(crate) shuttle_node: Option<Node>,
-    pub(crate) shuttle_source_box: Option<Node>,
-    pub(crate) shuttle_target_box: Option<Node>,
-}
+use crate::{Context, Node};
 
 /// A router widget that smoothly animates between pages/views when its route key changes.
 pub struct Router<Key, V, Msg> {
@@ -162,252 +143,6 @@ fn apply_transition_step(
     });
 }
 
-fn settle_morphs(ctx: &mut Context, morphs: &mut Vec<ActiveMorphFlight>) {
-    let had_morphs = !morphs.is_empty();
-    for flight in morphs.drain(..) {
-        ctx.morph_suppressed_nodes.remove(&flight.source_node);
-        ctx.morph_suppressed_nodes.remove(&flight.target_node);
-
-        if let Some(t_ph) = flight.target_placeholder {
-            if !flight.target_node.put_before(ctx, t_ph) {
-                if let Some(parent) = t_ph.parent(ctx) {
-                    parent.append(ctx, flight.target_node);
-                }
-            }
-            t_ph.remove(ctx);
-            ctx.destroy_node(t_ph);
-        }
-        if let Some(s_ph) = flight.source_placeholder {
-            s_ph.remove(ctx);
-            ctx.destroy_node(s_ph);
-        }
-        if let Some(shuttle) = flight.shuttle_node {
-            shuttle.remove(ctx);
-            ctx.destroy_node(shuttle);
-        }
-        if let Some(source_eff) = flight.source_effects {
-            flight.source_node.set_effects(ctx, source_eff);
-        }
-        if let Some(target_eff) = flight.target_effects {
-            flight.target_node.set_effects(ctx, target_eff);
-        }
-    }
-    if had_morphs {
-        ctx.request_frame();
-    }
-}
-
-fn apply_morph_step(
-    ctx: &mut Context,
-    router_container: Node,
-    morphs: &mut [ActiveMorphFlight],
-    progress: f32,
-) {
-    if morphs.is_empty() {
-        return;
-    }
-
-    let container_bounds = router_container.get_computed(ctx).unwrap_or_default();
-
-    for flight in morphs.iter_mut() {
-        if flight.shuttle_node.is_none() {
-            let s_comp = flight.source_node.get_computed(ctx);
-            let t_comp = flight.target_node.get_computed(ctx);
-
-            if let (Some(s), Some(t)) = (s_comp, t_comp) {
-                if s.w > 0.0 && s.h > 0.0 && t.w > 0.0 && t.h > 0.0 {
-                    let s_rel_x = s.x - container_bounds.x;
-                    let s_rel_y = s.y - container_bounds.y;
-                    let t_rel_x = t.x - container_bounds.x;
-                    let t_rel_y = t.y - container_bounds.y;
-
-                    let s_rect = Rect::new(s_rel_x, s_rel_y, s.w, s.h);
-                    let t_rect = Rect::new(t_rel_x, t_rel_y, t.w, t.h);
-                    flight.source_rect = Some(s_rect);
-                    flight.target_rect = Some(t_rect);
-
-                    let s_eff = flight.source_node.get_effects(ctx).unwrap_or_default();
-                    let t_eff = flight.target_node.get_effects(ctx).unwrap_or_default();
-                    flight.source_effects = Some(s_eff.clone());
-                    flight.target_effects = Some(t_eff.clone());
-
-                    let s_ph = ctx.create_node();
-                    s_ph.update_constraints(ctx, |c| {
-                        c.width = Size::Fixed(s.w.round().max(1.0) as u32);
-                        c.height = Size::Fixed(s.h.round().max(1.0) as u32);
-                        c.flex_grow = 0.0;
-                        c.flex_shrink = 0.0;
-                    });
-                    if !s_ph.put_before(ctx, flight.source_node) {
-                        if let Some(parent) = flight.source_node.parent(ctx) {
-                            parent.append(ctx, s_ph);
-                        }
-                    }
-                    flight.source_placeholder = Some(s_ph);
-
-                    let t_ph = ctx.create_node();
-                    t_ph.update_constraints(ctx, |c| {
-                        c.width = Size::Fixed(t.w.round().max(1.0) as u32);
-                        c.height = Size::Fixed(t.h.round().max(1.0) as u32);
-                        c.flex_grow = 0.0;
-                        c.flex_shrink = 0.0;
-                    });
-                    if !t_ph.put_before(ctx, flight.target_node) {
-                        if let Some(parent) = flight.target_node.parent(ctx) {
-                            parent.append(ctx, t_ph);
-                        }
-                    }
-                    flight.target_placeholder = Some(t_ph);
-
-                    if flight.transition.morph_effects {
-                        ctx.morph_suppressed_nodes.insert(flight.source_node);
-                        ctx.morph_suppressed_nodes.insert(flight.target_node);
-
-                        let mut clear_s = s_eff.clone();
-                        clear_s.background_color = Color::transparent;
-                        clear_s.box_shadow = BoxShadow::default();
-                        clear_s.additional_shadows.clear();
-                        clear_s.border.color = Color::transparent;
-                        flight.source_node.set_effects(ctx, clear_s);
-
-                        let mut clear_t = t_eff.clone();
-                        clear_t.background_color = Color::transparent;
-                        clear_t.box_shadow = BoxShadow::default();
-                        clear_t.additional_shadows.clear();
-                        clear_t.border.color = Color::transparent;
-                        flight.target_node.set_effects(ctx, clear_t);
-                    }
-
-                    let shuttle = ctx.create_node();
-                    shuttle.update_constraints(ctx, |c| {
-                        c.positioning = PositionStrategy::Absolute {
-                            left: s_rect.x,
-                            top: s_rect.y,
-                            right: f32::NAN,
-                            bottom: f32::NAN,
-                        };
-                        c.width = Size::Fixed(s_rect.w.round().max(1.0) as u32);
-                        c.height = Size::Fixed(s_rect.h.round().max(1.0) as u32);
-                        c.overflow = Overflow::Visible;
-                        c.z_index = 100;
-                    });
-                    shuttle.set_effects(ctx, s_eff);
-                    router_container.append(ctx, shuttle);
-
-                    let source_box = ctx.create_node();
-                    source_box.update_constraints(ctx, |c| {
-                        c.positioning = PositionStrategy::Absolute {
-                            left: 0.0,
-                            top: 0.0,
-                            right: 0.0,
-                            bottom: 0.0,
-                        };
-                        c.width = Size::Percent(1.0);
-                        c.height = Size::Percent(1.0);
-                        c.justify_content = JustifyContent::Center;
-                        c.align_items = AlignItems::Center;
-                    });
-                    source_box.update_effects(ctx, |e| e.opacity = 1.0);
-
-                    let target_box = ctx.create_node();
-                    target_box.update_constraints(ctx, |c| {
-                        c.positioning = PositionStrategy::Absolute {
-                            left: 0.0,
-                            top: 0.0,
-                            right: 0.0,
-                            bottom: 0.0,
-                        };
-                        c.width = Size::Percent(1.0);
-                        c.height = Size::Percent(1.0);
-                        c.justify_content = JustifyContent::Center;
-                        c.align_items = AlignItems::Center;
-                    });
-                    target_box.update_effects(ctx, |e| e.opacity = 0.0);
-
-                    shuttle.append(ctx, source_box);
-                    shuttle.append(ctx, target_box);
-
-                    flight.source_node.remove(ctx);
-                    source_box.append(ctx, flight.source_node);
-
-                    flight.target_node.remove(ctx);
-                    target_box.append(ctx, flight.target_node);
-
-                    flight.shuttle_node = Some(shuttle);
-                    flight.shuttle_source_box = Some(source_box);
-                    flight.shuttle_target_box = Some(target_box);
-                }
-            }
-        }
-
-        if let (Some(shuttle), Some(s_rect), Some(t_rect)) =
-            (flight.shuttle_node, flight.source_rect, flight.target_rect)
-        {
-            let p = flight.transition.curve.eval(progress as f64) as f32;
-
-            let curr_x = if progress >= 0.999 {
-                t_rect.x
-            } else {
-                s_rect.x + (t_rect.x - s_rect.x) * p
-            };
-            let curr_y = if progress >= 0.999 {
-                t_rect.y
-            } else {
-                s_rect.y + (t_rect.y - s_rect.y) * p
-            };
-            let curr_w = if progress >= 0.999 {
-                t_rect.w
-            } else {
-                (s_rect.w + (t_rect.w - s_rect.w) * p).max(1.0)
-            };
-            let curr_h = if progress >= 0.999 {
-                t_rect.h
-            } else {
-                (s_rect.h + (t_rect.h - s_rect.h) * p).max(1.0)
-            };
-
-            shuttle.update_constraints(ctx, |c| {
-                c.positioning = PositionStrategy::Absolute {
-                    left: curr_x,
-                    top: curr_y,
-                    right: f32::NAN,
-                    bottom: f32::NAN,
-                };
-                c.width = Size::Fixed(curr_w.round().max(1.0) as u32);
-                c.height = Size::Fixed(curr_h.round().max(1.0) as u32);
-            });
-
-            if flight.transition.morph_effects {
-                if let (Some(s_eff), Some(t_eff)) = (&flight.source_effects, &flight.target_effects)
-                {
-                    let mut interpolated = Effects::interpolate(s_eff, t_eff, p as f64);
-                    interpolated.opacity = 1.0;
-                    shuttle.set_effects(ctx, interpolated);
-                }
-            }
-
-            let fade_start = flight.transition.cross_fade_start;
-            let fade_end = flight.transition.cross_fade_end;
-            let (source_op, target_op) = if p <= fade_start {
-                (1.0, 0.0)
-            } else if p >= fade_end {
-                (0.0, 1.0)
-            } else {
-                let t = (p - fade_start) / (fade_end - fade_start);
-                let smooth_t = t * t * (3.0 - 2.0 * t);
-                (1.0 - smooth_t, smooth_t)
-            };
-
-            if let Some(source_box) = flight.shuttle_source_box {
-                source_box.update_effects(ctx, |e| e.opacity = source_op.clamp(0.0, 1.0));
-            }
-            if let Some(target_box) = flight.shuttle_target_box {
-                target_box.update_effects(ctx, |e| e.opacity = target_op.clamp(0.0, 1.0));
-            }
-        }
-    }
-}
-
 impl<Key, V, State, Msg> View<State> for Router<Key, V, Msg>
 where
     Key: PartialEq + Clone + 'static,
@@ -497,29 +232,35 @@ where
             element.active_key = to_key;
             element.container_node.append(ctx, new_node);
 
+            let duration = transition.duration_ms;
+            let curve = transition.curve;
+
             // Discover matching morph pairs between old_node and new_node
             let pairs = ctx.find_morph_pairs(old_node, new_node);
             element.active_morphs = pairs
                 .into_iter()
-                .map(|p| ActiveMorphFlight {
-                    id: p.id,
-                    source_node: p.source.node,
-                    target_node: p.target.node,
-                    source_placeholder: None,
-                    target_placeholder: None,
-                    transition: p.target.transition,
-                    source_rect: None,
-                    target_rect: None,
-                    source_effects: None,
-                    target_effects: None,
-                    shuttle_node: None,
-                    shuttle_source_box: None,
-                    shuttle_target_box: None,
+                .map(|p| {
+                    let mut anim_progress = AnimatedValue::new(0.0);
+                    anim_progress.set_target(1.0, 0.0, duration as f64, curve);
+                    ActiveMorphFlight {
+                        id: p.id,
+                        source_node: p.source.node,
+                        target_node: p.target.node,
+                        source_placeholder: None,
+                        target_placeholder: None,
+                        transition: p.target.transition,
+                        source_rect: None,
+                        target_rect: None,
+                        source_effects: None,
+                        target_effects: None,
+                        shuttle_node: None,
+                        shuttle_source_box: None,
+                        shuttle_target_box: None,
+                        anim_progress,
+                        anim_start: Instant::now(),
+                    }
                 })
                 .collect();
-
-            let duration = transition.duration_ms;
-            let curve = transition.curve;
 
             if duration > 0.0 {
                 element.anim_progress = AnimatedValue::new(0.0);
@@ -616,7 +357,7 @@ where
                     ctx,
                     element.container_node,
                     &mut element.active_morphs,
-                    progress,
+                    Some(progress),
                 );
 
                 // If transition finished, clean up outgoing view and restore normal flow positioning
@@ -879,7 +620,7 @@ mod tests {
 
     #[test]
     fn test_router_morph_flight_and_settle() {
-        use crate::ui::morph::MorphViewExt;
+        use crate::ui::morph::{MorphId, MorphViewExt};
 
         let mut ctx = Context::new();
 

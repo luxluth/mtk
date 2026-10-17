@@ -980,6 +980,19 @@ impl Context {
         pairs
     }
 
+    /// Returns true if `node` or any of its descendants is currently part of an active morph flight.
+    pub fn is_morph_active_for(&self, node: Node) -> bool {
+        if self.morph_suppressed_nodes.is_empty() {
+            return false;
+        }
+        if self.morph_suppressed_nodes.contains(&node) {
+            return true;
+        }
+        self.morph_suppressed_nodes
+            .iter()
+            .any(|&n| n.is_descendant_of(self, node))
+    }
+
     /// Returns the currently attached root node of the layout tree, if any.
     pub fn root_node(&self) -> Option<Node> {
         self.layout
