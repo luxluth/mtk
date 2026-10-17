@@ -209,6 +209,19 @@ impl ImageCache {
         }
 
         let data = ImageData::from_file_uncached_scaled(&key.path, key.max_dim)?;
+        let is_full_natural_resolution = match key.max_dim {
+            None => true,
+            Some((max_w, max_h)) => data.width < max_w && data.height < max_h,
+        };
+        if is_full_natural_resolution && key.max_dim.is_some() {
+            self.insert_keyed(
+                CacheKey {
+                    path: key.path.clone(),
+                    max_dim: None,
+                },
+                data.clone(),
+            );
+        }
         self.insert_keyed(key.clone(), data.clone());
         Ok(data)
     }
@@ -505,6 +518,25 @@ fn worker_loop(
         };
 
         if let Ok(ref data) = result {
+            let is_full_natural_resolution = match key.max_dim {
+                None => true,
+                Some((max_w, max_h)) => data.width < max_w && data.height < max_h,
+            };
+
+            if is_full_natural_resolution && key.max_dim.is_some() {
+                insert_entry_internal(
+                    &entries,
+                    &access_counter,
+                    &current_bytes,
+                    &max_bytes,
+                    CacheKey {
+                        path: key.path.clone(),
+                        max_dim: None,
+                    },
+                    data.clone(),
+                );
+            }
+
             insert_entry_internal(
                 &entries,
                 &access_counter,

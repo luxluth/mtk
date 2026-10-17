@@ -840,4 +840,40 @@ mod tests {
         );
         assert!(cache.get_keyed(&larger_key).is_some());
     }
+
+    #[test]
+    fn test_inherently_small_image_promoted_to_original() {
+        let cache = ImageCache::new();
+        let path = std::path::PathBuf::from("/virtual/small_icon.png");
+
+        // Simulate decoding an inherently small 24x24 icon under a 100x100 request
+        let icon_data = ImageData::from_rgba8(24, 24, vec![50; 24 * 24 * 4]).unwrap();
+        // Since 24 < 100, worker loop saves under both Some((100, 100)) and None
+        cache.insert_keyed(
+            CacheKey {
+                path: path.clone(),
+                max_dim: Some((100, 100)),
+            },
+            icon_data.clone(),
+        );
+        cache.insert_keyed(
+            CacheKey {
+                path: path.clone(),
+                max_dim: None,
+            },
+            icon_data.clone(),
+        );
+
+        // A subsequent request for 500x500 is immediately satisfied because the unscaled original
+        // contains 100% of the pixels that exist in the file (scaled up by GPU anyway)
+        let large_key = CacheKey {
+            path: path.clone(),
+            max_dim: Some((500, 500)),
+        };
+        let retrieved = cache
+            .get_keyed(&large_key)
+            .expect("Must return unscaled original");
+        assert_eq!(retrieved.width, 24);
+        assert_eq!(retrieved.height, 24);
+    }
 }
