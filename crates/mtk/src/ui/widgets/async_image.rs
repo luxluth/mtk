@@ -174,6 +174,12 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
     fn rebuild(&self, _prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
         let target_dim = self.resolve_target_dim(ctx, element.node);
         let path_changed = element.current_path != self.path;
+        let dim_increased = match (element.target_dim, target_dim) {
+            (Some((ew, eh)), Some((tw, th))) => tw > ew || th > eh,
+            (Some(_), None) => true,
+            _ => false,
+        };
+
         if path_changed {
             if element.attached_image_id.is_none() {
                 ImageCache::global().cancel_load_path(&element.current_path);
@@ -188,9 +194,7 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
             max_dim: target_dim,
         };
 
-        let cached = ImageCache::global()
-            .get_keyed(&key)
-            .or_else(|| ImageCache::global().get(&self.path));
+        let cached = ImageCache::global().get_keyed(&key);
 
         if let Some(data) = cached {
             let needs_update = element.attached_image_id != Some(data.id);
@@ -210,7 +214,7 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
                 element.target_dim = target_dim;
                 element.node.set_dirty(ctx);
             }
-        } else if !ImageCache::global().is_loading_path(&self.path) {
+        } else if dim_increased || !ImageCache::global().is_loading_satisfying(&key) {
             let load_dim = target_dim.or(Some((1024, 1024)));
             let load_key = CacheKey {
                 path: self.path.clone(),
@@ -249,23 +253,19 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
         ctx: &mut Context,
     ) -> (EventResult, Option<Self::Message>) {
         if matches!(event, Event::Tick { .. }) {
-            if element.attached_image_id.is_none() {
-                let target_dim = self.resolve_target_dim(ctx, element.node);
+            let target_dim = self.resolve_target_dim(ctx, element.node);
+            let dim_increased = match (element.target_dim, target_dim) {
+                (Some((ew, eh)), Some((tw, th))) => tw > ew || th > eh,
+                (Some(_), None) => true,
+                _ => false,
+            };
+
+            if element.attached_image_id.is_none() || dim_increased {
                 let key = CacheKey {
                     path: element.current_path.clone(),
                     max_dim: target_dim,
                 };
-                let cached = ImageCache::global()
-                    .get_keyed(&key)
-                    .or_else(|| {
-                        element.target_dim.and_then(|td| {
-                            ImageCache::global().get_keyed(&CacheKey {
-                                path: element.current_path.clone(),
-                                max_dim: Some(td),
-                            })
-                        })
-                    })
-                    .or_else(|| ImageCache::global().get(&element.current_path));
+                let cached = ImageCache::global().get_keyed(&key);
 
                 if let Some(data) = cached {
                     if data.height > 0 && data.width > 0 {
@@ -283,7 +283,7 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
                     element.target_dim = target_dim;
                     element.node.set_dirty(ctx);
                     ctx.request_frame();
-                } else if !ImageCache::global().is_loading_path(&element.current_path) {
+                } else if !ImageCache::global().is_loading_satisfying(&key) {
                     let load_dim = target_dim.or(Some((1024, 1024)));
                     let load_key = CacheKey {
                         path: element.current_path.clone(),

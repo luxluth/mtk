@@ -792,4 +792,52 @@ mod tests {
         assert_eq!(dst2.len(), 25 * 50 * 4);
         assert_eq!(dst2[0], 64);
     }
+
+    #[test]
+    fn test_cache_resolution_sufficiency_no_blurry_upscale() {
+        let cache = ImageCache::new();
+        let path = std::path::PathBuf::from("/virtual/resolution_test.png");
+
+        // Seed with a low-res thumbnail (50x50)
+        let thumb_50 = ImageData::from_rgba8(50, 50, vec![100; 50 * 50 * 4]).unwrap();
+        cache.insert_keyed(
+            CacheKey {
+                path: path.clone(),
+                max_dim: Some((50, 50)),
+            },
+            thumb_50.clone(),
+        );
+
+        // 1. A smaller request (25x25) CAN be satisfied by the 50x50 thumbnail
+        let smaller_key = CacheKey {
+            path: path.clone(),
+            max_dim: Some((25, 25)),
+        };
+        assert!(cache.get_keyed(&smaller_key).is_some());
+
+        // 2. A larger request (200x200) must NOT be satisfied by the 50x50 thumbnail (avoids blur)
+        let larger_key = CacheKey {
+            path: path.clone(),
+            max_dim: Some((200, 200)),
+        };
+        assert!(cache.get_keyed(&larger_key).is_none());
+
+        // 3. A full-resolution request (None) must NOT be satisfied by the thumbnail
+        let full_key = CacheKey {
+            path: path.clone(),
+            max_dim: None,
+        };
+        assert!(cache.get_keyed(&full_key).is_none());
+
+        // 4. If a 300x300 image is inserted, the 200x200 request is now satisfied with crisp quality
+        let high_res_300 = ImageData::from_rgba8(300, 300, vec![200; 300 * 300 * 4]).unwrap();
+        cache.insert_keyed(
+            CacheKey {
+                path: path.clone(),
+                max_dim: Some((300, 300)),
+            },
+            high_res_300,
+        );
+        assert!(cache.get_keyed(&larger_key).is_some());
+    }
 }

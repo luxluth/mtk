@@ -159,17 +159,21 @@ impl ImageCache {
             }
         }
 
-        // Fallback 2: If any version of this image path is in cache, return the best match
-        if let Some(best_key) = entries
-            .keys()
-            .filter(|k| k.path == key.path)
-            .cloned()
-            .max_by_key(|k| k.max_dim.map(|(w, h)| w * h).unwrap_or(u32::MAX))
-        {
-            if let Some(entry) = entries.get_mut(&best_key) {
-                let access_id = self.access_counter.fetch_add(1, Ordering::Relaxed);
-                entry.last_accessed = access_id;
-                return Some(entry.data.clone());
+        // Fallback 2: If a cached version has EQUAL OR GREATER resolution in both dimensions, return it
+        if let Some((req_w, req_h)) = key.max_dim {
+            if let Some(best_key) = entries
+                .iter()
+                .filter(|(k, entry)| {
+                    k.path == key.path && entry.data.width >= req_w && entry.data.height >= req_h
+                })
+                .min_by_key(|(_, entry)| entry.data.width * entry.data.height)
+                .map(|(k, _)| k.clone())
+            {
+                if let Some(entry) = entries.get_mut(&best_key) {
+                    let access_id = self.access_counter.fetch_add(1, Ordering::Relaxed);
+                    entry.last_accessed = access_id;
+                    return Some(entry.data.clone());
+                }
             }
         }
 
@@ -220,6 +224,36 @@ impl ImageCache {
             .lock()
             .map(|p| p.contains_key(key))
             .unwrap_or(false)
+    }
+
+    /// Checks if a background task is pending that can satisfy `key` (has >= requested resolution).
+    pub fn is_loading_satisfying(&self, key: &CacheKey) -> bool {
+        let Ok(pending) = self.pending.lock() else {
+            return false;
+        };
+
+        if pending.contains_key(key) {
+            return true;
+        }
+
+        // An unscaled original load satisfies any thumbnail
+        if pending
+            .keys()
+            .any(|k| k.path == key.path && k.max_dim.is_none())
+        {
+            return true;
+        }
+
+        if let Some((req_w, req_h)) = key.max_dim {
+            pending.keys().any(|k| {
+                k.path == key.path
+                    && k.max_dim
+                        .map(|(w, h)| w >= req_w && h >= req_h)
+                        .unwrap_or(true)
+            })
+        } else {
+            false
+        }
     }
 
     /// Checks if ANY background decoding task is currently pending or running for this image path.
@@ -425,18 +459,30 @@ fn worker_loop(
 
         let key = task.key;
 
-        // Check if an existing version in cache can satisfy this request in-memory
+        // Check if an existing version in cache has sufficient resolution to downscale in-memory
         let cached_pixels = {
             let entries_guard = entries.read().unwrap();
             if let Some(entry) = entries_guard.get(&key) {
                 Some(entry.data.clone())
-            } else if let Some(best_key) = entries_guard
-                .keys()
-                .filter(|k| k.path == key.path)
-                .cloned()
-                .max_by_key(|k| k.max_dim.map(|(w, h)| w * h).unwrap_or(u32::MAX))
-            {
-                entries_guard.get(&best_key).map(|e| e.data.clone())
+            } else if let Some((req_w, req_h)) = key.max_dim {
+                // Must have >= requested dimensions to prevent upscaling blurriness
+                let unscaled_key = CacheKey {
+                    path: key.path.clone(),
+                    max_dim: None,
+                };
+                if let Some(entry) = entries_guard.get(&unscaled_key) {
+                    Some(entry.data.clone())
+                } else {
+                    entries_guard
+                        .iter()
+                        .filter(|(k, entry)| {
+                            k.path == key.path
+                                && entry.data.width >= req_w
+                                && entry.data.height >= req_h
+                        })
+                        .min_by_key(|(_, entry)| entry.data.width * entry.data.height)
+                        .map(|(_, entry)| entry.data.clone())
+                }
             } else {
                 None
             }
