@@ -43,6 +43,26 @@ impl<Msg> AsyncImage<Msg> {
         self
     }
 
+    /// Explicitly sets the desired thumbnail width in physical pixels.
+    pub fn width(mut self, width: u32) -> Self {
+        let h = self.max_dim.map(|(_, h)| h).unwrap_or(width);
+        self.max_dim = Some((width.max(1), h.max(1)));
+        self
+    }
+
+    /// Explicitly sets the desired thumbnail height in physical pixels.
+    pub fn height(mut self, height: u32) -> Self {
+        let w = self.max_dim.map(|(w, _)| w).unwrap_or(height);
+        self.max_dim = Some((w.max(1), height.max(1)));
+        self
+    }
+
+    /// Explicitly sets the desired thumbnail bounds in physical pixels.
+    pub fn size(mut self, width: u32, height: u32) -> Self {
+        self.max_dim = Some((width.max(1), height.max(1)));
+        self
+    }
+
     fn resolve_target_dim(&self, ctx: &Context, node: Node) -> Option<(u32, u32)> {
         if let Some(dim) = self.max_dim {
             return Some(dim);
@@ -81,8 +101,7 @@ impl<Msg> AsyncImage<Msg> {
             }
         }
 
-        // Default ceiling for unconstrained layouts
-        Some((1024, 1024))
+        None
     }
 }
 
@@ -111,7 +130,11 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
 
         let mut attached_image_id = None;
 
-        if let Some(data) = ImageCache::global().get_keyed(&key) {
+        let cached = ImageCache::global()
+            .get_keyed(&key)
+            .or_else(|| ImageCache::global().get(&self.path));
+
+        if let Some(data) = cached {
             if data.height > 0 && data.width > 0 {
                 let intrinsic_ar = data.width as f32 / data.height as f32;
                 node.update_constraints(ctx, |c| {
@@ -124,7 +147,7 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
                 .borrow_mut()
                 .insert(node, (data.clone(), self.fit));
             attached_image_id = Some(data.id);
-        } else {
+        } else if target_dim.is_some() {
             let window = ctx.window();
             ImageCache::global().load_async_keyed(
                 key,
@@ -134,6 +157,10 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
                     }
                 }),
             );
+        } else {
+            // Target dimensions not yet resolved (layout pass has not run).
+            // Request a frame so layout computes exact bounds before streaming from disk.
+            ctx.request_frame();
         }
 
         AsyncImageElement {
@@ -148,6 +175,9 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
         let target_dim = self.resolve_target_dim(ctx, element.node);
         let path_changed = element.current_path != self.path;
         if path_changed {
+            if element.attached_image_id.is_none() {
+                ImageCache::global().cancel_load_path(&element.current_path);
+            }
             element.current_path = self.path.clone();
             element.target_dim = target_dim;
             element.attached_image_id = None;
@@ -180,12 +210,15 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
                 element.target_dim = target_dim;
                 element.node.set_dirty(ctx);
             }
-        } else if !ImageCache::global().is_loading_keyed(&key)
-            && !ImageCache::global().is_loading(&self.path)
-        {
+        } else if !ImageCache::global().is_loading_path(&self.path) {
+            let load_dim = target_dim.or(Some((1024, 1024)));
+            let load_key = CacheKey {
+                path: self.path.clone(),
+                max_dim: load_dim,
+            };
             let window = ctx.window();
             ImageCache::global().load_async_keyed(
-                key,
+                load_key,
                 Some(move |_result| {
                     if let Some(win) = window {
                         win.request_redraw();
@@ -196,6 +229,9 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
     }
 
     fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
+        if element.attached_image_id.is_none() {
+            ImageCache::global().cancel_load_path(&element.current_path);
+        }
         ctx.images.borrow_mut().remove(&element.node);
         element.node.remove(ctx);
         ctx.destroy_node(element.node);
@@ -247,12 +283,15 @@ impl<State, Msg> View<State> for AsyncImage<Msg> {
                     element.target_dim = target_dim;
                     element.node.set_dirty(ctx);
                     ctx.request_frame();
-                } else if !ImageCache::global().is_loading_keyed(&key)
-                    && !ImageCache::global().is_loading(&element.current_path)
-                {
+                } else if !ImageCache::global().is_loading_path(&element.current_path) {
+                    let load_dim = target_dim.or(Some((1024, 1024)));
+                    let load_key = CacheKey {
+                        path: element.current_path.clone(),
+                        max_dim: load_dim,
+                    };
                     let window = ctx.window();
                     ImageCache::global().load_async_keyed(
-                        key,
+                        load_key,
                         Some(move |_result| {
                             if let Some(win) = window {
                                 win.request_redraw();
@@ -312,5 +351,33 @@ mod tests {
         assert!(ctx.images.borrow().contains_key(&element.node));
 
         View::<()>::teardown(&widget, &mut ctx, &mut element);
+    }
+
+    #[test]
+    fn test_async_image_explicit_sizing() {
+        let mut ctx = Context::new();
+        let path = std::path::PathBuf::from("/virtual/sized_image.png");
+
+        let widget: AsyncImage<()> = async_image(path.clone()).size(300, 200);
+        let mut element = View::<()>::build(&widget, &mut ctx);
+
+        assert_eq!(element.target_dim, Some((300, 200)));
+        View::<()>::teardown(&widget, &mut ctx, &mut element);
+    }
+
+    #[test]
+    fn test_async_image_teardown_cancels_load() {
+        let mut ctx = Context::new();
+        let path = std::path::PathBuf::from("/virtual/cancel_on_teardown.png");
+
+        let widget: AsyncImage<()> = async_image(path.clone()).size(128, 128);
+        let mut element = View::<()>::build(&widget, &mut ctx);
+
+        // Should be queued in background
+        assert!(ImageCache::global().is_loading_path(&path));
+
+        // Teardown should cancel pending load
+        View::<()>::teardown(&widget, &mut ctx, &mut element);
+        assert!(!ImageCache::global().is_loading_path(&path));
     }
 }

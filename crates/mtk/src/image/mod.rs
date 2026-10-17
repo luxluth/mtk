@@ -66,9 +66,10 @@ impl ImageData {
     /// Decodes an image from encoded bytes (PNG, JPEG, WebP, etc.) using `zune-image`.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
         let cursor = Cursor::new(bytes);
-        let mut image =
-            zune_image::image::Image::read(cursor, zune_core::options::DecoderOptions::default())
-                .map_err(|e| format!("Failed to decode image bytes: {e:?}"))?;
+        let options = zune_core::options::DecoderOptions::new_fast()
+            .jpeg_set_out_colorspace(zune_core::colorspace::ColorSpace::RGBA);
+        let mut image = zune_image::image::Image::read(cursor, options)
+            .map_err(|e| format!("Failed to decode image bytes: {e:?}"))?;
 
         let (w, h) = image.dimensions();
         let width = w as u32;
@@ -753,5 +754,42 @@ mod tests {
             diag_pixel_r > 0 && diag_pixel_r < 255,
             "Diagonal boundary must be smoothly anti-aliased, got: {diag_pixel_r}"
         );
+    }
+
+    #[test]
+    fn test_image_cache_cancellation() {
+        let cache = ImageCache::new();
+        let path = std::path::PathBuf::from("/virtual/cancelling_test.png");
+
+        let key = CacheKey {
+            path: path.clone(),
+            max_dim: Some((100, 100)),
+        };
+
+        cache.load_async_keyed::<fn(Result<ImageData, String>)>(key.clone(), None);
+        assert!(cache.is_loading_path(&path));
+
+        cache.cancel_load_path(&path);
+        assert!(!cache.is_loading_path(&path));
+        assert!(!cache.is_loading_keyed(&key));
+    }
+
+    #[test]
+    fn test_downscale_aspect_ratios() {
+        // 200x100 source downscaled to max 50x50 -> should be 50x25
+        let src = vec![128u8; 200 * 100 * 4];
+        let (w, h, dst) = downscale_rgba8(200, 100, &src, 50, 50);
+        assert_eq!(w, 50);
+        assert_eq!(h, 25);
+        assert_eq!(dst.len(), 50 * 25 * 4);
+        assert_eq!(dst[0], 128);
+
+        // 100x200 source downscaled to max 50x50 -> should be 25x50
+        let src2 = vec![64u8; 100 * 200 * 4];
+        let (w2, h2, dst2) = downscale_rgba8(100, 200, &src2, 50, 50);
+        assert_eq!(w2, 25);
+        assert_eq!(h2, 50);
+        assert_eq!(dst2.len(), 25 * 50 * 4);
+        assert_eq!(dst2[0], 64);
     }
 }
