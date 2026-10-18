@@ -1,5 +1,5 @@
 use mtk::style::{
-    AlignItems, FlexDirection, JustifyContent, PositionStrategy, Size, Style, TextStyle,
+    AlignItems, Edges, FlexDirection, JustifyContent, PositionStrategy, Size, Style, TextStyle,
 };
 use mtk::ui::View;
 use mtk::ui::{
@@ -59,7 +59,7 @@ fn card_panel(s: Style) -> Style {
     s.bg_color(rgb!(255, 255, 255))
         .border(1.0, rgb!(226, 232, 240))
         .corner_radius(14.0)
-        .padding(18.0)
+        .padding(Edges::all(18.0))
         .box_shadow(
             BoxShadow::new(rgba!(15, 23, 42, 20))
                 .blur(14.0)
@@ -70,7 +70,7 @@ fn card_panel(s: Style) -> Style {
 fn badge_pill(s: Style, bg: Color, fg: Color) -> Style {
     s.bg_color(bg)
         .corner_radius(999.0)
-        .padding_xy(10.0, 4.0)
+        .padding(Edges::symmetric(10.0, 4.0))
         .set_text_style(TextStyle {
             font_size: 11.0,
             color: fg,
@@ -101,7 +101,7 @@ fn keycap(label: &str, is_active: bool) -> impl View<State, Message = Message> {
 
     text(label).style(
         Style::new()
-            .padding_xy(12.0, 7.0)
+            .padding(Edges::symmetric(12.0, 7.0))
             .corner_radius(6.0)
             .bg_color(bg)
             .border(1.5, border)
@@ -374,7 +374,7 @@ fn main() {
                         .width(Size::Fill)
                         .justify_content(JustifyContent::SpaceBetween)
                         .align_items(AlignItems::Center)
-                        .padding_xy(0.0, 4.0),
+                        .padding(Edges::symmetric(0.0, 4.0)),
                 ),
 
                 // Top Grid: 1. Modular Synth Drag + 2. Rotary Audio Dial
@@ -447,7 +447,7 @@ fn main() {
                             .style(
                                 Style::new()
                                     .width(Size::Fixed(175))
-                                    .padding(12.0)
+                                    .padding(Edges::all(12.0))
                                     .gap(6.0)
                                     .corner_radius(10.0)
                                     .bg_color(if state.node_dragging {
@@ -488,7 +488,7 @@ fn main() {
                                 .corner_radius(10.0)
                                 .bg_color(rgb!(248, 250, 252))
                                 .border(1.0, rgb!(226, 232, 240))
-                                .padding(8.0),
+                                .padding(Edges::all(8.0)),
                         ),
                     ))
                     .style(card_panel(Style::new()).width(Size::Percent(0.5)).gap(12.0)),
@@ -609,7 +609,7 @@ fn main() {
                                 .corner_radius(10.0)
                                 .bg_color(rgb!(248, 250, 252))
                                 .border(1.0, rgb!(226, 232, 240))
-                                .padding(18.0)
+                                .padding(Edges::all(18.0))
                                 .gap(20.0)
                                 .align_items(AlignItems::Center),
                         ),
@@ -715,7 +715,7 @@ fn main() {
                                 .corner_radius(10.0)
                                 .bg_color(rgb!(248, 250, 252))
                                 .border(1.0, rgb!(226, 232, 240))
-                                .padding(8.0),
+                                .padding(Edges::all(8.0)),
                         ),
                     ))
                     .style(card_panel(Style::new()).width(Size::Percent(0.5)).gap(12.0)),
@@ -788,7 +788,7 @@ fn main() {
                                 .corner_radius(10.0)
                                 .bg_color(rgb!(248, 250, 252))
                                 .border(1.0, rgb!(226, 232, 240))
-                                .padding(14.0)
+                                .padding(Edges::all(14.0))
                                 .gap(10.0)
                                 .justify_content(JustifyContent::Center),
                         ),
@@ -818,7 +818,7 @@ fn main() {
                 Style::new()
                     .width(Size::Fill)
                     .height(Size::Fill)
-                    .padding(24.0)
+                    .padding(Edges::all(24.0))
                     .gap(18.0)
                     .bg_color(rgb!(241, 245, 249)),
             )

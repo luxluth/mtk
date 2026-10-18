@@ -1,5 +1,5 @@
 use mtk::animation::Curve;
-use mtk::style::{AlignItems, JustifyContent, Size, Style, TextStyle};
+use mtk::style::{AlignItems, Edges, JustifyContent, Size, Style, TextStyle};
 use mtk::text_property::FontWeight;
 use mtk::ui::adapter::adapt;
 use mtk::ui::widgets::{
@@ -258,7 +258,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
     .style(
         Style::new()
             .width(Size::Percent(1.0))
-            .padding(18.0)
+            .padding(Edges::all(18.0))
             .gap(14.0)
             .corner_radius(10.0)
             .bg_color(bg_card)
@@ -315,7 +315,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
     .style(
         Style::new()
             .width(Size::Percent(1.0))
-            .padding(18.0)
+            .padding(Edges::all(18.0))
             .gap(14.0)
             .corner_radius(10.0)
             .bg_color(bg_card)
@@ -379,7 +379,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
     .style(
         Style::new()
             .width(Size::Percent(1.0))
-            .padding(18.0)
+            .padding(Edges::all(18.0))
             .gap(14.0)
             .corner_radius(10.0)
             .bg_color(bg_card)
@@ -444,7 +444,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
     .style(
         Style::new()
             .width(Size::Percent(1.0))
-            .padding(18.0)
+            .padding(Edges::all(18.0))
             .gap(14.0)
             .corner_radius(10.0)
             .bg_color(bg_card)
@@ -517,7 +517,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
     .style(
         Style::new()
             .width(Size::Percent(1.0))
-            .padding(18.0)
+            .padding(Edges::all(18.0))
             .gap(14.0)
             .corner_radius(10.0)
             .bg_color(bg_card)
@@ -550,7 +550,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
                     Style::new()
                         .width(Size::Percent(1.0))
                         .height(Size::Fixed(38))
-                        .padding_xy(12.0, 8.0)
+                        .padding(Edges::symmetric(12.0, 8.0))
                         .bg_color(input_bg)
                         .border(1.0, input_border)
                         .corner_radius(6.0)
@@ -578,7 +578,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
                     Style::new()
                         .width(Size::Percent(1.0))
                         .height(Size::Fixed(100))
-                        .padding_xy(12.0, 8.0)
+                        .padding(Edges::symmetric(12.0, 8.0))
                         .bg_color(input_bg)
                         .border(1.0, input_border)
                         .corner_radius(6.0)
@@ -598,7 +598,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
     .style(
         Style::new()
             .width(Size::Percent(1.0))
-            .padding(18.0)
+            .padding(Edges::all(18.0))
             .gap(14.0)
             .corner_radius(10.0)
             .bg_color(bg_card)
@@ -661,7 +661,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
     .style(
         Style::new()
             .width(Size::Percent(1.0))
-            .padding(18.0)
+            .padding(Edges::all(18.0))
             .gap(14.0)
             .corner_radius(10.0)
             .bg_color(bg_card)
@@ -704,7 +704,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
             .width(Size::Percent(1.0))
             .align_items(AlignItems::Center)
             .justify_content(JustifyContent::SpaceBetween)
-            .padding_xy(20.0, 16.0)
+            .padding(Edges::symmetric(20.0, 16.0))
             .corner_radius(10.0)
             .bg_color(bg_card)
             .border(1.0, border_card)
@@ -723,7 +723,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
         column((header_banner, content_grid)).style(
             Style::new()
                 .width(Size::Percent(1.0))
-                .padding(20.0)
+                .padding(Edges::all(20.0))
                 .gap(16.0),
         ),
     )
@@ -829,7 +829,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
         Style::new()
             .width(Size::Percent(1.0))
             .height(Size::Percent(1.0))
-            .padding(32.0)
+            .padding(Edges::all(32.0))
             .gap(18.0)
             .bg_color(if dark {
                 rgb!(15, 23, 42)
@@ -867,7 +867,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
     .style(
         Style::new()
             .width(Size::Fixed(440))
-            .padding(24.0)
+            .padding(Edges::all(24.0))
             .gap(16.0)
             .corner_radius(12.0)
             .bg_color(bg_card)

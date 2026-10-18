@@ -580,8 +580,14 @@ mod tests {
 
     #[test]
     fn test_style_interpolation() {
-        let start = Style::new().padding(10.0).scale(1.0).opacity(1.0);
-        let end = Style::new().padding(20.0).scale(2.0).opacity(0.0);
+        let start = Style::new()
+            .padding(Edges::all(10.0))
+            .scale(1.0)
+            .opacity(1.0);
+        let end = Style::new()
+            .padding(Edges::all(20.0))
+            .scale(2.0)
+            .opacity(0.0);
 
         let mid = Style::interpolate(&start, &end, 0.5);
         assert!((mid.base_constraints.padding.top - 15.0).abs() < 1e-3);

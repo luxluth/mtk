@@ -1,5 +1,5 @@
 use mtk::{
-    AlignItems, JustifyContent, Lens, Size, Style, TextStyle, clr, rgb,
+    AlignItems, Edges, JustifyContent, Lens, Size, Style, TextStyle, clr, rgb,
     ui::{
         View, ViewAdaptExt, ViewStyleExt,
         widgets::{column, text, text_area},
@@ -37,7 +37,7 @@ fn app(state: &AppState) -> impl View<AppState, Message = AppMsg> + use<> {
                 Style::new()
                     .width(Size::Fixed(450))
                     .height(Size::Fixed(200))
-                    .padding(12.0)
+                    .padding(Edges::all(12.0))
                     .border(2.0, rgb!(100, 150, 255))
                     .corner_radius(8.0)
                     .bg_color(rgb!(250, 250, 255))
@@ -51,7 +51,7 @@ fn app(state: &AppState) -> impl View<AppState, Message = AppMsg> + use<> {
         text(format!("Live Output:\n{}", state.bio)).style(
             Style::new()
                 .width(Size::Fixed(450))
-                .padding(12.0)
+                .padding(Edges::all(12.0))
                 .bg_color(rgb!(240, 240, 240))
                 .corner_radius(8.0)
                 .set_text_style(TextStyle {

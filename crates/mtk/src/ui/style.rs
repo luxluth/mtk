@@ -25,7 +25,7 @@ pub trait ViewStyleExt: Sized {
     /// use mtk::ui::ViewStyleExt;
     /// use mtk::ui::widgets::text;
     ///
-    /// let styled_text = text("Hello").style(Style::new().padding(10.0));
+    /// let styled_text = text("Hello").style(Style::new().padding(Edges::all(10.0)));
     /// ```
     fn style(self, style: Style) -> StyledView<Self>;
 
@@ -617,8 +617,8 @@ mod tests {
     #[test]
     fn test_row_flex_direction_preserved_when_styled() {
         let mut ctx = Context::new();
-        let row_view =
-            row((text::<_, ()>("Left"), text::<_, ()>("Right"))).style(Style::new().padding(10.0));
+        let row_view = row((text::<_, ()>("Left"), text::<_, ()>("Right")))
+            .style(Style::new().padding(Edges::all(10.0)));
 
         let element = View::<()>::build(&row_view, &mut ctx);
         let node = View::<()>::get_node(&row_view, &element);
@@ -631,7 +631,7 @@ mod tests {
     fn test_column_flex_direction_preserved_when_styled() {
         let mut ctx = Context::new();
         let col_view = column((text::<_, ()>("Top"), text::<_, ()>("Bottom")))
-            .style(Style::new().padding(10.0));
+            .style(Style::new().padding(Edges::all(10.0)));
 
         let element = View::<()>::build(&col_view, &mut ctx);
         let node = View::<()>::get_node(&col_view, &element);
@@ -655,7 +655,7 @@ mod tests {
 
     #[test]
     fn test_style_merge_and_mixins() {
-        let base = Style::new().padding(10.0).corner_radius(12.0);
+        let base = Style::new().padding(Edges::all(10.0)).corner_radius(12.0);
         let mixin = |s: Style| s.scale(1.2).opacity(0.8);
         let combined = base.apply(mixin).when(true, |s| s.gap(8.0));
 
@@ -703,7 +703,7 @@ mod tests {
                 ),
                 text::<_, ()>("Blur Active").style(
                     Style::new()
-                        .padding_xy(10.0, 4.0)
+                        .padding(Edges::symmetric(10.0, 4.0))
                         .set_text_style(TextStyle {
                             font_size: 11.5,
                             color: rgb!(5, 150, 105),
@@ -721,7 +721,7 @@ mod tests {
         .style(
             Style::new()
                 .width(Size::Fixed(720))
-                .padding(22.0)
+                .padding(Edges::all(22.0))
                 .blur(0.65),
         ),));
 
@@ -874,7 +874,7 @@ mod tests {
 
         let btn0 = text::<_, ()>("7").style(
             Style::new()
-                .padding(20.0)
+                .padding(Edges::all(20.0))
                 .width(Size::Fill)
                 .height(Size::Fill)
                 .justify_content(JustifyContent::Center)
@@ -883,7 +883,7 @@ mod tests {
         );
         let btn1 = text::<_, ()>("8").style(
             Style::new()
-                .padding(20.0)
+                .padding(Edges::all(20.0))
                 .width(Size::Fill)
                 .height(Size::Fill)
                 .justify_content(JustifyContent::Center)
@@ -892,7 +892,7 @@ mod tests {
         );
         let btn2 = text::<_, ()>("9").style(
             Style::new()
-                .padding(20.0)
+                .padding(Edges::all(20.0))
                 .width(Size::Fill)
                 .height(Size::Fill)
                 .justify_content(JustifyContent::Center)
@@ -901,7 +901,7 @@ mod tests {
         );
         let btn3 = text::<_, ()>("/").style(
             Style::new()
-                .padding(20.0)
+                .padding(Edges::all(20.0))
                 .width(Size::Fill)
                 .height(Size::Fill)
                 .justify_content(JustifyContent::Center)

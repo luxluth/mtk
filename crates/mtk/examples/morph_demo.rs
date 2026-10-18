@@ -1,5 +1,5 @@
 use mtk::animation::Spring;
-use mtk::style::{AlignItems, JustifyContent, Size, Style, TextStyle};
+use mtk::style::{AlignItems, Edges, JustifyContent, Size, Style, TextStyle};
 use mtk::text_property::FontWeight;
 use mtk::ui::event::{EventKind, ViewEventExt as _};
 use mtk::ui::morph::MorphViewExt;
@@ -121,7 +121,7 @@ fn render_gallery() -> impl View<AppState, Message = AppMsg> + use<> {
             Style::new()
                 .width(Size::Fixed(240))
                 .height(Size::Fixed(160))
-                .padding(20.0)
+                .padding(Edges::all(20.0))
                 .bg_color(item.color_card)
                 .corner_radius(14.0)
                 .box_shadow(
@@ -166,7 +166,7 @@ fn render_details(idx: usize) -> impl View<AppState, Message = AppMsg> + use<> {
         row((
             button("< Back").on_click(AppMsg::BackToGallery).style(
                 Style::new()
-                    .padding_xy(12.0, 6.0)
+                    .padding(Edges::symmetric(12.0, 6.0))
                     .bg_color(rgba!(255, 255, 255, 50))
                     .corner_radius(8.0)
                     .set_text_style(TextStyle {
@@ -214,7 +214,7 @@ fn render_details(idx: usize) -> impl View<AppState, Message = AppMsg> + use<> {
         Style::new()
             .width(Size::Fixed(760))
             .height(Size::Fixed(320))
-            .padding(28.0)
+            .padding(Edges::all(28.0))
             .bg_color(item.color_hero)
             .corner_radius(26.0)
             .box_shadow(
@@ -231,7 +231,7 @@ fn render_details(idx: usize) -> impl View<AppState, Message = AppMsg> + use<> {
         .on_click(AppMsg::BackToGallery)
         .style(
             Style::new()
-                .padding_xy(20.0, 10.0)
+                .padding(Edges::symmetric(20.0, 10.0))
                 .bg_color(rgb!(15, 23, 42))
                 .corner_radius(10.0)
                 .set_text_style(TextStyle {

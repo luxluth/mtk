@@ -1,5 +1,5 @@
 use mtk::image::{ImageData, ObjectFit, SvgData};
-use mtk::style::{AlignItems, JustifyContent, Size, Style, TextStyle};
+use mtk::style::{AlignItems, Edges, JustifyContent, Size, Style, TextStyle};
 use mtk::text_property::FontWeight;
 use mtk::ui::View;
 use mtk::ui::ViewStyleExt;
@@ -78,7 +78,7 @@ fn app(state: &DemoState) -> impl View<DemoState, Message = DemoMsg> + use<> {
         .style(
             Style::new()
                 .width(Size::Percent(1.0))
-                .padding(18.0)
+                .padding(Edges::all(18.0))
                 .bg_color(clr!(white))
                 .border(1.0, rgb!(226, 232, 240))
                 .gap(4.0),
@@ -195,14 +195,14 @@ fn app(state: &DemoState) -> impl View<DemoState, Message = DemoMsg> + use<> {
                     ))
                     .style(
                         Style::new()
-                            .padding(10.0)
+                            .padding(Edges::all(10.0))
                             .bg_color(rgb!(248, 250, 252))
                             .border(1.0, rgb!(226, 232, 240))
                             .corner_radius(8.0)
                             .gap(6.0),
                     ),
                 ))
-                .style(Style::new().padding(16.0).gap(14.0)),
+                .style(Style::new().padding(Edges::all(16.0)).gap(14.0)),
             )
             .axis(ScrollAxis::Vertical)
             .style(
@@ -240,7 +240,7 @@ fn app(state: &DemoState) -> impl View<DemoState, Message = DemoMsg> + use<> {
                         .height(Size::Percent(1.0))
                         .align_items(AlignItems::Center)
                         .justify_content(JustifyContent::Center)
-                        .padding(32.0),
+                        .padding(Edges::all(32.0)),
                 ),
             )
             .axis(ScrollAxis::Both)
@@ -257,7 +257,7 @@ fn app(state: &DemoState) -> impl View<DemoState, Message = DemoMsg> + use<> {
             Style::new()
                 .width(Size::Percent(1.0))
                 .flex_grow(1.0)
-                .padding(16.0)
+                .padding(Edges::all(16.0))
                 .gap(16.0),
         ),
     ))

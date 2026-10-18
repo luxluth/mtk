@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use mtk::bytemuck;
-use mtk::style::{AlignItems, JustifyContent, Size, Style, TextStyle};
+use mtk::style::{AlignItems, Edges, JustifyContent, Size, Style, TextStyle};
 use mtk::ui::{
     Event, ViewStyleExt,
     widgets::{PaintContext, WgpuPainter, column, row, text, wgpu_canvas},
@@ -238,7 +238,7 @@ fn main() {
                 // Header section
                 row((
                     text("⚡ MTK Cybernetic Gyroid").style(
-                        Style::new().padding(4.0).set_text_style(TextStyle {
+                        Style::new().padding(Edges::all(4.0)).set_text_style(TextStyle {
                             font_size: 24.0,
                             color: clr!(white),
                             ..Default::default()
@@ -246,7 +246,7 @@ fn main() {
                     ),
                     text("WGPU Raymarching Engine").style(
                         Style::new()
-                            .padding_xy(8.0, 4.0)
+                            .padding(Edges::symmetric(8.0, 4.0))
                             .bg_color(rgba!(60, 80, 160, 180))
                             .corner_radius(8.0)
                             .set_text_style(TextStyle {
@@ -260,11 +260,11 @@ fn main() {
                     Style::new()
                         .gap(12.0)
                         .align_items(AlignItems::Center)
-                        .padding_xy(0.0, 6.0),
+                        .padding(Edges::symmetric(0.0, 6.0)),
                 ),
                 text("Interactive 3D raymarched volumetric distance field with Fresnel rim bloom and specular lighting.")
                     .style(
-                        Style::new().padding_xy(0.0, 6.0).set_text_style(TextStyle {
+                        Style::new().padding(Edges::symmetric(0.0, 6.0)).set_text_style(TextStyle {
                             font_size: 13.0,
                             color: rgba!(160, 175, 210, 220),
                             ..Default::default()
@@ -293,7 +293,7 @@ fn main() {
                     ),
                 // Footer instructions
                 text("✨ Drag cursor across the canvas to orbit the 3D scene in real-time").style(
-                    Style::new().padding_xy(0.0, 8.0).set_text_style(TextStyle {
+                    Style::new().padding(Edges::symmetric(0.0, 8.0)).set_text_style(TextStyle {
                         font_size: 12.0,
                         color: rgba!(130, 150, 190, 180),
                         ..Default::default()
@@ -303,7 +303,7 @@ fn main() {
             .style(
                 Style::new()
                     .bg_color(rgb!(12, 14, 22))
-                    .padding(24.0)
+                    .padding(Edges::all(24.0))
                     .width(Size::Percent(1.0))
                     .height(Size::Percent(1.0))
                     .align_items(AlignItems::Center)

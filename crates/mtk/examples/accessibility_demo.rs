@@ -1,5 +1,5 @@
 use mtk::accessibility::AccessibleViewExt;
-use mtk::style::{AlignItems, FlexDirection, Size, Style, TextStyle};
+use mtk::style::{AlignItems, Edges, FlexDirection, Size, Style, TextStyle};
 use mtk::text_property::FontWeight;
 use mtk::ui::adapter::adapt;
 use mtk::ui::widgets::{
@@ -170,7 +170,7 @@ fn app(state: &A11yDemoState) -> impl View<A11yDemoState, Message = A11yDemoMsg>
     ))
     .style(
         Style::new()
-            .padding(16.0)
+            .padding(Edges::all(16.0))
             .corner_radius(8.0)
             .bg_color(card_bg)
             .border(1.0, card_border)
@@ -207,7 +207,7 @@ fn app(state: &A11yDemoState) -> impl View<A11yDemoState, Message = A11yDemoMsg>
     ))
     .style(
         Style::new()
-            .padding(16.0)
+            .padding(Edges::all(16.0))
             .corner_radius(8.0)
             .bg_color(card_bg)
             .border(1.0, card_border)
@@ -251,7 +251,7 @@ fn app(state: &A11yDemoState) -> impl View<A11yDemoState, Message = A11yDemoMsg>
     ))
     .style(
         Style::new()
-            .padding(16.0)
+            .padding(Edges::all(16.0))
             .corner_radius(8.0)
             .bg_color(card_bg)
             .border(1.0, card_border)
@@ -280,7 +280,7 @@ fn app(state: &A11yDemoState) -> impl View<A11yDemoState, Message = A11yDemoMsg>
     ))
     .style(
         Style::new()
-            .padding(16.0)
+            .padding(Edges::all(16.0))
             .corner_radius(8.0)
             .bg_color(card_bg)
             .border(1.0, card_border)
@@ -300,7 +300,7 @@ fn app(state: &A11yDemoState) -> impl View<A11yDemoState, Message = A11yDemoMsg>
             .flex_direction(FlexDirection::Row)
             .align_items(AlignItems::Center)
             .gap(8.0)
-            .padding(12.0)
+            .padding(Edges::all(12.0))
             .corner_radius(6.0)
             .bg_color(if state.high_contrast {
                 rgb!(30, 30, 30)
@@ -322,7 +322,7 @@ fn app(state: &A11yDemoState) -> impl View<A11yDemoState, Message = A11yDemoMsg>
             .width(Size::Percent(100.0))
             .height(Size::Percent(100.0))
             .bg_color(bg_color)
-            .padding(24.0)
+            .padding(Edges::all(24.0))
             .gap(16.0),
     )
 }

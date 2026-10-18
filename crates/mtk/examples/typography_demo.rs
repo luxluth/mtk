@@ -1,6 +1,6 @@
 use mtk::animation::{Curve, Spring};
 use mtk::style::{
-    AlignItems, JustifyContent, LineHeight, Size, Style, TextStyle, VerticalAlignment,
+    AlignItems, Edges, JustifyContent, LineHeight, Size, Style, TextStyle, VerticalAlignment,
 };
 use mtk::text_property::{Alignment, FontStyle, FontWeight};
 use mtk::ui::widgets::{ScrollAxis, scroll_view};
@@ -33,7 +33,7 @@ enum Message {
 }
 
 fn button_style(s: Style) -> Style {
-    s.padding_xy(14.0, 8.0)
+    s.padding(Edges::symmetric(14.0, 8.0))
         .corner_radius(8.0)
         .bg_color(rgb!(241, 245, 249))
         .border(1.0, rgb!(203, 213, 225))
@@ -43,7 +43,7 @@ fn button_style(s: Style) -> Style {
 }
 
 fn active_button_style(s: Style) -> Style {
-    s.padding_xy(14.0, 8.0)
+    s.padding(Edges::symmetric(14.0, 8.0))
         .corner_radius(8.0)
         .bg_color(rgb!(79, 70, 229))
         .border(1.0, rgb!(67, 56, 202))
@@ -61,7 +61,7 @@ fn card_panel(s: Style) -> Style {
     s.bg_color(rgba!(255, 255, 255, 245))
         .border(1.5, rgb!(226, 232, 240))
         .corner_radius(12.0)
-        .padding(18.0)
+        .padding(Edges::all(18.0))
         .box_shadow(
             BoxShadow::new(rgba!(148, 163, 184, 30))
                 .blur(12.0)
@@ -120,7 +120,7 @@ fn main() {
                 row((
                     text("Aa").style(
                         Style::new()
-                            .padding_xy(10.0, 4.0)
+                            .padding(Edges::symmetric(10.0, 4.0))
                             .corner_radius(8.0)
                             .bg_color(rgb!(79, 70, 229))
                             .set_text_style(TextStyle {
@@ -131,7 +131,7 @@ fn main() {
                             }),
                     ),
                     text("MTK Typography").style(
-                        Style::new().padding(4.0).set_text_style(TextStyle {
+                        Style::new().padding(Edges::all(4.0)).set_text_style(TextStyle {
                             font_size: 22.0,
                             color: rgb!(15, 23, 42),
                             font_weight: FontWeight::BOLD,
@@ -143,7 +143,7 @@ fn main() {
                     Style::new()
                         .gap(12.0)
                         .align_items(AlignItems::Center)
-                        .padding_xy(0.0, 4.0),
+                        .padding(Edges::symmetric(0.0, 4.0)),
                 ),
 
                 // Controls Toolbar (Scrollable)
@@ -151,7 +151,7 @@ fn main() {
                     row((
                         // Font Size Controls
                         row((
-                            text("Size:").style(Style::new().padding(4.0).set_text_style(TextStyle {
+                            text("Size:").style(Style::new().padding(Edges::all(4.0)).set_text_style(TextStyle {
                                 font_size: 14.0,
                                 color: rgb!(71, 85, 105),
                                 font_weight: FontWeight::SEMI_BOLD,
@@ -168,7 +168,7 @@ fn main() {
                             text(current_size_label).style(
                                 Style::new()
                                     .width(Size::Fixed(64))
-                                    .padding_xy(8.0, 6.0)
+                                    .padding(Edges::symmetric(8.0, 6.0))
                                     .corner_radius(6.0)
                                     .bg_color(rgb!(241, 245, 249))
                                     .border(1.0, rgb!(226, 232, 240))
@@ -305,7 +305,7 @@ fn main() {
                     .style(
                         Style::new()
                             .width(Size::Fit)
-                            .padding_xy(16.0, 14.0)
+                            .padding(Edges::symmetric(16.0, 14.0))
                             .gap(18.0)
                             .align_items(AlignItems::Center),
                     ),
@@ -320,7 +320,7 @@ fn main() {
                 // Interactive Preview Sandbox
                 column((
                     text("Interactive Typography Preview").style(
-                        Style::new().padding(2.0).set_text_style(TextStyle {
+                        Style::new().padding(Edges::all(2.0)).set_text_style(TextStyle {
                             font_size: 13.0,
                             color: rgb!(100, 116, 139),
                             font_weight: FontWeight::SEMI_BOLD,
@@ -330,7 +330,7 @@ fn main() {
                     text("The quick brown fox jumps over the lazy dog.").style(
                         Style::new()
                             .width(Size::Percent(1.0))
-                            .padding(4.0)
+                            .padding(Edges::all(4.0))
                             .set_text_style(TextStyle {
                                 font_size: state.font_size,
                                 color: rgb!(15, 23, 42),
@@ -346,7 +346,7 @@ fn main() {
                     text("0123456789 — Special Characters: !@#$%^&*()_+{}[]:;\"'<>?,./~`").style(
                         Style::new()
                             .width(Size::Percent(1.0))
-                            .padding(2.0)
+                            .padding(Edges::all(2.0))
                             .set_text_style(TextStyle {
                                 font_size: (state.font_size * 0.75).max(12.0),
                                 color: rgb!(79, 70, 229),
@@ -360,7 +360,7 @@ fn main() {
                     text("千里之行，始于足下 — 敏捷的棕色狐狸跃过懒狗。").style(
                         Style::new()
                             .width(Size::Percent(1.0))
-                            .padding(2.0)
+                            .padding(Edges::all(2.0))
                             .set_text_style(TextStyle {
                                 font_size: (state.font_size * 0.85).max(13.0),
                                 color: rgb!(13, 148, 136),
@@ -384,7 +384,7 @@ fn main() {
                 // Multi-line Paragraph & Line Height Card
                 column((
                     text("Paragraph Flow and Multilingual CJK Support").style(
-                        Style::new().padding(2.0).set_text_style(TextStyle {
+                        Style::new().padding(Edges::all(2.0)).set_text_style(TextStyle {
                             font_size: 14.0,
                             color: rgb!(30, 41, 59),
                             font_weight: FontWeight::BOLD,
@@ -434,7 +434,7 @@ fn main() {
             .style(
                 Style::new()
                     .gap(14.0)
-                    .padding(28.0)
+                    .padding(Edges::all(28.0))
                     .bg_color(rgb!(248, 250, 252))
                     .width(Size::Fill)
                     .height(Size::Fill)

@@ -3,7 +3,7 @@ use winit::keyboard::{Key, NamedKey};
 
 use crate::animation::Curve;
 use crate::debugger::SourceLocation;
-use crate::style::{Style, TextStyle, VerticalAlignment};
+use crate::style::{Edges, Style, TextStyle, VerticalAlignment};
 use crate::text_property::{Alignment, FontWeight};
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
@@ -123,7 +123,7 @@ impl<State, Msg: Clone> View<State> for Button<Msg> {
         };
 
         let default_style = Style::new()
-            .padding_xy(16.0, 8.0)
+            .padding(Edges::symmetric(16.0, 8.0))
             .corner_radius(6.0)
             .bg_color(if self.disabled {
                 rgb!(226, 232, 240)
@@ -187,7 +187,7 @@ impl<State, Msg: Clone> View<State> for Button<Msg> {
             };
 
             let default_style = Style::new()
-                .padding_xy(16.0, 8.0)
+                .padding(Edges::symmetric(16.0, 8.0))
                 .corner_radius(6.0)
                 .bg_color(if self.disabled {
                     rgb!(226, 232, 240)

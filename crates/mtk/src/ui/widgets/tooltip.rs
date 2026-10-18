@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use crate::animation::{AnimatedValue, Curve};
 use crate::debugger::SourceLocation;
 use crate::effects::{BoxShadow, Effects};
-use crate::style::{PositionStrategy, Style, TextStyle};
+use crate::style::{Edges, PositionStrategy, Style, TextStyle};
 use crate::text_property::FontWeight;
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
@@ -162,7 +162,7 @@ impl<V> Tooltip<V> {
 
     pub(crate) fn default_style() -> Style {
         Style::new()
-            .padding_xy(8.0, 4.0)
+            .padding(Edges::symmetric(8.0, 4.0))
             .corner_radius(4.0)
             .bg_color(rgb!(15, 23, 42))
             .border(1.0, rgb!(51, 65, 85))
@@ -676,7 +676,7 @@ mod tests {
 
     #[test]
     fn test_tooltip_style_override() {
-        let overhaul = Style::new().bg_color(clr!(black)).padding(16.0);
+        let overhaul = Style::new().bg_color(clr!(black)).padding(Edges::all(16.0));
         let t = tooltip(button::<_, ()>("Action"), "Hint").override_style(overhaul);
         let resolved = t.resolve_style();
 

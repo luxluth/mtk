@@ -750,6 +750,7 @@ impl<V> ViewOverlayExt for V {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::style::Edges;
     use crate::ui::ViewStyleExt;
     use crate::ui::widgets::text;
 
@@ -959,11 +960,14 @@ mod tests {
         let mut ctx = Context::new();
         let menu_item = text::<_, ()>("Menu Item").style(
             Style::new()
-                .padding(8.0)
+                .padding(Edges::all(8.0))
                 .on_hover(|s| s.bg_color(crate::Color::white)),
         );
-        let flyout_menu = crate::ui::widgets::column((menu_item,))
-            .style(Style::new().width(Size::Fixed(180)).padding(6.0));
+        let flyout_menu = crate::ui::widgets::column((menu_item,)).style(
+            Style::new()
+                .width(Size::Fixed(180))
+                .padding(Edges::all(6.0)),
+        );
         let overlay_view = text::<_, ()>("Anchor")
             .overlay(flyout_menu)
             .is_open(true)

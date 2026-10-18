@@ -7,7 +7,7 @@ use crate::colors::Color;
 use crate::debugger::SourceLocation;
 use crate::effects::BoxShadow;
 use crate::style::{
-    AlignItems, FlexDirection, JustifyContent, Size, Style, TextStyle, VerticalAlignment,
+    AlignItems, Edges, FlexDirection, JustifyContent, Size, Style, TextStyle, VerticalAlignment,
 };
 use crate::text_property::FontWeight;
 use crate::ui::event::EventResult;
@@ -256,7 +256,7 @@ where
             .height(Size::Fixed(24))
             .corner_radius(12.0)
             .bg_color(track_bg)
-            .padding_xy(2.0, 2.0)
+            .padding(Edges::symmetric(2.0, 2.0))
             .justify_content(JustifyContent::Start)
             .align_items(AlignItems::Center)
             .apply_to_node(ctx, track_node);

@@ -779,25 +779,7 @@ impl Style {
         if condition { f(self) } else { self }
     }
 
-    pub fn padding(mut self, val: f32) -> Self {
-        self.base_constraints.padding = Edges::all(val);
-        self.flags.insert(StyleFlags::PADDING);
-        self
-    }
-
-    /// Sets symmetric horizontal (`x`) and vertical (`y`) padding edges.
-    pub fn padding_xy(mut self, x: f32, y: f32) -> Self {
-        self.base_constraints.padding = Edges {
-            top: y,
-            right: x,
-            bottom: y,
-            left: x,
-        };
-        self.flags.insert(StyleFlags::PADDING);
-        self
-    }
-
-    pub fn padding_edges(mut self, edges: Edges) -> Self {
+    pub fn padding(mut self, edges: Edges) -> Self {
         self.base_constraints.padding = edges;
         self.flags.insert(StyleFlags::PADDING);
         self
@@ -1894,8 +1876,8 @@ pub(crate) mod tests {
         assert_eq!(merged.base_text_style.font_size, 16.0);
 
         // Explicit padding 0.0 override (previously ignored if checking default edges)
-        let base = Style::new().padding(20.0);
-        let override_style = Style::new().padding(0.0);
+        let base = Style::new().padding(Edges::all(20.0));
+        let override_style = Style::new().padding(Edges::all(0.0));
         let merged = base.merge(override_style);
         assert_eq!(merged.base_constraints.padding, Edges::all(0.0));
     }
@@ -1922,7 +1904,7 @@ pub(crate) mod tests {
         assert_eq!(style.disabled().unwrap().base_effects.opacity, 0.5);
 
         // Unconfigured style has None for interaction -> zero heap allocation
-        let plain_style = Style::new().padding(10.0);
+        let plain_style = Style::new().padding(Edges::all(10.0));
         assert!(plain_style.interaction.is_none());
         assert!(plain_style.hover().is_none());
     }

@@ -1,5 +1,5 @@
 use mtk::{
-    AlignItems, AlignSelf, Lens, Size, Style, TextStyle, clr, hsl, text_property,
+    AlignItems, AlignSelf, Edges, Lens, Size, Style, TextStyle, clr, hsl, text_property,
     ui::{
         EventKind, View, ViewAdaptExt, ViewEventExt, ViewStyleExt,
         keyed::{keyed, keyed_sequence},
@@ -95,7 +95,7 @@ fn filter_button(
     text(label)
         .style(
             Style::new()
-                .padding_xy(12.0, 6.0)
+                .padding(Edges::symmetric(12.0, 6.0))
                 .bg_color(bg)
                 .corner_radius(6.0)
                 .set_text_style(TextStyle {
@@ -157,7 +157,7 @@ fn todo_item_view(todo: &TodoItem) -> impl View<TodoState, Message = TodoMsg> + 
         text(todo.title.clone()).style(
             Style::new()
                 .flex_grow(1.0)
-                .padding_xy(10.0, 4.0)
+                .padding(Edges::symmetric(10.0, 4.0))
                 .set_text_style(TextStyle {
                     font_size: 14.0,
                     color: text_color,
@@ -172,7 +172,7 @@ fn todo_item_view(todo: &TodoItem) -> impl View<TodoState, Message = TodoMsg> + 
             .style(
                 Style::new()
                     .align_self(AlignSelf::Center)
-                    .padding_xy(8.0, 4.0)
+                    .padding(Edges::symmetric(8.0, 4.0))
                     .set_text_style(TextStyle {
                         font_size: 13.0,
                         color: hsl!(215.4, 0.16, 0.50), // High contrast slate icon
@@ -191,7 +191,7 @@ fn todo_item_view(todo: &TodoItem) -> impl View<TodoState, Message = TodoMsg> + 
             .bg_color(clr!(white))
             .corner_radius(8.0)
             .border(1.0, hsl!(214.3, 0.32, 0.88)) // High Contrast Inset Border
-            .padding_xy(12.0, 8.0),
+            .padding(Edges::symmetric(12.0, 8.0)),
     )
 }
 
@@ -258,7 +258,7 @@ fn app(state: &TodoState) -> impl View<TodoState, Message = TodoMsg> + use<> {
                     Style::new()
                         .flex_grow(1.0)
                         .height(Size::Fixed(42))
-                        .padding(12.0)
+                        .padding(Edges::all(12.0))
                         .bg_color(clr!(white))
                         .border(1.5, hsl!(214.3, 0.32, 0.85)) // High Contrast Border
                         .corner_radius(8.0),
@@ -291,8 +291,12 @@ fn app(state: &TodoState) -> impl View<TodoState, Message = TodoMsg> + use<> {
         ),
         // Explicitly Delimited Scroll Container with Inset Background and High Contrast Border
         scroll_view(
-            column(filtered_items)
-                .style(Style::new().width(Size::Percent(1.0)).padding(8.0).gap(6.0)),
+            column(filtered_items).style(
+                Style::new()
+                    .width(Size::Percent(1.0))
+                    .padding(Edges::all(8.0))
+                    .gap(6.0),
+            ),
         )
         .style(
             Style::new()
@@ -317,7 +321,7 @@ fn app(state: &TodoState) -> impl View<TodoState, Message = TodoMsg> + use<> {
                     text("Clear Completed")
                         .style(
                             Style::new()
-                                .padding_xy(10.0, 6.0)
+                                .padding(Edges::symmetric(10.0, 6.0))
                                 .set_text_style(TextStyle {
                                     font_size: 13.0,
                                     color: hsl!(0.0, 0.84, 0.55), // High Contrast Red 500
@@ -336,7 +340,7 @@ fn app(state: &TodoState) -> impl View<TodoState, Message = TodoMsg> + use<> {
             Style::new()
                 .width(Size::Percent(1.0))
                 .align_items(AlignItems::Center)
-                .padding_xy(10.0, 8.0)
+                .padding(Edges::symmetric(10.0, 8.0))
                 .border(1.0, hsl!(214.3, 0.32, 0.88))
                 .corner_radius(8.0)
                 .bg_color(hsl!(220.0, 0.14, 0.97)),
@@ -346,7 +350,7 @@ fn app(state: &TodoState) -> impl View<TodoState, Message = TodoMsg> + use<> {
         Style::new()
             .width(Size::Percent(1.0))
             .height(Size::Percent(1.0))
-            .padding(24.0)
+            .padding(Edges::all(24.0))
             .gap(16.0)
             .bg_color(clr!(white))
             .border(1.5, hsl!(214.3, 0.32, 0.85)) // High Contrast Card Border

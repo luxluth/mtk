@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use crate::colors::Color;
 use crate::debugger::SourceLocation;
-use crate::style::{AlignItems, JustifyContent, Style, TextStyle};
+use crate::style::{AlignItems, Edges, JustifyContent, Style, TextStyle};
 use crate::text_property::FontWeight;
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
@@ -98,7 +98,7 @@ impl<State, Msg> View<State> for Badge<Msg> {
         );
 
         Style::new()
-            .padding_xy(8.0, 3.0)
+            .padding(Edges::symmetric(8.0, 3.0))
             .corner_radius(12.0)
             .bg_color(self.bg_color)
             .align_items(AlignItems::Center)
@@ -233,7 +233,7 @@ where
         Style::new()
             .flex_direction(crate::style::FlexDirection::Row)
             .align_items(AlignItems::Center)
-            .padding_xy(10.0, 5.0)
+            .padding(Edges::symmetric(10.0, 5.0))
             .gap(6.0)
             .corner_radius(14.0)
             .bg_color(self.bg_color)

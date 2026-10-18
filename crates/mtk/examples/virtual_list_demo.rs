@@ -184,7 +184,7 @@ fn filter_chip(
 
     button(label).on_click(AppMsg::SetFilter(level)).style(
         Style::new()
-            .padding_xy(12.0, 6.0)
+            .padding(Edges::symmetric(12.0, 6.0))
             .corner_radius(6.0)
             .bg_color(bg)
             .border(
@@ -230,7 +230,7 @@ fn main() {
                         Style::new()
                             .bg_color(clr!(0x2563EBFF))
                             .corner_radius(4.0)
-                            .padding_edges(Edges::lr(4.))
+                            .padding(Edges::lr(4.))
                             .set_text_style(
                                 TextStyle::new()
                                     .color(clr!(0xFFFFFFFF))
@@ -268,7 +268,7 @@ fn main() {
                             Style::new()
                                 .width(Size::Fixed(360))
                                 .height(Size::Fixed(32))
-                                .padding_xy(10.0, 0.0)
+                                .padding(Edges::symmetric(10.0, 0.0))
                                 .bg_color(clr!(0xFFFFFFFF))
                                 .corner_radius(6.0)
                                 .border(1.0, clr!(0xCBD5E1FF))
@@ -297,7 +297,7 @@ fn main() {
         .style(
             Style::new()
                 .width(Size::Percent(1.0))
-                .padding(16.0)
+                .padding(Edges::all(16.0))
                 .gap(12.0)
                 .bg_color(clr!(0xF8FAFCFF))
                 .border(1.0, clr!(0xE2E8F0FF)),
@@ -316,7 +316,7 @@ fn main() {
             Style::new()
                 .width(Size::Percent(1.0))
                 .height(Size::Fixed(36))
-                .padding_xy(16.0, 0.0)
+                .padding(Edges::symmetric(16.0, 0.0))
                 .align_items(AlignItems::Center)
                 .bg_color(clr!(0xF1F5F9FF))
                 .border(1.0, clr!(0xE2E8F0FF)),
@@ -397,7 +397,7 @@ fn main() {
                     .max_height(36.0)
                     .flex_shrink(0.0)
                     .flex_grow(0.0)
-                    .padding_xy(16.0, 0.0)
+                    .padding(Edges::symmetric(16.0, 0.0))
                     .align_items(AlignItems::Center)
                     .gap(10.0)
                     .bg_color(row_bg)

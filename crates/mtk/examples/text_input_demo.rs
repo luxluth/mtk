@@ -1,5 +1,5 @@
 use mtk::{
-    AlignItems, JustifyContent, Lens, Size, Style, TextStyle, clr, rgb,
+    AlignItems, Edges, JustifyContent, Lens, Size, Style, TextStyle, clr, rgb,
     ui::{
         View, ViewStyleExt,
         adapter::adapt,
@@ -38,7 +38,7 @@ fn app(state: &AppState) -> impl View<AppState, Message = AppMsg> + use<> {
                 Style::new()
                     .width(Size::Fixed(300))
                     .height(Size::Fixed(40))
-                    .padding(10.0)
+                    .padding(Edges::all(10.0))
                     .border(2.0, rgb!(100, 100, 255))
                     .corner_radius(8.0)
                     .overflow(mtk::Overflow::Hidden),
@@ -51,7 +51,7 @@ fn app(state: &AppState) -> impl View<AppState, Message = AppMsg> + use<> {
                 Style::new()
                     .width(Size::Fixed(300))
                     .height(Size::Fixed(40))
-                    .padding(10.0)
+                    .padding(Edges::all(10.0))
                     .border(2.0, rgb!(100, 255, 100))
                     .corner_radius(8.0)
                     .overflow(mtk::Overflow::Hidden),
@@ -62,7 +62,7 @@ fn app(state: &AppState) -> impl View<AppState, Message = AppMsg> + use<> {
         text(format!("Hello, {}!", state.username)).style(
             Style::new()
                 .width(Size::Fit)
-                .padding(20.0)
+                .padding(Edges::all(20.0))
                 .set_text_style(TextStyle {
                     font_size: 24.0,
                     wrap: true,

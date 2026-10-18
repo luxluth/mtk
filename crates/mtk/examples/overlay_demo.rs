@@ -3,7 +3,7 @@ use mtk::clr;
 use mtk::colors::Color;
 use mtk::rgb;
 use mtk::rgba;
-use mtk::style::{AlignItems, JustifyContent, Overflow, Size, Style, TextStyle};
+use mtk::style::{AlignItems, Edges, JustifyContent, Overflow, Size, Style, TextStyle};
 use mtk::text_property::FontWeight;
 use mtk::ui::widgets::{button, column, row, text};
 use mtk::ui::{MouseEventContext, OverlayPlacement, ViewEventExt, ViewOverlayExt, ViewStyleExt};
@@ -55,7 +55,7 @@ fn menu_item(
     text::<_, AppMsg>(label)
         .style(
             Style::new()
-                .padding_xy(12.0, 8.0)
+                .padding(Edges::symmetric(12.0, 8.0))
                 .width(Size::Fill)
                 .corner_radius(6.0)
                 .bg_color(Color::transparent)
@@ -116,12 +116,14 @@ fn main() {
             // Floating flyout menu (rendered unclipped over ancestor Overflow::Hidden container)
             let flyout_menu = column((
                 text("Floating Options Menu").style(
-                    Style::new().padding_xy(12.0, 4.0).set_text_style(
-                        TextStyle::new()
-                            .font_size(11.0)
-                            .font_weight(FontWeight::BOLD)
-                            .color(rgb!(148, 163, 184)),
-                    ),
+                    Style::new()
+                        .padding(Edges::symmetric(12.0, 4.0))
+                        .set_text_style(
+                            TextStyle::new()
+                                .font_size(11.0)
+                                .font_weight(FontWeight::BOLD)
+                                .color(rgb!(148, 163, 184)),
+                        ),
                 ),
                 menu_item("Profile Settings", "Profile Settings"),
                 menu_item("Preferences", "Preferences"),
@@ -132,7 +134,7 @@ fn main() {
             .style(
                 Style::new()
                     .width(Size::Fixed(200))
-                    .padding(6.0)
+                    .padding(Edges::all(6.0))
                     .gap(2.0)
                     .corner_radius(10.0)
                     .bg_color(clr!(white))
@@ -148,12 +150,14 @@ fn main() {
             // Context menu anchored to right-click cursor point
             let context_menu = column((
                 text("Context Actions").style(
-                    Style::new().padding_xy(12.0, 4.0).set_text_style(
-                        TextStyle::new()
-                            .font_size(11.0)
-                            .font_weight(FontWeight::BOLD)
-                            .color(rgb!(148, 163, 184)),
-                    ),
+                    Style::new()
+                        .padding(Edges::symmetric(12.0, 4.0))
+                        .set_text_style(
+                            TextStyle::new()
+                                .font_size(11.0)
+                                .font_weight(FontWeight::BOLD)
+                                .color(rgb!(148, 163, 184)),
+                        ),
                 ),
                 menu_item("New File", "New File"),
                 menu_item("Duplicate Item", "Duplicate Item"),
@@ -164,7 +168,7 @@ fn main() {
             .style(
                 Style::new()
                     .width(Size::Fixed(180))
-                    .padding(6.0)
+                    .padding(Edges::all(6.0))
                     .gap(2.0)
                     .corner_radius(10.0)
                     .bg_color(clr!(white))
@@ -202,7 +206,7 @@ fn main() {
                         .width(Size::Fixed(400))
                         .height(Size::Fixed(140))
                         .overflow(Overflow::Hidden)
-                        .padding(16.0)
+                        .padding(Edges::all(16.0))
                         .gap(12.0)
                         .corner_radius(8.0)
                         .border(1.5, rgb!(239, 68, 68))
@@ -235,7 +239,7 @@ fn main() {
                         .corner_radius(8.0)
                         .border(1.5, rgb!(59, 130, 246))
                         .bg_color(clr!(white))
-                        .padding(16.0)
+                        .padding(Edges::all(16.0))
                         .align_items(AlignItems::Center)
                         .justify_content(JustifyContent::Center)
                         .box_shadow(
@@ -271,7 +275,7 @@ fn main() {
             ))
             .style(
                 Style::new()
-                    .padding_xy(16.0, 10.0)
+                    .padding(Edges::symmetric(16.0, 10.0))
                     .corner_radius(8.0)
                     .bg_color(clr!(white))
                     .border(1.0, rgb!(226, 232, 240))
@@ -295,7 +299,7 @@ fn main() {
                     .width(Size::Percent(1.0))
                     .height(Size::Percent(1.0))
                     .bg_color(rgb!(248, 250, 252))
-                    .padding(32.0)
+                    .padding(Edges::all(32.0))
                     .gap(24.0),
             )
         },

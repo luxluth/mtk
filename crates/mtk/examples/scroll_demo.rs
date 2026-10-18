@@ -1,6 +1,6 @@
 use mtk::clr;
 use mtk::colors::Color;
-use mtk::style::{Size, Style};
+use mtk::style::{Edges, Size, Style};
 use mtk::ui::ViewStyleExt;
 use mtk::ui::memoize::memoize;
 use mtk::ui::widgets::{ScrollAxis, ScrollOffset, column, scroll_view, text};
@@ -39,11 +39,12 @@ fn main() {
 
         for row_rc in &state.rows {
             items.push(memoize(Rc::clone(row_rc), |data| {
-                text(data.label.clone()).style(Style::new().padding(20.0).bg_color(data.color))
+                text(data.label.clone())
+                    .style(Style::new().padding(Edges::all(20.0)).bg_color(data.color))
             }));
         }
 
-        scroll_view(column(items).style(Style::new().gap(10.0).padding(10.0)))
+        scroll_view(column(items).style(Style::new().gap(10.0).padding(Edges::all(10.0))))
             .axis(ScrollAxis::Vertical)
             .start_offset_y(ScrollOffset::Percent(1.))
             // .no_scrollbar()

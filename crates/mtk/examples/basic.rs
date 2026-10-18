@@ -1,5 +1,5 @@
 use mtk::clr;
-use mtk::style::{Size, Style};
+use mtk::style::{Edges, Size, Style};
 use mtk::ui::ViewStyleExt;
 use mtk::ui::widgets::text;
 use mtk::windowing::{Window, WindowAttributes};
@@ -12,7 +12,7 @@ fn main() {
             text("Hello, MTK!").style(
                 Style::new()
                     .bg_color(clr!(white))
-                    .padding(10.)
+                    .padding(Edges::all(10.))
                     .width(Size::Percent(1.))
                     .height(Size::Percent(1.)),
             )

@@ -5,7 +5,7 @@ use crate::colors::Color;
 use crate::debugger::SourceLocation;
 use crate::effects::BoxShadow;
 use crate::style::{
-    AlignItems, FlexDirection, JustifyContent, PositionStrategy, Size, Style, TextStyle,
+    AlignItems, Edges, FlexDirection, JustifyContent, PositionStrategy, Size, Style, TextStyle,
 };
 use crate::text_property::FontWeight;
 use crate::ui::event::EventResult;
@@ -165,7 +165,7 @@ where
             .flex_direction(FlexDirection::Row)
             .width(Size::Percent(1.0))
             .height(Size::Fixed(38))
-            .padding_xy(12.0, 8.0)
+            .padding(Edges::symmetric(12.0, 8.0))
             .justify_content(JustifyContent::SpaceBetween)
             .align_items(AlignItems::Center)
             .bg_color(self.bg_color)
@@ -190,7 +190,7 @@ where
                 right: 0.0,
             })
             .width(Size::Percent(1.0))
-            .padding(4.0)
+            .padding(Edges::all(4.0))
             .gap(2.0)
             .bg_color(self.bg_color)
             .border(1.0, self.border_color)
@@ -239,7 +239,7 @@ where
 
             Style::new()
                 .width(Size::Percent(1.0))
-                .padding_xy(10.0, 7.0)
+                .padding(Edges::symmetric(10.0, 7.0))
                 .corner_radius(4.0)
                 .bg_color(if is_sel { sel_bg } else { clr!(transparent) })
                 .apply_to_node(ctx, item_node);

@@ -1,5 +1,5 @@
 use mtk::animation::{Curve, Spring};
-use mtk::style::{AlignItems, JustifyContent, Size, Style, TextStyle, VerticalAlignment};
+use mtk::style::{AlignItems, Edges, JustifyContent, Size, Style, TextStyle, VerticalAlignment};
 use mtk::text_property::{Alignment, FontWeight};
 use mtk::ui::{
     EventKind, ViewEventExt, ViewStyleExt,
@@ -31,7 +31,7 @@ enum Message {
 }
 
 fn button_style(s: Style) -> Style {
-    s.padding_xy(12.0, 7.0)
+    s.padding(Edges::symmetric(12.0, 7.0))
         .corner_radius(8.0)
         .bg_color(rgba!(255, 255, 255, 200))
         .border(1.0, rgba!(203, 213, 225, 200))
@@ -46,7 +46,7 @@ fn button_style(s: Style) -> Style {
 }
 
 fn active_button_style(s: Style) -> Style {
-    s.padding_xy(12.0, 7.0)
+    s.padding(Edges::symmetric(12.0, 7.0))
         .corner_radius(8.0)
         .bg_color(rgb!(79, 70, 229))
         .border(1.0, rgb!(67, 56, 202))
@@ -182,7 +182,7 @@ fn main() {
                     column((
                         text("CARD 01").style(
                             Style::new()
-                                .padding_xy(8.0, 3.0)
+                                .padding(Edges::symmetric(8.0, 3.0))
                                 .corner_radius(4.0)
                                 .bg_color(rgba!(255, 255, 255, 80))
                                 .set_text_style(TextStyle {
@@ -217,7 +217,7 @@ fn main() {
                         Style::new()
                             .width(Size::Fixed(270))
                             .height(Size::Fixed(260))
-                            .padding(20.0)
+                            .padding(Edges::all(20.0))
                             .gap(10.0)
                             .corner_radius(20.0)
                             .bg_color(rgb!(249, 115, 22))
@@ -228,7 +228,7 @@ fn main() {
                     column((
                         text("CARD 02").style(
                             Style::new()
-                                .padding_xy(8.0, 3.0)
+                                .padding(Edges::symmetric(8.0, 3.0))
                                 .corner_radius(4.0)
                                 .bg_color(rgba!(255, 255, 255, 80))
                                 .set_text_style(TextStyle {
@@ -263,7 +263,7 @@ fn main() {
                         Style::new()
                             .width(Size::Fixed(270))
                             .height(Size::Fixed(260))
-                            .padding(20.0)
+                            .padding(Edges::all(20.0))
                             .gap(10.0)
                             .corner_radius(20.0)
                             .bg_color(rgb!(99, 102, 241))
@@ -274,7 +274,7 @@ fn main() {
                     column((
                         text("CARD 03").style(
                             Style::new()
-                                .padding_xy(8.0, 3.0)
+                                .padding(Edges::symmetric(8.0, 3.0))
                                 .corner_radius(4.0)
                                 .bg_color(rgba!(255, 255, 255, 80))
                                 .set_text_style(TextStyle {
@@ -309,7 +309,7 @@ fn main() {
                         Style::new()
                             .width(Size::Fixed(270))
                             .height(Size::Fixed(260))
-                            .padding(20.0)
+                            .padding(Edges::all(20.0))
                             .gap(10.0)
                             .corner_radius(20.0)
                             .bg_color(rgb!(16, 185, 129))
@@ -332,7 +332,7 @@ fn main() {
                             row((
                                 text("⯁").style(
                                     Style::new()
-                                        .padding_xy(6.0, 3.0)
+                                        .padding(Edges::symmetric(6.0, 3.0))
                                         .corner_radius(6.0)
                                         .bg_color(if is_dark { rgba!(255, 255, 255, 40) } else { rgba!(79, 70, 229, 30) })
                                         .set_text_style(TextStyle {
@@ -357,7 +357,7 @@ fn main() {
                             // Live status badge
                             text(if state.vibrancy > 0.0 { "Blur Active" } else { "Blur Bypassed" }).style(
                                 Style::new()
-                                    .padding_xy(10.0, 4.0)
+                                    .padding(Edges::symmetric(10.0, 4.0))
                                     .corner_radius(6.0)
                                     .bg_color(if state.vibrancy > 0.0 { rgba!(16, 185, 129, 40) } else { rgba!(100, 116, 139, 30) })
                                     .border(1.0, if state.vibrancy > 0.0 { rgba!(16, 185, 129, 80) } else { rgba!(100, 116, 139, 60) })
@@ -413,7 +413,7 @@ fn main() {
                                 text(format!("{:.0}%", state.vibrancy * 100.0)).style(
                                     Style::new()
                                         .width(Size::Fixed(52))
-                                        .padding_xy(6.0, 4.0)
+                                        .padding(Edges::symmetric(6.0, 4.0))
                                         .corner_radius(6.0)
                                         .bg_color(if is_dark {
                                             rgba!(255, 255, 255, 30)
@@ -488,7 +488,7 @@ fn main() {
                     .style(
                         Style::new()
                             .width(Size::Fixed(720))
-                            .padding(22.0)
+                            .padding(Edges::all(22.0))
                             .gap(14.0)
                             .corner_radius(18.0)
                             .bg_color(glass_tint)
@@ -500,7 +500,7 @@ fn main() {
                 .style(
                     Style::new()
                         .width(Size::Percent(1.0))
-                        .padding_edges(mtk::style::Edges {
+                        .padding(mtk::style::Edges {
                             left: (40.0 + state.panel_offset_x).max(0.0),
                             right: (40.0 - state.panel_offset_x).max(0.0),
                             top: 0.0,
@@ -514,7 +514,7 @@ fn main() {
                 Style::new()
                     .width(Size::Fill)
                     .height(Size::Fill)
-                    .padding(28.0)
+                    .padding(Edges::all(28.0))
                     .gap(20.0)
                     .bg_color(rgb!(241, 245, 249))
                     .align_items(AlignItems::Center)

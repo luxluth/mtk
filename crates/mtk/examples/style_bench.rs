@@ -2,7 +2,7 @@ use std::hint::black_box;
 use std::time::Instant;
 
 use mtk::colors::Color;
-use mtk::style::{Style, TextStyle};
+use mtk::style::{Edges, Style, TextStyle};
 use mtk::ui::style::ViewStyleExt;
 use mtk::ui::widgets::{column, row, scroll_view, text, virtual_list_count};
 use mtk::ui::{Event, View};
@@ -15,7 +15,7 @@ fn generate_10k_tree() -> impl View<(), Message = ()> {
                 .map(|c| {
                     text(format!("{r}:{c}")).style(
                         Style::new()
-                            .padding(4.0)
+                            .padding(Edges::all(4.0))
                             .corner_radius(4.0)
                             .bg_color(if (r + c) % 2 == 0 {
                                 rgb!(30, 41, 59)
@@ -39,7 +39,7 @@ fn generate_1k_scroll_view() -> impl View<(), Message = ()> {
         .map(|i| {
             text(format!("Row {i}")).style(
                 Style::new()
-                    .padding(10.0)
+                    .padding(Edges::all(10.0))
                     .bg_color(rgb!(30, 41, 59))
                     .text_color(rgb!(241, 245, 249)),
             )
@@ -52,7 +52,7 @@ fn generate_1k_virtual_list() -> impl View<(), Message = ()> {
     virtual_list_count(1000, 36.0, |idx| {
         text(format!("Row {idx}")).style(
             Style::new()
-                .padding(10.0)
+                .padding(Edges::all(10.0))
                 .bg_color(rgb!(30, 41, 59))
                 .text_color(rgb!(241, 245, 249)),
         )
@@ -80,7 +80,7 @@ fn main() {
     let start = Instant::now();
     for _ in 0..ITERS {
         let s = Style::new()
-            .padding(12.0)
+            .padding(Edges::all(12.0))
             .corner_radius(8.0)
             .bg_color(rgb!(30, 41, 59))
             .border(1.0, rgb!(51, 65, 85))
@@ -98,7 +98,7 @@ fn main() {
     // ------------------------------------------------------------------------
     print!("2. Style Merging via StyleFlags ({ITERS} iterations): ");
     let base = Style::new()
-        .padding(16.0)
+        .padding(Edges::all(16.0))
         .corner_radius(6.0)
         .bg_color(rgb!(59, 130, 246))
         .border(1.0, rgb!(37, 99, 235))

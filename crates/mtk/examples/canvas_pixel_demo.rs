@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use mtk::style::{AlignItems, JustifyContent, Size, Style, TextStyle};
+use mtk::style::{AlignItems, Edges, JustifyContent, Size, Style, TextStyle};
 use mtk::ui::{
     Event, ViewStyleExt,
     widgets::{button, column, pixel_canvas, row, text},
@@ -154,7 +154,7 @@ fn main() {
                 .on_click(AppMsg::SetToolMode(ToolMode::Paint))
                 .style(
                     Style::new()
-                        .padding_xy(16.0, 8.0)
+                        .padding(Edges::symmetric(16.0, 8.0))
                         .corner_radius(8.0)
                         .bg_color(if state.tool_mode == ToolMode::Paint {
                             rgba!(0, 200, 160, 255)
@@ -175,7 +175,7 @@ fn main() {
                 .on_click(AppMsg::SetToolMode(ToolMode::Eraser))
                 .style(
                     Style::new()
-                        .padding_xy(16.0, 8.0)
+                        .padding(Edges::symmetric(16.0, 8.0))
                         .corner_radius(8.0)
                         .bg_color(if state.tool_mode == ToolMode::Eraser {
                             rgba!(235, 75, 110, 255)
@@ -194,18 +194,23 @@ fn main() {
 
             column((
                 text("MTK Software PixelPainter Canvas").style(
-                    Style::new().padding(10.0).set_text_style(TextStyle {
-                        font_size: 20.0,
-                        color: clr!(white),
-                        ..Default::default()
-                    }),
+                    Style::new()
+                        .padding(Edges::all(10.0))
+                        .set_text_style(TextStyle {
+                            font_size: 20.0,
+                            color: clr!(white),
+                            ..Default::default()
+                        }),
                 ),
-                row((paint_btn, eraser_btn)).style(Style::new().gap(12.0).padding_xy(0.0, 6.0)),
-                text(status_info).style(Style::new().padding(5.0).set_text_style(TextStyle {
-                    font_size: 13.0,
-                    color: rgba!(200, 200, 220, 200),
-                    ..Default::default()
-                })),
+                row((paint_btn, eraser_btn))
+                    .style(Style::new().gap(12.0).padding(Edges::symmetric(0.0, 6.0))),
+                text(status_info).style(Style::new().padding(Edges::all(5.0)).set_text_style(
+                    TextStyle {
+                        font_size: 13.0,
+                        color: rgba!(200, 200, 220, 200),
+                        ..Default::default()
+                    },
+                )),
                 pixel_canvas(move |buf: &mut mtk::ui::widgets::PixelBuffer| {
                     let elapsed = start.elapsed().as_secs_f32();
 
@@ -305,7 +310,7 @@ fn main() {
             .style(
                 Style::new()
                     .bg_color(rgb!(24, 24, 37))
-                    .padding(20.0)
+                    .padding(Edges::all(20.0))
                     .width(Size::Percent(1.0))
                     .height(Size::Percent(1.0))
                     .align_items(AlignItems::Center)

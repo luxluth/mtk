@@ -13,7 +13,7 @@ use crate::ui::transition::Transition;
 ///     column((
 ///         text("Confirm Action"),
 ///         button("OK").on_click(AppMsg::Confirm),
-///     )).style(Style::new().bg_color(clr!(white)).padding(20.0).corner_radius(12.0)),
+///     )).style(Style::new().bg_color(clr!(white)).padding(Edges::all(20.0)).corner_radius(12.0)),
 /// ).on_close(|| AppMsg::CloseDialog)
 /// ```
 #[track_caller]

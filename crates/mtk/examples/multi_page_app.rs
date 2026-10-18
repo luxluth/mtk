@@ -1,4 +1,4 @@
-use mtk::style::{AlignItems, JustifyContent, PositionStrategy, Size, Style, TextStyle};
+use mtk::style::{AlignItems, Edges, JustifyContent, PositionStrategy, Size, Style, TextStyle};
 use mtk::text_property::FontWeight;
 use mtk::ui::presence::presence;
 use mtk::ui::transition::{Motion, PageTransition};
@@ -92,7 +92,7 @@ fn render_page(num: usize, state: &AppState) -> impl View<AppState, Message = Ap
             .on_click(AppMsg::GoTo(Page::from_number(i)))
             .style(if is_current {
                 Style::new()
-                    .padding_xy(16.0, 10.0)
+                    .padding(Edges::symmetric(16.0, 10.0))
                     .bg_color(accent)
                     .corner_radius(8.0)
                     .set_text_style(TextStyle {
@@ -103,7 +103,7 @@ fn render_page(num: usize, state: &AppState) -> impl View<AppState, Message = Ap
                     })
             } else {
                 Style::new()
-                    .padding_xy(16.0, 10.0)
+                    .padding(Edges::symmetric(16.0, 10.0))
                     .bg_color(clr!(white))
                     .border(1.0, rgb!(203, 213, 225))
                     .corner_radius(8.0)
@@ -121,7 +121,7 @@ fn render_page(num: usize, state: &AppState) -> impl View<AppState, Message = Ap
         buttons.push(
             button("Go Back").on_click(AppMsg::GoBack).style(
                 Style::new()
-                    .padding_xy(16.0, 10.0)
+                    .padding(Edges::symmetric(16.0, 10.0))
                     .bg_color(rgb!(241, 245, 249))
                     .border(1.0, rgb!(148, 163, 184))
                     .corner_radius(8.0)
@@ -143,7 +143,7 @@ fn render_page(num: usize, state: &AppState) -> impl View<AppState, Message = Ap
         ))
         .style(
             Style::new()
-                .padding_xy(12.0, 6.0)
+                .padding(Edges::symmetric(12.0, 6.0))
                 .bg_color(clr!(white))
                 .border(1.0, rgb!(226, 232, 240))
                 .corner_radius(16.0)

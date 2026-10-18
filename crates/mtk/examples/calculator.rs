@@ -1,5 +1,6 @@
 use mtk::{
-    AlignItems, AnimationTarget, FlexDirection, JustifyContent, Overflow, Size, Style, TextStyle,
+    AlignItems, AnimationTarget, Edges, FlexDirection, JustifyContent, Overflow, Size, Style,
+    TextStyle,
     animation::Curve,
     clr,
     colors::Color,
@@ -62,7 +63,7 @@ fn calc_btn(
     text(label.to_string())
         .style(
             Style::new()
-                .padding(20.0)
+                .padding(Edges::all(20.0))
                 .border(2.0, border)
                 .width(Size::Fill)
                 .height(Size::Fill)
@@ -221,7 +222,7 @@ fn app_view(state: &CalcState) -> impl View<CalcState, Message = CalcMsg> + use<
         container(vec![
             text(state.display.clone()).style(
                 Style::new()
-                    .padding(20.0)
+                    .padding(Edges::all(20.0))
                     .width(Size::Percent(1.0))
                     .set_text_style(TextStyle {
                         font_size: 48.0,
@@ -365,7 +366,7 @@ fn app_view(state: &CalcState) -> impl View<CalcState, Message = CalcMsg> + use<
         Style::new()
             .width(Size::Percent(1.0))
             .height(Size::Percent(1.0))
-            .padding(20.0)
+            .padding(Edges::all(20.0))
             .flex_direction(FlexDirection::Column)
             .gap(10.0)
             .bg_color(state.theme.bg()),

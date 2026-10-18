@@ -1,5 +1,5 @@
 use mtk::clr;
-use mtk::style::{AlignItems, JustifyContent, Size, Style, TextStyle};
+use mtk::style::{AlignItems, Edges, JustifyContent, Size, Style, TextStyle};
 use mtk::text::TextSpan;
 use mtk::text_property::{FontStyle, FontWeight};
 use mtk::ui::ViewStyleExt;
@@ -160,7 +160,7 @@ fn calculate_area(radius: f64) -> f64 {
                         Style::new()
                             .width(Size::Percent(1.0))
                             .bg_color(rgb!(30, 41, 59))
-                            .padding(10.0)
+                            .padding(Edges::all(10.0))
                             .corner_radius_top(8.0)
                             .border_bottom(1.0, rgb!(51, 65, 85)),
                     ),
@@ -180,7 +180,7 @@ fn calculate_area(radius: f64) -> f64 {
                         .style(
                             Style::new()
                                 .width(Size::Percent(1.0))
-                                .padding(16.0)
+                                .padding(Edges::all(16.0))
                                 .corner_radius_bottom(8.0),
                         ),
                 ))
@@ -220,7 +220,7 @@ fn calculate_area(radius: f64) -> f64 {
                         } else {
                             rgb!(241, 245, 249)
                         })
-                        .padding(12.0)
+                        .padding(Edges::all(12.0))
                         .corner_radius(6.0)
                         .border(1.0, rgb!(226, 232, 240)),
                 ),

@@ -714,12 +714,16 @@ impl View<String> for InputText {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::style::{Size, Style, VerticalAlignment};
+    use crate::style::{Edges, Size, Style, VerticalAlignment};
 
     #[test]
     fn test_input_text_vertical_alignment_preservation() {
         let mut ctx = Context::new();
-        let widget = input_text().style(Style::new().height(Size::Fixed(40)).padding(8.0));
+        let widget = input_text().style(
+            Style::new()
+                .height(Size::Fixed(40))
+                .padding(Edges::all(8.0)),
+        );
 
         let mut element = widget.build(&mut ctx);
         assert_eq!(

@@ -1,5 +1,5 @@
 use mtk::{
-    AlignItems, JustifyContent, Lens, Size, Style, TextStyle, clr, rgb, text_property,
+    AlignItems, Edges, JustifyContent, Lens, Size, Style, TextStyle, clr, rgb, text_property,
     ui::{
         EventKind, View, ViewAdaptExt, ViewEventExt, ViewStyleExt,
         widgets::{column, text},
@@ -16,7 +16,7 @@ fn counter(count: i32) -> impl View<i32, Message = CounterMsg> {
     text(format!("总数 {}", count))
         .style(
             Style::new()
-                .padding(20.0)
+                .padding(Edges::all(20.0))
                 .border(2.0, rgb!(100, 100, 100))
                 .corner_radius(8.0)
                 .width(Size::Fit)
@@ -45,7 +45,7 @@ fn toggle(is_on: bool) -> impl View<bool, Message = ToggleMsg> {
     })
     .style(
         Style::new()
-            .padding(20.0)
+            .padding(Edges::all(20.0))
             .bg_color(if is_on {
                 rgb!(50, 50, 50)
             } else {

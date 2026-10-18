@@ -54,6 +54,14 @@ impl Edges {
             right: 0.0,
         }
     }
+    pub fn symmetric(horizontal: f32, vertical: f32) -> Self {
+        Self {
+            top: vertical,
+            bottom: vertical,
+            left: horizontal,
+            right: horizontal,
+        }
+    }
 
     pub fn top(mut self, v: f32) -> Self {
         self.top = v;

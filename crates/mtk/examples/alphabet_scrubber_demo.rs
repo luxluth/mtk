@@ -515,7 +515,7 @@ fn main() {
                 ),))
                 .style(
                     Style::new()
-                        .padding_xy(8.0, 3.0)
+                        .padding(Edges::symmetric(8.0, 3.0))
                         .corner_radius(4.0)
                         .bg_color(clr!(0xeef2ffff)),
                 ),
@@ -560,7 +560,7 @@ fn main() {
         .style(
             Style::new()
                 .width(Size::Percent(1.0))
-                .padding_edges(Edges {
+                .padding(Edges {
                     top: 14.0,
                     bottom: 12.0,
                     left: 20.0,
@@ -583,7 +583,7 @@ fn main() {
                     ),))
                     .style(
                         Style::new()
-                            .padding_xy(7.0, 3.0)
+                            .padding(Edges::symmetric(7.0, 3.0))
                             .corner_radius(4.0)
                             .bg_color(clr!(0xeef2ffff)),
                     ),
@@ -634,7 +634,7 @@ fn main() {
                     .height(Size::Fixed(56))
                     .min_height(56.0)
                     .max_height(56.0)
-                    .padding_xy(16.0, 0.0)
+                    .padding(Edges::symmetric(16.0, 0.0))
                     .align_items(AlignItems::Center)
                     .gap(12.0)
                     .bg_color(if contact.is_section_start {

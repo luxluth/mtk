@@ -83,7 +83,7 @@ impl<State, Child: View<State>> View<State> for SafeArea<Child> {
         let mut style = Style::new()
             .width(Size::Percent(1.0))
             .height(Size::Percent(1.0))
-            .padding_edges(padding);
+            .padding(padding);
 
         if let Some(bg) = self.bg_color {
             style = style.bg_color(bg);
