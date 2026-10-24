@@ -498,6 +498,17 @@ where
             (EventResult::Ignored, None)
         }
     }
+
+    fn on_layout(
+        &self,
+        element: &mut Self::Element,
+        computed: crate::layout::Computed,
+        ctx: &mut Context,
+    ) {
+        if let Some((_, ref mut el)) = element.child {
+            self.view.on_layout(el, computed, ctx);
+        }
+    }
 }
 
 impl<V, State, Msg> ViewSequence<State> for Presence<V, Msg>
@@ -534,6 +545,20 @@ where
         ctx: &mut Context,
     ) -> (EventResult, Option<Self::Message>) {
         View::<State>::handle_event(self, elements, state, event, ctx)
+    }
+
+    fn on_layout(&self, elements: &mut Self::Elements, ctx: &mut Context) {
+        View::<State>::on_layout(
+            self,
+            elements,
+            elements
+                .child
+                .as_ref()
+                .map(|(n, _)| *n)
+                .and_then(|n| n.get_computed(ctx))
+                .unwrap_or_default(),
+            ctx,
+        );
     }
 }
 

@@ -95,6 +95,15 @@ where
 
         (result, outer_msg)
     }
+
+    fn on_layout(
+        &self,
+        element: &mut Self::Element,
+        computed: crate::layout::Computed,
+        ctx: &mut Context,
+    ) {
+        self.view.on_layout(element, computed, ctx);
+    }
 }
 
 /// Extension trait for [`View`] that enables fluid `.adapt(...)` method chaining.

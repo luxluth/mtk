@@ -710,6 +710,14 @@ pub trait ViewEventExt<State>: View<State> + Sized {
     fn on_theme_changed<F>(self, handler: F) -> ThemeHandler<State, Self, F>
     where
         F: Fn(&State, ::winit::window::Theme) -> Option<Self::Message> + 'static;
+
+    /// Fires a closure whenever this view's resolved layout dimensions change after a layout pass.
+    ///
+    /// The closure receives the current application state and the new [`Computed`](crate::layout::Computed)
+    /// geometry, and optionally emits a message to drive application state updates.
+    fn on_resize<F>(self, handler: F) -> ResizeHandler<State, Self, F>
+    where
+        F: Fn(&State, crate::layout::Computed) -> Option<Self::Message> + 'static;
 }
 
 impl<State, V: View<State>> ViewEventExt<State> for V {
@@ -925,6 +933,17 @@ impl<State, V: View<State>> ViewEventExt<State> for V {
         F: Fn(&State, ::winit::window::Theme) -> Option<Self::Message> + 'static,
     {
         ThemeHandler {
+            inner: self,
+            handler: Rc::new(handler),
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    fn on_resize<F>(self, handler: F) -> ResizeHandler<State, Self, F>
+    where
+        F: Fn(&State, crate::layout::Computed) -> Option<Self::Message> + 'static,
+    {
+        ResizeHandler {
             inner: self,
             handler: Rc::new(handler),
             _marker: std::marker::PhantomData,
@@ -2727,5 +2746,148 @@ mod tests {
             &mut ctx,
         );
         assert_eq!(msg, Some((winit::event::MouseButton::Right, false)));
+    }
+}
+
+/// Persistent element state for a [`ResizeHandler`], tracking the last observed size so the
+/// handler fires only when dimensions actually change.
+pub struct ResizeElement<VEl> {
+    pub(crate) inner_element: VEl,
+    pub(crate) last_computed: Option<crate::layout::Computed>,
+    pub(crate) pending_computed: Option<crate::layout::Computed>,
+}
+
+/// A wrapper view that fires a closure whenever the wrapped view's resolved layout dimensions change.
+///
+/// Created via [`ViewEventExt::on_resize`].
+pub struct ResizeHandler<State, V, F> {
+    pub(crate) inner: V,
+    pub(crate) handler: Rc<F>,
+    pub(crate) _marker: std::marker::PhantomData<State>,
+}
+
+impl<State, V: View<State>, F> View<State> for ResizeHandler<State, V, F>
+where
+    F: Fn(&State, crate::layout::Computed) -> Option<V::Message> + 'static,
+{
+    type Element = ResizeElement<V::Element>;
+    type Message = V::Message;
+
+    fn build(&self, ctx: &mut Context) -> Self::Element {
+        ResizeElement {
+            inner_element: self.inner.build(ctx),
+            last_computed: None,
+            pending_computed: None,
+        }
+    }
+
+    fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
+        self.inner
+            .rebuild(&prev.inner, ctx, &mut element.inner_element);
+    }
+
+    fn rebuild_with_parent(
+        &self,
+        prev: &Self,
+        ctx: &mut Context,
+        element: &mut Self::Element,
+        parent: Node,
+        next_sibling: Option<Node>,
+    ) {
+        self.inner.rebuild_with_parent(
+            &prev.inner,
+            ctx,
+            &mut element.inner_element,
+            parent,
+            next_sibling,
+        );
+    }
+
+    fn teardown(&self, ctx: &mut Context, element: &mut Self::Element) {
+        self.inner.teardown(ctx, &mut element.inner_element);
+    }
+
+    fn get_node(&self, element: &Self::Element) -> Node {
+        self.inner.get_node(&element.inner_element)
+    }
+
+    fn handle_event(
+        &self,
+        element: &mut Self::Element,
+        state: &State,
+        event: Event,
+        ctx: &mut Context,
+    ) -> (EventResult, Option<Self::Message>) {
+        // On the first Tick after a layout pass, emit the resize message if dimensions changed.
+        if let Event::Tick { .. } = event {
+            if let Some(computed) = element.pending_computed.take() {
+                if let Some(msg) = (self.handler)(state, computed) {
+                    let _ = self
+                        .inner
+                        .handle_event(&mut element.inner_element, state, event, ctx);
+                    return (EventResult::Handled, Some(msg));
+                }
+            }
+        }
+        self.inner
+            .handle_event(&mut element.inner_element, state, event, ctx)
+    }
+
+    fn on_layout(
+        &self,
+        element: &mut Self::Element,
+        computed: crate::layout::Computed,
+        ctx: &mut Context,
+    ) {
+        self.inner
+            .on_layout(&mut element.inner_element, computed, ctx);
+
+        let changed = match element.last_computed {
+            Some(prev) => (prev.w - computed.w).abs() > 0.5 || (prev.h - computed.h).abs() > 0.5,
+            None => true,
+        };
+
+        if changed {
+            element.last_computed = Some(computed);
+            element.pending_computed = Some(computed);
+            ctx.request_frame();
+        }
+    }
+}
+
+#[cfg(test)]
+mod resize_tests {
+    use super::*;
+    use crate::ui::widgets::text;
+
+    #[derive(Clone, Debug, PartialEq)]
+    enum TestResizeMsg {
+        Resized(f32, f32),
+    }
+
+    #[test]
+    fn test_on_resize_event_flow() {
+        let mut ctx = Context::new();
+        let view = text::<_, TestResizeMsg>("Resize Target")
+            .on_resize(|_state, computed| Some(TestResizeMsg::Resized(computed.w, computed.h)));
+
+        let mut element = view.build(&mut ctx);
+        let node = view.get_node(&element);
+        ctx.root_attach(node);
+
+        ctx.compute_layout(300.0, 150.0);
+        let comp = node.get_computed(&ctx).unwrap();
+
+        view.on_layout(&mut element, comp, &mut ctx);
+
+        let (res, msg) = view.handle_event(&mut element, &(), Event::Tick { dt: 0.016 }, &mut ctx);
+        assert_eq!(res, EventResult::Handled);
+        assert_eq!(msg, Some(TestResizeMsg::Resized(comp.w, comp.h)));
+
+        // Second tick with no layout change does not re-emit
+        let (res2, msg2) =
+            view.handle_event(&mut element, &(), Event::Tick { dt: 0.016 }, &mut ctx);
+        assert_eq!(res2, EventResult::Ignored);
+        assert_eq!(msg2, None);
     }
 }

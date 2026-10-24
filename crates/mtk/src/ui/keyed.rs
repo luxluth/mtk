@@ -74,6 +74,15 @@ impl<State, K, V: View<State>> View<State> for Keyed<K, V> {
     ) -> (EventResult, Option<Self::Message>) {
         self.view.handle_event(element, state, event, ctx)
     }
+
+    fn on_layout(
+        &self,
+        element: &mut Self::Element,
+        computed: crate::layout::Computed,
+        ctx: &mut Context,
+    ) {
+        self.view.on_layout(element, computed, ctx);
+    }
 }
 
 /// A dynamic sequence of keyed views reconciled by stable key identity across frames.
@@ -296,6 +305,13 @@ where
         }
 
         (handled, emitted_msg)
+    }
+
+    fn on_layout(&self, elements: &mut Self::Elements, ctx: &mut Context) {
+        for (item, (_key, el)) in self.items.iter().zip(elements.iter_mut()) {
+            let comp = item.view.get_node(el).get_computed(ctx).unwrap_or_default();
+            item.view.on_layout(el, comp, ctx);
+        }
     }
 }
 

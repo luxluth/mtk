@@ -272,6 +272,15 @@ impl<State, V: View<State>> View<State> for Morphable<MorphId, V> {
         self.view
             .handle_event(&mut element.inner_el, state, event, ctx)
     }
+
+    fn on_layout(
+        &self,
+        element: &mut Self::Element,
+        computed: crate::layout::Computed,
+        ctx: &mut Context,
+    ) {
+        self.view.on_layout(&mut element.inner_el, computed, ctx);
+    }
 }
 
 /// Extension trait enabling `.morph(id)` method chaining on any view.

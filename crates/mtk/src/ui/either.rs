@@ -209,6 +209,13 @@ where
                 }
             }
             (Either::Right(new_b), Either::Left(old_a)) => {
+                let actual_sibling = if let Either::Left(old_el) = element {
+                    let old_node = old_a.get_node(old_el);
+                    old_node.next_sibling(ctx)
+                } else {
+                    None
+                };
+                let sibling_to_use = next_sibling.or(actual_sibling);
                 if let Either::Left(mut old_el) =
                     std::mem::replace(element, Either::Right(new_b.build(ctx)))
                 {
@@ -218,7 +225,7 @@ where
                 }
                 if let Either::Right(new_el) = element {
                     let new_node = new_b.get_node(new_el);
-                    if let Some(sibling) = next_sibling {
+                    if let Some(sibling) = sibling_to_use {
                         new_node.put_before(ctx, sibling);
                     } else {
                         parent.append(ctx, new_node);
@@ -226,6 +233,13 @@ where
                 }
             }
             (Either::Left(new_a), Either::Right(old_b)) => {
+                let actual_sibling = if let Either::Right(old_el) = element {
+                    let old_node = old_b.get_node(old_el);
+                    old_node.next_sibling(ctx)
+                } else {
+                    None
+                };
+                let sibling_to_use = next_sibling.or(actual_sibling);
                 if let Either::Right(mut old_el) =
                     std::mem::replace(element, Either::Left(new_a.build(ctx)))
                 {
@@ -235,7 +249,7 @@ where
                 }
                 if let Either::Left(new_el) = element {
                     let new_node = new_a.get_node(new_el);
-                    if let Some(sibling) = next_sibling {
+                    if let Some(sibling) = sibling_to_use {
                         new_node.put_before(ctx, sibling);
                     } else {
                         parent.append(ctx, new_node);
@@ -263,11 +277,20 @@ where
                 {
                     let old_node = old_a.get_node(&old_el);
                     let is_root = ctx.layout.root == Some(old_node.0);
+                    let parent = old_node.parent(ctx);
+                    let next_sibling = old_node.next_sibling(ctx);
                     old_node.remove(ctx);
                     old_a.teardown(ctx, &mut old_el);
                     if let Either::Right(new_el) = element {
+                        let new_node = new_b.get_node(new_el);
                         if is_root {
-                            ctx.root_attach(new_b.get_node(new_el));
+                            ctx.root_attach(new_node);
+                        } else if let Some(parent) = parent {
+                            if let Some(sibling) = next_sibling {
+                                new_node.put_before(ctx, sibling);
+                            } else {
+                                parent.append(ctx, new_node);
+                            }
                         }
                     }
                 }
@@ -278,11 +301,20 @@ where
                 {
                     let old_node = old_b.get_node(&old_el);
                     let is_root = ctx.layout.root == Some(old_node.0);
+                    let parent = old_node.parent(ctx);
+                    let next_sibling = old_node.next_sibling(ctx);
                     old_node.remove(ctx);
                     old_b.teardown(ctx, &mut old_el);
                     if let Either::Left(new_el) = element {
+                        let new_node = new_a.get_node(new_el);
                         if is_root {
-                            ctx.root_attach(new_a.get_node(new_el));
+                            ctx.root_attach(new_node);
+                        } else if let Some(parent) = parent {
+                            if let Some(sibling) = next_sibling {
+                                new_node.put_before(ctx, sibling);
+                            } else {
+                                parent.append(ctx, new_node);
+                            }
                         }
                     }
                 }
@@ -317,6 +349,19 @@ where
             (Either::Left(a), Either::Left(el)) => a.handle_event(el, state, event, ctx),
             (Either::Right(b), Either::Right(el)) => b.handle_event(el, state, event, ctx),
             _ => (EventResult::Ignored, None),
+        }
+    }
+
+    fn on_layout(
+        &self,
+        element: &mut Self::Element,
+        computed: crate::layout::Computed,
+        ctx: &mut Context,
+    ) {
+        match (self, element) {
+            (Either::Left(a), Either::Left(el)) => a.on_layout(el, computed, ctx),
+            (Either::Right(b), Either::Right(el)) => b.on_layout(el, computed, ctx),
+            _ => {}
         }
     }
 }
@@ -414,6 +459,20 @@ where
             (Either::Left(a), Either::Left(el)) => a.handle_event(el, state, event, ctx),
             (Either::Right(b), Either::Right(el)) => b.handle_event(el, state, event, ctx),
             _ => (EventResult::Ignored, None),
+        }
+    }
+
+    fn on_layout(&self, elements: &mut Self::Elements, ctx: &mut Context) {
+        match (self, elements) {
+            (Either::Left(a), Either::Left(el)) => {
+                let comp = a.get_node(el).get_computed(ctx).unwrap_or_default();
+                a.on_layout(el, comp, ctx);
+            }
+            (Either::Right(b), Either::Right(el)) => {
+                let comp = b.get_node(el).get_computed(ctx).unwrap_or_default();
+                b.on_layout(el, comp, ctx);
+            }
+            _ => {}
         }
     }
 }

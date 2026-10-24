@@ -340,6 +340,22 @@ where
 
         (handled, emitted_msg)
     }
+
+    fn on_layout(
+        &self,
+        element: &mut Self::Element,
+        _computed: crate::layout::Computed,
+        ctx: &mut Context,
+    ) where
+        F: VirtualListRenderHelper<T, V, State, Self::Message>,
+        T: 'static,
+    {
+        self.sync_visible_range(ctx, element, false);
+        for (_idx, view, elem) in element.visible_elements.iter_mut() {
+            let comp = view.get_node(elem).get_computed(ctx).unwrap_or_default();
+            view.on_layout(elem, comp, ctx);
+        }
+    }
 }
 
 impl<T, F, V> VirtualList<T, F, V> {

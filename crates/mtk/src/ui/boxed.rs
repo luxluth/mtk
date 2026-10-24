@@ -57,6 +57,13 @@ pub trait ErasedView<State, Msg> {
         ctx: &mut Context,
     ) -> (EventResult, Option<Msg>);
 
+    fn on_layout_erased(
+        &self,
+        element: &mut BoxedElement,
+        computed: crate::layout::Computed,
+        ctx: &mut Context,
+    );
+
     fn as_any(&self) -> &dyn Any;
 
     fn view_type_id(&self) -> TypeId;
@@ -148,6 +155,17 @@ where
             self.handle_event(concrete_el, state, event, ctx)
         } else {
             (EventResult::Ignored, None)
+        }
+    }
+
+    fn on_layout_erased(
+        &self,
+        element: &mut BoxedElement,
+        computed: crate::layout::Computed,
+        ctx: &mut Context,
+    ) {
+        if let Some(concrete_el) = element.inner.downcast_mut::<V::Element>() {
+            self.on_layout(concrete_el, computed, ctx);
         }
     }
 
@@ -264,6 +282,15 @@ impl<State: 'static, Msg: 'static> View<State> for BoxedView<State, Msg> {
         ctx: &mut Context,
     ) -> (EventResult, Option<Self::Message>) {
         self.inner.handle_event_erased(element, state, event, ctx)
+    }
+
+    fn on_layout(
+        &self,
+        element: &mut Self::Element,
+        computed: crate::layout::Computed,
+        ctx: &mut Context,
+    ) {
+        self.inner.on_layout_erased(element, computed, ctx);
     }
 }
 

@@ -267,6 +267,15 @@ where
         self.children
             .handle_event(&mut element.1, state, event, ctx)
     }
+
+    fn on_layout(
+        &self,
+        element: &mut Self::Element,
+        _computed: crate::layout::Computed,
+        ctx: &mut Context,
+    ) {
+        self.children.on_layout(&mut element.1, ctx);
+    }
 }
 
 #[cfg(test)]

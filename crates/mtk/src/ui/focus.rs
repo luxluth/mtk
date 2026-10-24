@@ -90,6 +90,15 @@ impl<State, V: View<State>> View<State> for Focusable<V> {
 
         (handled.or(inner_res), inner_msg)
     }
+
+    fn on_layout(
+        &self,
+        element: &mut Self::Element,
+        computed: crate::layout::Computed,
+        ctx: &mut Context,
+    ) {
+        self.inner.on_layout(element, computed, ctx);
+    }
 }
 
 #[cfg(test)]

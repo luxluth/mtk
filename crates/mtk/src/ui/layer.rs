@@ -609,6 +609,25 @@ where
         self.base_view
             .handle_event(&mut element.base_el, state, event, ctx)
     }
+
+    fn on_layout(
+        &self,
+        element: &mut Self::Element,
+        computed: crate::layout::Computed,
+        ctx: &mut Context,
+    ) {
+        self.base_view
+            .on_layout(&mut element.base_el, computed, ctx);
+        if element.is_mounted {
+            let layer_comp = self
+                .layer_view
+                .get_node(&element.layer_el)
+                .get_computed(ctx)
+                .unwrap_or(computed);
+            self.layer_view
+                .on_layout(&mut element.layer_el, layer_comp, ctx);
+        }
+    }
 }
 
 /// Extension trait on all [`View`] types to easily attach layers, sheets, and modal surfaces.

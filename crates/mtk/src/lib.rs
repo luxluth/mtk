@@ -43,13 +43,14 @@ pub use crate::ui::widgets::{
     TooltipPlacement,
 };
 pub use crate::ui::{
-    BoxedElement, BoxedView, BoxedViewExt, DragContext, DragPhase, Either, Focusable, FocusableExt,
-    KeyEvent, KeyEventContext, Keyed, KeyedViewSequence, Motion, MotionOffset, MouseActionKind,
-    MouseEventContext, MouseHandler, Overlay, OverlayElement, OverlayPlacement, PageTransition,
-    Presence, PresenceViewExt, Router, ScrollContext, ScrollHandler, ScrollSource,
-    ThumbScrollContext, ThumbScrollHandler, Transition, TransitionOrder, ViewEitherExt,
-    ViewEventExt, ViewOverlayExt, ViewStyleExt, boxed, compute_overlay_position, either, keyed,
-    keyed_sequence, overlay, presence, router,
+    Adaptive, AdaptiveElement, BoxedElement, BoxedView, BoxedViewExt, DragContext, DragPhase,
+    Either, Focusable, FocusableExt, KeyEvent, KeyEventContext, Keyed, KeyedViewSequence, Motion,
+    MotionOffset, MouseActionKind, MouseEventContext, MouseHandler, Overlay, OverlayElement,
+    OverlayPlacement, PageTransition, Presence, PresenceViewExt, ResizeElement, ResizeHandler,
+    Router, ScrollContext, ScrollHandler, ScrollSource, ThumbScrollContext, ThumbScrollHandler,
+    Transition, TransitionOrder, ViewEitherExt, ViewEventExt, ViewOverlayExt, ViewStyleExt,
+    adaptive, boxed, compute_overlay_position, either, keyed, keyed_sequence, overlay, presence,
+    router,
 };
 pub use accesskit::{Action, ActionData, ActionRequest, Role, TreeUpdate};
 use std::cell::RefCell;
@@ -637,6 +638,11 @@ impl Context {
         }
     }
 
+    /// Returns `true` if the layout engine has any dirty nodes pending recomputation.
+    pub fn has_dirties(&self) -> bool {
+        !self.layout.dirties.is_empty()
+    }
+
     /// Destroys a node and all of its recursive children from the layout engine and cleans up associated text/effect state.
     pub fn destroy_node(&mut self, node: Node) {
         let accessibility_nodes = &mut self.accessibility_nodes;
@@ -728,7 +734,12 @@ impl Context {
 
     /// Computes the complete bottom-up and top-down layout pass across the node tree given `viewport_width` and `viewport_height`.
     pub fn compute_layout(&mut self, viewport_width: f32, viewport_height: f32) {
-        self.viewport_size = (viewport_width, viewport_height);
+        if self.viewport_size != (viewport_width, viewport_height) {
+            self.viewport_size = (viewport_width, viewport_height);
+            if let Some(root) = self.layout.root {
+                self.layout.set_dirty(root);
+            }
+        }
         let mut layout = std::mem::take(&mut self.layout);
         let mut sizing_func = self.text_sizing_func.take();
         let text_context = self.text_context.clone();

@@ -712,6 +712,21 @@ where
 
         (flyout_res.or(anchor_res), anchor_msg)
     }
+
+    fn on_layout(
+        &self,
+        element: &mut Self::Element,
+        computed: crate::layout::Computed,
+        ctx: &mut Context,
+    ) {
+        self.anchor_view
+            .on_layout(&mut element.anchor_element, computed, ctx);
+        update_overlay_geometry(self, ctx, element);
+        if let Some((fl_node, ref mut fl_el)) = element.flyout_element {
+            let fl_comp = fl_node.get_computed(ctx).unwrap_or_default();
+            self.flyout_view.on_layout(fl_el, fl_comp, ctx);
+        }
+    }
 }
 
 /// Extension trait enabling fluid `.overlay(...)` and `.context_menu(...)` on any [`View`].

@@ -2063,6 +2063,29 @@ where
 
                 self.context.compute_layout(logical_w, logical_h);
 
+                // Post-layout hook: notify views of their resolved geometry (adaptive, on_resize, etc.).
+                // A second stabilization pass runs if any adaptive view mutated the layout tree.
+                if let (Some(view), Some(element)) = (&self.view, &mut self.element) {
+                    let root_comp = self
+                        .context
+                        .layout
+                        .root
+                        .and_then(|r| self.context.layout.get_computed(r))
+                        .copied()
+                        .unwrap_or_default();
+
+                    let mut iterations = 0;
+                    while iterations < 3 {
+                        view.on_layout(element, root_comp, &mut self.context);
+                        if self.context.has_dirties() {
+                            self.context.compute_layout(logical_w, logical_h);
+                            iterations += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+
                 if let Some(tx) = &self.debug_tx {
                     let snapshot =
                         self.context
@@ -2546,5 +2569,157 @@ mod tests {
             y: 60.0,
             hit_nodes: hit_nodes.clone(),
         });
+    }
+
+    #[test]
+    fn test_adaptive_metric_cards_layout() {
+        use crate::style::{Edges, FlexDirection, Size, Style, TextStyle};
+        use crate::text_property::FontWeight;
+        use crate::ui::widgets::{column, container, row, text};
+        use crate::ui::{Either, ViewEventExt, ViewStyleExt, adaptive};
+        use crate::{clr, rgb};
+
+        fn metric_card_test(
+            title: &str,
+            value: &str,
+            change: &str,
+            accent_color: crate::Color,
+        ) -> impl crate::ui::View<(f32, f32), Message = (f32, f32)> {
+            container((
+                text::<_, (f32, f32)>(title).style(Style::new().set_text_style(TextStyle {
+                    font_size: 13.0,
+                    color: rgb!(100, 116, 139),
+                    font_weight: FontWeight::MEDIUM,
+                    ..Default::default()
+                })),
+                text::<_, (f32, f32)>(value).style(Style::new().set_text_style(TextStyle {
+                    font_size: 26.0,
+                    color: rgb!(15, 23, 42),
+                    font_weight: FontWeight::BOLD,
+                    ..Default::default()
+                })),
+                text::<_, (f32, f32)>(change).style(Style::new().set_text_style(TextStyle {
+                    font_size: 12.0,
+                    color: accent_color,
+                    font_weight: FontWeight::BOLD,
+                    ..Default::default()
+                })),
+            ))
+            .style(
+                Style::new()
+                    .flex_grow(1.0)
+                    .width(Size::Fill)
+                    .padding(Edges::all(20.0))
+                    .bg_color(clr!(white))
+                    .border(1.0, rgb!(226, 232, 240))
+                    .corner_radius(12.0)
+                    .flex_direction(FlexDirection::Column)
+                    .gap(6.0),
+            )
+        }
+
+        let mut window = Window::with(
+            (0.0f32, 0.0f32),
+            |state: &mut (f32, f32), (w, h)| {
+                *state = (w, h);
+            },
+            |_state: &(f32, f32)| {
+                column((adaptive(|bounds| {
+                    if bounds.w > 560.0 {
+                        Either::Left(
+                            row((
+                                metric_card_test(
+                                    "Total Revenue",
+                                    "$48,250",
+                                    "+12.4%",
+                                    rgb!(16, 185, 129),
+                                ),
+                                metric_card_test(
+                                    "Active Users",
+                                    "2,420",
+                                    "+8.1%",
+                                    rgb!(37, 99, 235),
+                                ),
+                                metric_card_test(
+                                    "Conversion Rate",
+                                    "3.42%",
+                                    "+1.2%",
+                                    rgb!(124, 58, 237),
+                                ),
+                            ))
+                            .style(Style::new().width(Size::Fill).gap(16.0)),
+                        )
+                    } else {
+                        Either::Right(
+                            column((
+                                metric_card_test(
+                                    "Total Revenue",
+                                    "$48,250",
+                                    "+12.4%",
+                                    rgb!(16, 185, 129),
+                                ),
+                                metric_card_test(
+                                    "Active Users",
+                                    "2,420",
+                                    "+8.1%",
+                                    rgb!(37, 99, 235),
+                                ),
+                                metric_card_test(
+                                    "Conversion Rate",
+                                    "3.42%",
+                                    "+1.2%",
+                                    rgb!(124, 58, 237),
+                                ),
+                            ))
+                            .style(Style::new().width(Size::Fill).gap(12.0)),
+                        )
+                    }
+                })
+                .style(
+                    Style::new()
+                        .width(Size::Fill)
+                        .flex_grow(1.0)
+                        .padding(Edges::all(24.0)),
+                )
+                .on_resize(|_state, bounds| Some((bounds.w, bounds.h))),))
+                .style(Style::new().width(Size::Fill).height(Size::Fill))
+            },
+        );
+
+        window.context.compute_layout(720.0, 450.0);
+        let root_comp = window
+            .context
+            .layout
+            .root
+            .and_then(|r| window.context.layout.get_computed(r))
+            .copied()
+            .unwrap_or_default();
+        if let (Some(view), Some(element)) = (&window.view, &mut window.element) {
+            let mut iterations = 0;
+            while iterations < 3 {
+                view.on_layout(element, root_comp, &mut window.context);
+                if window.context.has_dirties() {
+                    window.context.compute_layout(720.0, 450.0);
+                    iterations += 1;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        // Verify that container has rendered cards with width > 0
+        window.context.build_render_list(crate::style::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 720.0,
+            h: 450.0,
+        });
+
+        // Pick near center to ensure cards exist in layout hierarchy
+        let hit_nodes = window.context.pick(200.0, 50.0);
+        assert!(
+            !hit_nodes.is_empty(),
+            "Cards must be present in hit testing"
+        );
     }
 }

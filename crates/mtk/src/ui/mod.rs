@@ -6,6 +6,7 @@
 use crate::{Context, Node, ui::event::EventResult, windowing::WindowDimension};
 
 pub mod adapter;
+pub mod adaptive;
 pub mod boxed;
 pub mod either;
 pub mod event;
@@ -26,13 +27,14 @@ pub mod widgets;
 pub use crate::switch;
 pub use ::winit::window::Theme;
 pub use adapter::{ViewAdaptExt, adapt};
+pub use adaptive::{Adaptive, AdaptiveElement, adaptive};
 pub use boxed::{BoxedElement, BoxedView, BoxedViewExt, boxed};
 pub use either::{Either, ViewEitherExt, either};
 pub use event::{
     DragContext, DragElement, DragHandler, DragPhase, EventKind, KeyActionKind, KeyEventContext,
-    KeyHandler, KeyScope, MouseActionKind, MouseEventContext, MouseHandler, ScrollContext,
-    ScrollHandler, ScrollSource, ThemeHandler, ThumbScrollContext, ThumbScrollHandler, TickHandler,
-    ViewEventExt,
+    KeyHandler, KeyScope, MouseActionKind, MouseEventContext, MouseHandler, ResizeElement,
+    ResizeHandler, ScrollContext, ScrollHandler, ScrollSource, ThemeHandler, ThumbScrollContext,
+    ThumbScrollHandler, TickHandler, ViewEventExt,
 };
 pub use focus::{Focusable, FocusableExt};
 pub use keyed::{Keyed, KeyedViewSequence, keyed, keyed_sequence};
@@ -43,6 +45,7 @@ pub use morph::{
     ActiveMorphFlight, MorphId, MorphScope, MorphScopeExt, MorphTransition, MorphViewExt,
     Morphable, morph_scope, morphable,
 };
+use mtk_layout::Computed;
 pub use overlay::{
     Overlay, OverlayElement, OverlayPlacement, ViewOverlayExt, compute_overlay_position, overlay,
 };
@@ -156,6 +159,13 @@ pub enum Event {
         /// Optional action data payload (e.g. string value for SetValue).
         data: Option<accesskit::ActionData>,
     },
+    /// Dispatched when a layout node's computed dimensions change or are first established.
+    Resized {
+        /// The layout node that was resized.
+        node: Node,
+        /// The new computed geometry.
+        computed: Computed,
+    },
 }
 
 /// Describes a keyboard input targeting a window or UI node.
@@ -246,6 +256,10 @@ pub trait View<State> {
         event: Event,
         ctx: &mut Context,
     ) -> (EventResult, Option<Self::Message>);
+
+    #[allow(unused_variables)]
+    /// Called immediately after layout calculation with the final resolved geometry.
+    fn on_layout(&self, element: &mut Self::Element, computed: Computed, ctx: &mut Context) {}
 }
 
 /// Defines container composition for sequential views, such as tuples `(ViewA, ViewB)` or `Vec<V>`.
@@ -272,6 +286,10 @@ pub trait ViewSequence<State> {
         event: Event,
         ctx: &mut Context,
     ) -> (EventResult, Option<Self::Message>);
+
+    #[allow(unused_variables)]
+    /// Called immediately after layout calculation with the final resolved geometry.
+    fn on_layout(&self, elements: &mut Self::Elements, ctx: &mut Context) {}
 }
 
 macro_rules! impl_view_tuple {
@@ -341,6 +359,14 @@ macro_rules! impl_view_tuple {
                 )*
 
                 (handled, emitted_msg)
+            }
+
+            fn on_layout(&self, elements: &mut Self::Elements, ctx: &mut Context) {
+                $(
+                    let node = self.$idx.get_node(&elements.$idx);
+                    let comp = node.get_computed(ctx).unwrap_or_default();
+                    self.$idx.on_layout(&mut elements.$idx, comp, ctx);
+                )*
             }
         }
     };
@@ -428,6 +454,14 @@ where
         }
 
         (handled, emitted_msg)
+    }
+
+    fn on_layout(&self, elements: &mut Self::Elements, ctx: &mut Context) {
+        for (view, el) in self.iter().zip(elements.iter_mut()) {
+            let node = view.get_node(el);
+            let comp = node.get_computed(ctx).unwrap_or_default();
+            view.on_layout(el, comp, ctx);
+        }
     }
 }
 
@@ -522,6 +556,12 @@ where
             (EventResult::Ignored, None)
         }
     }
+
+    fn on_layout(&self, element: &mut Self::Element, computed: Computed, ctx: &mut Context) {
+        if let (Some(view), Some(el)) = (self.as_ref(), element) {
+            view.on_layout(el, computed, ctx);
+        }
+    }
 }
 
 // Implement ViewSequence for Option<V> to support conditional rendering
@@ -580,6 +620,14 @@ where
             view.handle_event(el, state, event, ctx)
         } else {
             (EventResult::Ignored, None)
+        }
+    }
+
+    fn on_layout(&self, elements: &mut Self::Elements, ctx: &mut Context) {
+        if let (Some(view), Some(el)) = (self.as_ref(), elements) {
+            let node = view.get_node(el);
+            let comp = node.get_computed(ctx).unwrap_or_default();
+            view.on_layout(el, comp, ctx);
         }
     }
 }

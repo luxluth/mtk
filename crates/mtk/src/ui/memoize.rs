@@ -100,4 +100,13 @@ where
         // routing the event to the cached view
         element.1.handle_event(&mut element.2, state, event, ctx)
     }
+
+    fn on_layout(
+        &self,
+        element: &mut Self::Element,
+        computed: crate::layout::Computed,
+        ctx: &mut Context,
+    ) {
+        element.1.on_layout(&mut element.2, computed, ctx);
+    }
 }

@@ -385,6 +385,16 @@ where
         self.view
             .handle_event(&mut element.current_el, state, event, ctx)
     }
+
+    fn on_layout(
+        &self,
+        element: &mut Self::Element,
+        _computed: crate::layout::Computed,
+        ctx: &mut Context,
+    ) {
+        let comp = element.current_node.get_computed(ctx).unwrap_or_default();
+        self.view.on_layout(&mut element.current_el, comp, ctx);
+    }
 }
 
 #[cfg(test)]

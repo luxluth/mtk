@@ -256,6 +256,15 @@ impl<State, V: View<State>> View<State> for StyledView<V> {
 
         res
     }
+
+    fn on_layout(
+        &self,
+        element: &mut Self::Element,
+        computed: crate::layout::Computed,
+        ctx: &mut Context,
+    ) {
+        self.inner.on_layout(&mut element.0, computed, ctx);
+    }
 }
 
 fn property_changed(prop: TransitionProperty, a: &Style, b: &Style) -> bool {
@@ -562,6 +571,15 @@ impl<State, V: View<State>> View<State> for KeyframedView<V> {
         }
 
         self.inner.handle_event(&mut element.0, state, event, ctx)
+    }
+
+    fn on_layout(
+        &self,
+        element: &mut Self::Element,
+        computed: crate::layout::Computed,
+        ctx: &mut Context,
+    ) {
+        self.inner.on_layout(&mut element.0, computed, ctx);
     }
 }
 
