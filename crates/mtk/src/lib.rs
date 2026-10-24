@@ -66,6 +66,14 @@ pub enum ClipboardData {
     Text(String),
 }
 
+/// Internal synchronized clipboard state tracking staged text and asynchronous fetch requests.
+#[derive(Debug, Default, Clone)]
+pub struct ClipboardState {
+    pub pending_set: Option<String>,
+    pub fetch_requested: bool,
+    pub last_text: Option<String>,
+}
+
 /// The central coordinator and state container for the MTK user interface runtime.
 ///
 /// `Context` acts as the primary bridge between high-level Rust [`View`](crate::ui::View) declarations
@@ -125,10 +133,7 @@ pub struct Context {
     pub window: Option<Arc<dyn Window>>,
     pub modifiers: ModifiersState,
     pub ensure_visible_requests: HashMap<Node, crate::style::Rect>,
-    #[cfg(not(target_os = "android"))]
-    pub clipboard: Arc<Mutex<Option<arboard::Clipboard>>>,
-    #[cfg(target_os = "android")]
-    pub clipboard: Arc<Mutex<Option<()>>>,
+    pub clipboard: Arc<Mutex<ClipboardState>>,
     pub canvases: RefCell<HashMap<Node, CanvasData>>,
     pub images: RefCell<HashMap<Node, (ImageData, ObjectFit)>>,
     pub svgs: RefCell<HashMap<Node, (SvgData, ObjectFit)>>,
@@ -196,7 +201,7 @@ impl Context {
             window: None,
             modifiers: ModifiersState::default(),
             ensure_visible_requests: HashMap::new(),
-            clipboard: Arc::new(Mutex::new(None)),
+            clipboard: Arc::new(Mutex::new(ClipboardState::default())),
             canvases: RefCell::new(HashMap::new()),
             images: RefCell::new(HashMap::new()),
             svgs: RefCell::new(HashMap::new()),
@@ -546,45 +551,46 @@ impl Context {
         self.theme
     }
 
-    /// Copies payload data to the persistent system clipboard.
+    /// Requests asynchronous retrieval of text from the operating system clipboard.
     ///
-    /// Keeps the underlying system clipboard handle alive across application frames to prevent
-    /// Linux (X11 / Wayland) clipboard managers from losing selection contents upon drop.
+    /// The window event runner will initiate the data transfer and deliver the resulting
+    /// text to the focused view via [`Event::Paste`].
+    pub fn request_clipboard_text(&self) {
+        if let Ok(mut state) = self.clipboard.lock() {
+            state.fetch_requested = true;
+        }
+        if let Some(w) = &self.window {
+            w.request_redraw();
+        }
+    }
+
+    /// Copies payload data to the system clipboard.
+    ///
+    /// Caches the payload immediately and queues it for the operating system clipboard
+    /// via the windowing data transfer pipeline.
     ///
     /// # Examples
     /// ```rust,ignore
     /// ctx.clipboard_copy(ClipboardData::Text("Hello, World!".to_string()));
     /// ```
-    #[cfg(not(target_os = "android"))]
     pub fn clipboard_copy(&self, data: ClipboardData) {
-        if let Ok(mut guard) = self.clipboard.lock() {
-            if guard.is_none() {
-                *guard = arboard::Clipboard::new().ok();
-            }
-            if let Some(cb) = guard.as_mut() {
-                match data {
-                    ClipboardData::Text(text) => {
-                        let _ = cb.set_text(text);
-                    }
+        if let Ok(mut state) = self.clipboard.lock() {
+            match data {
+                ClipboardData::Text(text) => {
+                    state.last_text = Some(text.clone());
+                    state.pending_set = Some(text);
                 }
-            } else if let Ok(mut new_cb) = arboard::Clipboard::new() {
-                match data {
-                    ClipboardData::Text(text) => {
-                        let _ = new_cb.set_text(text);
-                    }
-                }
-                *guard = Some(new_cb);
             }
+        }
+        if let Some(w) = &self.window {
+            w.request_redraw();
         }
     }
 
-    #[cfg(target_os = "android")]
-    pub fn clipboard_copy(&self, _data: ClipboardData) {}
-
-    /// Retrieves payload data from the persistent system clipboard.
+    /// Retrieves payload data from the system clipboard cache, if available.
     ///
-    /// Returns `Some(ClipboardData)` if clipboard content is available, or `None` if
-    /// the clipboard is empty or unsupported.
+    /// Returns `Some(ClipboardData)` if clipboard content is cached, or `None` if
+    /// the clipboard cache is empty.
     ///
     /// # Examples
     /// ```rust,ignore
@@ -592,33 +598,13 @@ impl Context {
     ///     println!("Pasted: {text}");
     /// }
     /// ```
-    #[cfg(not(target_os = "android"))]
     pub fn clipboard_get(&self) -> Option<ClipboardData> {
-        if let Ok(mut guard) = self.clipboard.lock() {
-            if guard.is_none() {
-                *guard = arboard::Clipboard::new().ok();
-            }
-            if let Some(cb) = guard.as_mut() {
-                if let Ok(text) = cb.get_text() {
-                    return Some(ClipboardData::Text(text));
-                }
-            }
-            // If get_text() failed (e.g. stale connection, or guard was None), retry with a fresh Clipboard instance
-            if let Ok(mut new_cb) = arboard::Clipboard::new() {
-                if let Ok(text) = new_cb.get_text() {
-                    let result = Some(ClipboardData::Text(text));
-                    *guard = Some(new_cb);
-                    return result;
-                }
-                *guard = Some(new_cb);
-            }
-        }
-        None
-    }
-
-    #[cfg(target_os = "android")]
-    pub fn clipboard_get(&self) -> Option<ClipboardData> {
-        None
+        self.clipboard.lock().ok().and_then(|state| {
+            state
+                .last_text
+                .as_ref()
+                .map(|t| ClipboardData::Text(t.clone()))
+        })
     }
 
     /// Allocates a new layout node in the layout engine. The node is independent until appended to a parent.

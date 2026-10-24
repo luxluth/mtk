@@ -166,6 +166,13 @@ pub enum Event {
         /// The new computed geometry.
         computed: Computed,
     },
+    /// Dispatched when text content is received from the system clipboard or paste action.
+    Paste {
+        /// Plain UTF-8 text string retrieved from the clipboard.
+        text: String,
+        /// The currently focused layout node when the paste was received.
+        focused_node: Option<Node>,
+    },
 }
 
 /// Describes a keyboard input targeting a window or UI node.

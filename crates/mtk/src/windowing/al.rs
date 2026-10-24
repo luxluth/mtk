@@ -1500,6 +1500,35 @@ where
             }
         }
     }
+
+    fn process_clipboard_requests(&mut self, event_loop: &dyn ActiveEventLoop) {
+        let (pending_set, fetch_requested) = if let Ok(mut state) = self.context.clipboard.lock() {
+            (
+                state.pending_set.take(),
+                std::mem::replace(&mut state.fetch_requested, false),
+            )
+        } else {
+            (None, false)
+        };
+
+        if let Some(text) = pending_set {
+            let send_data = winit::data_transfer::DataTransferSendBuilder::new(text)
+                .with_type(winit::data_transfer::TypeHint::Plaintext, |text, _| {
+                    Some(winit::data_transfer::SendData::Bytes(
+                        text.as_bytes().to_vec(),
+                    ))
+                })
+                .build();
+            let _ = event_loop.set_clipboard(send_data);
+        }
+
+        if fetch_requested {
+            if let Ok(Some(id)) = event_loop.clipboard() {
+                let _ =
+                    event_loop.fetch_data_transfer(id, &winit::data_transfer::TypeHint::Plaintext);
+            }
+        }
+    }
 }
 
 impl<S: 'static, V: 'static> ApplicationHandler for Window<S, V>
@@ -1634,10 +1663,11 @@ where
         self.context.window = None;
     }
 
-    fn about_to_wait(&mut self, _event_loop: &dyn ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) {
         self.process_pending_messages();
         #[cfg(feature = "accessibility")]
         self.process_a11y_events();
+        self.process_clipboard_requests(event_loop);
 
         #[cfg(target_os = "android")]
         if let Some(window) = &self.window {
@@ -1967,16 +1997,28 @@ where
                     let _ = tx.send(crate::debugger::DebugEvent::HoveredNode(None));
                 }
             }
-            WindowEvent::MouseWheel { delta, phase, .. } => {
+            WindowEvent::MouseWheel {
+                delta,
+                phase,
+                source,
+                ..
+            } => {
                 let scale_factor = window.scale_factor();
-                let (dx, dy, is_touchpad) = match delta {
-                    MouseScrollDelta::LineDelta(x, y) => (x * 20.0, y * 20.0, false),
-                    MouseScrollDelta::PixelDelta(pos) => (
-                        (pos.x / scale_factor) as f32,
-                        (pos.y / scale_factor) as f32,
-                        true,
-                    ),
-                    _ => (0.0, 0.0, false),
+                let is_touchpad = match source {
+                    winit::event::ScrollSource::Finger | winit::event::ScrollSource::Momentum => {
+                        true
+                    }
+                    winit::event::ScrollSource::Wheel => false,
+                    winit::event::ScrollSource::Unknown | _ => {
+                        matches!(delta, MouseScrollDelta::PixelDelta(_))
+                    }
+                };
+                let (dx, dy) = match delta {
+                    MouseScrollDelta::LineDelta(x, y) => (x * 20.0, y * 20.0),
+                    MouseScrollDelta::PixelDelta(pos) => {
+                        ((pos.x / scale_factor) as f32, (pos.y / scale_factor) as f32)
+                    }
+                    _ => (0.0, 0.0),
                 };
                 let hit_nodes = self.context.pick(self.cursor_pos.0, self.cursor_pos.1);
                 let mtk_event = Event::MouseWheel {
@@ -1987,6 +2029,17 @@ where
                     hit_nodes,
                 };
                 self.dispatch_and_rebuild(mtk_event);
+            }
+            WindowEvent::DataTransferReceived { value, .. } => {
+                if let Ok(text) = value.try_as_string() {
+                    if let Ok(mut state) = self.context.clipboard.lock() {
+                        state.last_text = Some(text.clone());
+                    }
+                    let focused_node = self.context.focused_node;
+                    let mtk_event = Event::Paste { text, focused_node };
+                    self.dispatch_and_rebuild(mtk_event);
+                    window.request_redraw();
+                }
             }
             WindowEvent::RedrawRequested => {
                 // Process incoming commands from TUI debugger
@@ -2132,6 +2185,8 @@ where
             }
             _ => {}
         }
+
+        self.process_clipboard_requests(event_loop);
     }
 }
 
@@ -2721,5 +2776,37 @@ mod tests {
             !hit_nodes.is_empty(),
             "Cards must be present in hit testing"
         );
+    }
+
+    #[test]
+    fn test_clipboard_copy_request_and_paste_event() {
+        use crate::ui::widgets::input_text;
+
+        let mut window = Window::with(
+            "Initial".to_string(),
+            |state: &mut String, msg: String| {
+                *state = msg;
+            },
+            |_state: &String| input_text(),
+        );
+
+        window.context.compute_layout(400.0, 300.0);
+        let input_node = window.context.layout.root.unwrap();
+        window.context.request_focus(Node(input_node));
+
+        window
+            .context
+            .clipboard_copy(crate::ClipboardData::Text(" World".into()));
+        assert_eq!(
+            window.context.clipboard_get(),
+            Some(crate::ClipboardData::Text(" World".into()))
+        );
+
+        window.dispatch_and_rebuild(Event::Paste {
+            text: " World".into(),
+            focused_node: Some(Node(input_node)),
+        });
+
+        assert_eq!(window.state, "Initial World");
     }
 }

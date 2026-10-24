@@ -534,13 +534,18 @@ impl View<String> for InputText {
                             ctx.request_frame();
                         }
                         Key::Character(s) if ctrl_alt && (s == "v" || s == "V") => {
-                            if let Some(crate::ClipboardData::Text(pasted)) = ctx.clipboard_get() {
-                                let sanitized = pasted
-                                    .replace("\r\n", " ")
-                                    .replace('\n', " ")
-                                    .replace('\r', " ");
-                                element.editor.insert(&sanitized);
-                                text_changed = true;
+                            ctx.request_clipboard_text();
+                            if ctx.window.is_none() {
+                                if let Some(crate::ClipboardData::Text(pasted)) =
+                                    ctx.clipboard_get()
+                                {
+                                    let sanitized = pasted
+                                        .replace("\r\n", " ")
+                                        .replace('\n', " ")
+                                        .replace('\r', " ");
+                                    element.editor.insert(&sanitized);
+                                    text_changed = true;
+                                }
                             }
                         }
                         _ => {
@@ -592,8 +597,21 @@ impl View<String> for InputText {
                         Ime::DeleteSurrounding { .. } => {
                             eprintln!("[mtk(ime)]: Not supported {ime:?}")
                         }
-                        _ => {}
                     }
+                }
+            }
+            Event::Paste { text, focused_node } => {
+                let is_focused = focused_node == Some(element.node)
+                    || (focused_node.is_none() && ctx.focused_node() == Some(element.node));
+                if is_focused {
+                    let sanitized = text
+                        .replace("\r\n", " ")
+                        .replace('\n', " ")
+                        .replace('\r', " ");
+                    element.editor.insert(&sanitized);
+                    emitted_msg = Some(element.editor.display_text().to_string());
+                    handled = EventResult::Handled;
+                    ctx.request_frame();
                 }
             }
             Event::FocusLost { node } => {

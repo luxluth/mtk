@@ -175,12 +175,9 @@ impl TuiAppState {
             if let Some(node) = self.find_selected_node() {
                 if let Some(src) = &node.source {
                     let loc_str = src.link();
-                    if let Ok(mut clip) = arboard::Clipboard::new() {
-                        let _ = clip.set_text(&loc_str);
-                        self.status_message =
-                            Some(format!("Copied location to clipboard: {loc_str}"));
-                        return;
-                    }
+                    copy_to_terminal_clipboard(&loc_str);
+                    self.status_message = Some(format!("Copied location to clipboard: {loc_str}"));
+                    return;
                 }
             }
         }
@@ -811,4 +808,40 @@ fn render_status_bar(f: &mut ratatui::Frame, area: Rect, state: &TuiAppState) {
 
     let paragraph = Paragraph::new(line).block(block);
     f.render_widget(paragraph, area);
+}
+
+fn copy_to_terminal_clipboard(text: &str) {
+    use std::io::Write;
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let bytes = text.as_bytes();
+    let mut b64 = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as usize;
+        let b1 = if chunk.len() > 1 {
+            chunk[1] as usize
+        } else {
+            0
+        };
+        let b2 = if chunk.len() > 2 {
+            chunk[2] as usize
+        } else {
+            0
+        };
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        b64.push(ALPHABET[(triple >> 18) & 0x3f] as char);
+        b64.push(ALPHABET[(triple >> 12) & 0x3f] as char);
+        if chunk.len() > 1 {
+            b64.push(ALPHABET[(triple >> 6) & 0x3f] as char);
+        } else {
+            b64.push('=');
+        }
+        if chunk.len() > 2 {
+            b64.push(ALPHABET[triple & 0x3f] as char);
+        } else {
+            b64.push('=');
+        }
+    }
+    let mut stdout = std::io::stdout().lock();
+    let _ = write!(stdout, "\x1b]52;c;{b64}\x07");
+    let _ = stdout.flush();
 }

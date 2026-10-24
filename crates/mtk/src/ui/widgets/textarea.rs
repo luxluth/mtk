@@ -365,8 +365,20 @@ impl View<String> for TextArea {
                         Ime::DeleteSurrounding { .. } => {
                             eprintln!("[mtk(ime)]: Not supported yet {ime:?}")
                         }
-                        _ => {}
                     }
+                }
+            }
+            Event::Paste {
+                ref text,
+                focused_node,
+            } => {
+                let is_focused = focused_node.as_ref() == Some(&element.node)
+                    || (focused_node.is_none() && Some(element.node.clone()) == ctx.focused_node());
+                if is_focused {
+                    element.editor.insert(text);
+                    emitted_msg = Some(element.editor.display_text().to_string());
+                    handled = EventResult::Handled;
+                    ctx.request_frame();
                 }
             }
             Event::KeyboardInput { ref event, .. } => {
@@ -526,9 +538,14 @@ impl View<String> for TextArea {
                             ctx.request_frame();
                         }
                         Key::Character(s) if ctrl_alt && (s == "v" || s == "V") => {
-                            if let Some(crate::ClipboardData::Text(pasted)) = ctx.clipboard_get() {
-                                element.editor.insert(&pasted);
-                                emitted_msg = Some(element.editor.display_text().to_string());
+                            ctx.request_clipboard_text();
+                            if ctx.window.is_none() {
+                                if let Some(crate::ClipboardData::Text(pasted)) =
+                                    ctx.clipboard_get()
+                                {
+                                    element.editor.insert(&pasted);
+                                    emitted_msg = Some(element.editor.display_text().to_string());
+                                }
                             }
                             handled = EventResult::Handled;
                             ctx.request_frame();

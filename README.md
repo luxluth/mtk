@@ -38,7 +38,6 @@ MTK brings together proven technologies from across the systems and graphics eco
 - **Windowing**: [winit](https://github.com/rust-windowing/winit) — Native window creation, DPI scaling, and event handling.
 - **Images**: [zune-image](https://github.com/etemesi254/zune-image), [resvg](https://github.com/linebender/resvg) — Asynchronous streaming loader (`mtk-image-loader`) with byte-bounded LRU caching.
 - **Inspector**: [Ratatui](https://github.com/ratatui/ratatui) — Built-in terminal UI layout inspector.
-- **Clipboard**: [arboard](https://github.com/1Password/arboard) — Cross-platform clipboard read and write support.
 
 ---
 
