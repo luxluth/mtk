@@ -53,6 +53,7 @@ pub use presence::{Presence, PresenceViewExt, presence};
 pub use router::{Router, router};
 pub use style::ViewStyleExt;
 pub use transition::{Motion, MotionOffset, PageTransition, Transition, TransitionOrder};
+pub use widgets::{OsDraggable, OsDraggableElement, OsDraggableExt, os_draggable};
 
 /// Represents user interaction, layout lifecycle, and system input events dispatched down the view tree.
 #[derive(Clone, Debug)]

@@ -92,6 +92,22 @@ impl<Msg: 'static + Send> Command<Msg> {
         })
     }
 
+    /// Convenience command to request the application window to close.
+    pub fn request_close() -> Self {
+        Self::perform(|ctx| {
+            ctx.request_window_close();
+            None
+        })
+    }
+
+    /// Convenience command to initiate an interactive OS window drag.
+    pub fn drag_window() -> Self {
+        Self::perform(|ctx| {
+            let _ = ctx.drag_window();
+            None
+        })
+    }
+
     /// Extracts the internal action vectors from this command.
     pub fn into_actions(self) -> (Vec<SyncAction<Msg>>, Vec<AsyncAction<Msg>>) {
         (self.sync_actions, self.async_actions)

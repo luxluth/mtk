@@ -1536,10 +1536,16 @@ where
     V: View<S>,
     V::Message: 'static + Send,
 {
-    fn proxy_wake_up(&mut self, _event_loop: &dyn ActiveEventLoop) {
+    fn proxy_wake_up(&mut self, event_loop: &dyn ActiveEventLoop) {
         self.process_pending_messages();
         #[cfg(feature = "accessibility")]
         self.process_a11y_events();
+        if self.context.close_requested {
+            if let Some(tx) = &self.debug_tx {
+                let _ = tx.send(crate::debugger::DebugEvent::Closed);
+            }
+            event_loop.exit();
+        }
     }
 
     fn can_create_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
@@ -1668,6 +1674,14 @@ where
         #[cfg(feature = "accessibility")]
         self.process_a11y_events();
         self.process_clipboard_requests(event_loop);
+
+        if self.context.close_requested {
+            if let Some(tx) = &self.debug_tx {
+                let _ = tx.send(crate::debugger::DebugEvent::Closed);
+            }
+            event_loop.exit();
+            return;
+        }
 
         #[cfg(target_os = "android")]
         if let Some(window) = &self.window {
@@ -2187,6 +2201,13 @@ where
         }
 
         self.process_clipboard_requests(event_loop);
+
+        if self.context.close_requested {
+            if let Some(tx) = &self.debug_tx {
+                let _ = tx.send(crate::debugger::DebugEvent::Closed);
+            }
+            event_loop.exit();
+        }
     }
 }
 

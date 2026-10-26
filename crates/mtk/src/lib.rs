@@ -45,11 +45,12 @@ pub use crate::ui::widgets::{
 pub use crate::ui::{
     Adaptive, AdaptiveElement, BoxedElement, BoxedView, BoxedViewExt, DragContext, DragPhase,
     Either, Focusable, FocusableExt, KeyEvent, KeyEventContext, Keyed, KeyedViewSequence, Motion,
-    MotionOffset, MouseActionKind, MouseEventContext, MouseHandler, Overlay, OverlayElement,
-    OverlayPlacement, PageTransition, Presence, PresenceViewExt, ResizeElement, ResizeHandler,
-    Router, ScrollContext, ScrollHandler, ScrollSource, ThumbScrollContext, ThumbScrollHandler,
-    Transition, TransitionOrder, ViewEitherExt, ViewEventExt, ViewOverlayExt, ViewStyleExt,
-    adaptive, boxed, compute_overlay_position, either, keyed, keyed_sequence, overlay, presence,
+    MotionOffset, MouseActionKind, MouseEventContext, MouseHandler, OsDraggable,
+    OsDraggableElement, OsDraggableExt, Overlay, OverlayElement, OverlayPlacement, PageTransition,
+    Presence, PresenceViewExt, ResizeElement, ResizeHandler, Router, ScrollContext, ScrollHandler,
+    ScrollSource, ThumbScrollContext, ThumbScrollHandler, Transition, TransitionOrder,
+    ViewEitherExt, ViewEventExt, ViewOverlayExt, ViewStyleExt, adaptive, boxed,
+    compute_overlay_position, either, keyed, keyed_sequence, os_draggable, overlay, presence,
     router,
 };
 pub use accesskit::{Action, ActionData, ActionRequest, Role, TreeUpdate};
@@ -144,6 +145,7 @@ pub struct Context {
     pub safe_area: Edges,
     pub captured_pointer: Option<PointerCapture>,
     pub theme: Option<Theme>,
+    pub(crate) close_requested: bool,
 
     // Shared element morph registry
     pub morph_registry: HashMap<Node, MorphInfo>,
@@ -212,6 +214,7 @@ impl Context {
             safe_area: Edges::all(0.0),
             captured_pointer: None,
             theme: None,
+            close_requested: false,
 
             morph_registry: HashMap::new(),
             morph_nodes_by_id: HashMap::new(),
@@ -615,6 +618,20 @@ impl Context {
     /// Returns a reference-counted handle to the underlying window, if attached.
     pub fn window(&self) -> Option<Arc<dyn winit::window::Window>> {
         self.window.clone()
+    }
+
+    /// Initiates an interactive window drag operation with the OS window manager.
+    ///
+    /// Hands window movement over to the operating system or desktop compositor
+    /// until the pointer button is released.
+    pub fn drag_window(&self) -> Result<(), ::winit::error::RequestError> {
+        if let Some(window) = self.window.as_ref() {
+            window.drag_window()
+        } else {
+            Err(::winit::error::RequestError::NotSupported(
+                ::winit::error::NotSupportedError::new("No active window attached to Context"),
+            ))
+        }
     }
 
     /// Requests a new frame redraw on the associated window.
@@ -1094,6 +1111,17 @@ impl Context {
             text,
             children,
         })
+    }
+
+    /// Requests the application window / event loop to terminate gracefully.
+    pub fn request_window_close(&mut self) {
+        self.close_requested = true;
+        self.request_frame();
+    }
+
+    /// Returns `true` if an application window close was requested.
+    pub fn is_close_requested(&self) -> bool {
+        self.close_requested
     }
 }
 
