@@ -1,7 +1,7 @@
 //! Animation curves, spring physics, interpolations, and keyframe sequences.
 
 use crate::Vector2;
-use crate::colors::Color;
+use crate::colors::{Background, Color};
 use crate::effects::{BoxShadow, Effects, Radius};
 use crate::style::{Edges, ScrollbarStyle, Size, Style};
 
@@ -208,6 +208,61 @@ impl Animatable for Color {
     }
 }
 
+impl Animatable for Background {
+    fn interpolate(start: &Self, end: &Self, t: f64) -> Self {
+        match (start, end) {
+            (Background::Color(c1), Background::Color(c2)) => Background::Color(c1.lerp(c2, t)),
+            (Background::Linear(l1), Background::Linear(l2)) => {
+                let angle = l1.angle + (l2.angle - l1.angle) * (t as f32);
+                let mut stops = Vec::new();
+                let len = l1.stops.len().min(l2.stops.len());
+                for i in 0..len {
+                    let s1 = &l1.stops[i];
+                    let s2 = &l2.stops[i];
+                    stops.push(crate::colors::ColorStop {
+                        position: s1.position + (s2.position - s1.position) * (t as f32),
+                        color: s1.color.lerp(&s2.color, t),
+                    });
+                }
+                Background::Linear(crate::colors::LinearGradient { angle, stops })
+            }
+            (Background::Radial(r1), Background::Radial(r2)) => {
+                let center = (
+                    r1.center.0 + (r2.center.0 - r1.center.0) * (t as f32),
+                    r1.center.1 + (r2.center.1 - r1.center.1) * (t as f32),
+                );
+                let radius = r1.radius + (r2.radius - r1.radius) * (t as f32);
+                let mut stops = Vec::new();
+                let len = r1.stops.len().min(r2.stops.len());
+                for i in 0..len {
+                    let s1 = &r1.stops[i];
+                    let s2 = &r2.stops[i];
+                    stops.push(crate::colors::ColorStop {
+                        position: s1.position + (s2.position - s1.position) * (t as f32),
+                        color: s1.color.lerp(&s2.color, t),
+                    });
+                }
+                Background::Radial(crate::colors::RadialGradient {
+                    center,
+                    radius,
+                    stops,
+                })
+            }
+            _ => {
+                if t >= 0.5 {
+                    end.clone()
+                } else {
+                    start.clone()
+                }
+            }
+        }
+    }
+
+    fn is_finished(&self, target: &Self) -> bool {
+        self == target
+    }
+}
+
 impl Animatable for Vector2 {
     fn interpolate(start: &Self, end: &Self, t: f64) -> Self {
         let t_f = t as f32;
@@ -301,7 +356,7 @@ impl Animatable for Effects {
     fn interpolate(start: &Self, end: &Self, t: f64) -> Self {
         let t_f = t as f32;
         Effects {
-            background_color: Color::interpolate(&start.background_color, &end.background_color, t),
+            background: Background::interpolate(&start.background, &end.background, t),
             border: crate::effects::Border {
                 color: Color::interpolate(&start.border.color, &end.border.color, t),
                 radius: Radius::interpolate(&start.border.radius, &end.border.radius, t),
@@ -324,7 +379,7 @@ impl Animatable for Effects {
         }
     }
     fn is_finished(&self, target: &Self) -> bool {
-        self.background_color.is_finished(&target.background_color)
+        self.background.is_finished(&target.background)
             && self.border.color.is_finished(&target.border.color)
             && self.border.radius.is_finished(&target.border.radius)
             && self.box_shadow.is_finished(&target.box_shadow)
@@ -643,5 +698,25 @@ mod tests {
         assert!(!early.inset);
         let late = BoxShadow::interpolate(&s1, &inset_end, 0.6);
         assert!(late.inset);
+    }
+
+    #[test]
+    fn test_background_interpolation() {
+        use crate::colors::LinearGradient;
+
+        let red = Color::new(200, 0, 0, 255);
+        let blue = Color::new(0, 0, 200, 255);
+
+        let g1 = Background::Linear(LinearGradient::vertical(red, blue));
+        let g2 = Background::Linear(LinearGradient::angled(90.0, blue, red));
+
+        let mid = Background::interpolate(&g1, &g2, 0.5);
+        if let Background::Linear(lin) = mid {
+            assert_eq!(lin.angle, 135.0);
+            assert_eq!(lin.stops.len(), 2);
+            assert_eq!(lin.stops[0].color, Color::new(100, 0, 100, 255));
+        } else {
+            panic!("Expected linear gradient background");
+        }
     }
 }

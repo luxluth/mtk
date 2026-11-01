@@ -19,6 +19,10 @@ struct VertexInput {
     @location(8) shadow_params: vec4<f32>,
     @location(9) effects: vec4<f32>,
     @location(10) clip_rect: vec4<f32>,
+    @location(11) gradient_color: vec4<f32>,
+    @location(12) gradient_color2: vec4<f32>,
+    @location(13) gradient_params: vec4<f32>,
+    @location(14) gradient_stops: vec4<f32>,
 }
 
 struct VertexOutput {
@@ -34,6 +38,10 @@ struct VertexOutput {
     @location(8) fragShadowParams: vec4<f32>,
     @location(9) fragEffects: vec4<f32>,
     @location(10) fragClipRect: vec4<f32>,
+    @location(11) fragGradientColor: vec4<f32>,
+    @location(12) fragGradientColor2: vec4<f32>,
+    @location(13) fragGradientParams: vec4<f32>,
+    @location(14) fragGradientStops: vec4<f32>,
 }
 
 @vertex
@@ -86,6 +94,10 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     out.fragShadowParams = in.shadow_params;
     out.fragEffects = in.effects;
     out.fragClipRect = in.clip_rect;
+    out.fragGradientColor = in.gradient_color;
+    out.fragGradientColor2 = in.gradient_color2;
+    out.fragGradientParams = in.gradient_params;
+    out.fragGradientStops = in.gradient_stops;
     return out;
 }
 
@@ -116,6 +128,45 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let outer_alpha = clamp(1.0 - smoothstep(-0.75, 0.75, dist), 0.0, 1.0);
 
     var base_color = in.fragColor;
+    let grad_type = in.fragGradientParams.x;
+
+    if grad_type > 0.5 {
+        let uv = (p + b) / in.fragQuadSize;
+        var t = 0.0;
+
+        if grad_type < 1.5 {
+            // Linear Gradient (type == 1.0)
+            let rad = radians(in.fragGradientParams.y);
+            let dir = vec2<f32>(sin(rad), -cos(rad));
+            let half_extent = max(0.0001, 0.5 * (abs(dir.x) + abs(dir.y)));
+            t = clamp(dot(uv - vec2<f32>(0.5, 0.5), dir) / (2.0 * half_extent) + 0.5, 0.0, 1.0);
+        } else {
+            // Radial Gradient (type == 2.0)
+            let center = in.fragGradientParams.yz;
+            let radius = max(in.fragGradientParams.w, 0.0001);
+            let dist_center = length(uv - center);
+            t = clamp(dist_center / radius, 0.0, 1.0);
+        }
+
+        let num_stops = in.fragGradientStops.w;
+        let p0 = in.fragGradientStops.x;
+        let p1 = in.fragGradientStops.y;
+        let p2 = in.fragGradientStops.z;
+
+        if num_stops <= 2.0 {
+            let factor = clamp((t - p0) / max(p1 - p0, 0.0001), 0.0, 1.0);
+            base_color = mix(in.fragColor, in.fragGradientColor, factor);
+        } else {
+            if t <= p1 {
+                let factor = clamp((t - p0) / max(p1 - p0, 0.0001), 0.0, 1.0);
+                base_color = mix(in.fragColor, in.fragGradientColor, factor);
+            } else {
+                let factor = clamp((t - p1) / max(p2 - p1, 0.0001), 0.0, 1.0);
+                base_color = mix(in.fragGradientColor, in.fragGradientColor2, factor);
+            }
+        }
+    }
+
     let vibrancy = in.fragEffects.x;
     let vibrancy_darkness = in.fragEffects.y;
 
@@ -127,7 +178,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let luma = dot(bg_sample.rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
         let vibrant_rgb = mix(vec3<f32>(luma), bg_sample.rgb, 1.0 + vibrancy * 0.75);
         let dark_rgb = mix(vibrant_rgb, vibrant_rgb * (1.0 - vibrancy_darkness), vibrancy);
-        let tinted_rgb = mix(dark_rgb, in.fragColor.rgb, in.fragColor.a);
+        let tinted_rgb = mix(dark_rgb, base_color.rgb, base_color.a);
 
         base_color = vec4<f32>(tinted_rgb, 1.0);
     }

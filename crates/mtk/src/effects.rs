@@ -1,4 +1,4 @@
-use crate::colors::Color;
+use crate::colors::{Background, Color};
 
 macro_rules! corners_component {
     ($name:ident, $t:ty) => {
@@ -229,7 +229,7 @@ impl Filter {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Effects {
-    pub background_color: Color,
+    pub background: Background,
     pub border: Border,
     pub box_shadow: BoxShadow,
     pub additional_shadows: Vec<BoxShadow>,
@@ -243,7 +243,7 @@ pub struct Effects {
 impl Default for Effects {
     fn default() -> Self {
         Self {
-            background_color: Color::transparent,
+            background: Background::Color(Color::transparent),
             opacity: 1.,
             scale: 1.,
             border: Border::default(),
@@ -257,6 +257,11 @@ impl Default for Effects {
 }
 
 impl Effects {
+    /// Returns the primary color if solid, or first stop color if a gradient.
+    pub fn background_color(&self) -> Color {
+        self.background.primary_color()
+    }
+
     pub fn opacity(mut self, opacity: f32) -> Self {
         self.opacity = opacity;
         self.explicit_opacity = true;

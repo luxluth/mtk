@@ -10,7 +10,7 @@ use crate::style::{
 use crate::text_property::FontWeight;
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
-use crate::{Context, Node, clr, rgb, rgba};
+use crate::{Background, Context, Node, clr, rgb, rgba};
 
 /// A custom dropdown select menu widget with full keyboard navigation and focus support.
 pub struct Dropdown<Msg, F = fn(usize) -> Msg> {
@@ -19,7 +19,7 @@ pub struct Dropdown<Msg, F = fn(usize) -> Msg> {
     pub(crate) placeholder: String,
     pub(crate) on_select: Option<F>,
     pub(crate) disabled: bool,
-    pub(crate) bg_color: Color,
+    pub(crate) background: Background,
     pub(crate) text_color: Color,
     pub(crate) border_color: Color,
     pub(crate) source_loc: Option<SourceLocation>,
@@ -44,7 +44,7 @@ pub fn dropdown<Msg>(
         placeholder: "Select option...".to_string(),
         on_select: None,
         disabled: false,
-        bg_color: clr!(white),
+        background: clr!(white).into(),
         text_color: rgb!(15, 23, 42),
         border_color: rgb!(203, 213, 225),
         source_loc: Some(SourceLocation::here("Dropdown")),
@@ -67,7 +67,7 @@ impl<Msg, F> Dropdown<Msg, F> {
             placeholder: self.placeholder,
             on_select: Some(on_select),
             disabled: self.disabled,
-            bg_color: self.bg_color,
+            background: self.background,
             text_color: self.text_color,
             border_color: self.border_color,
             source_loc: self.source_loc,
@@ -76,8 +76,8 @@ impl<Msg, F> Dropdown<Msg, F> {
     }
 
     /// Sets custom background color.
-    pub fn bg_color(mut self, color: Color) -> Self {
-        self.bg_color = color;
+    pub fn background(mut self, bg: impl Into<Background>) -> Self {
+        self.background = bg.into();
         self
     }
 
@@ -168,7 +168,7 @@ where
             .padding(Edges::symmetric(12.0, 8.0))
             .justify_content(JustifyContent::SpaceBetween)
             .align_items(AlignItems::Center)
-            .bg_color(self.bg_color)
+            .background(self.background.clone())
             .border(1.0, self.border_color)
             .corner_radius(6.0)
             .apply_to_node(ctx, trigger_node);
@@ -192,7 +192,7 @@ where
             .width(Size::Percent(1.0))
             .padding(Edges::all(4.0))
             .gap(2.0)
-            .bg_color(self.bg_color)
+            .background(self.background.clone())
             .border(1.0, self.border_color)
             .corner_radius(8.0)
             .box_shadow(
@@ -204,7 +204,9 @@ where
             .unclipped(true)
             .apply_to_node(ctx, menu_node);
 
-        let is_dark = self.bg_color.r < 100 && self.bg_color.g < 100 && self.bg_color.b < 100;
+        let is_dark = self.background.primary_color().r < 100
+            && self.background.primary_color().g < 100
+            && self.background.primary_color().b < 100;
         let sel_bg = if is_dark {
             rgba!(59, 130, 246, 60)
         } else {
@@ -260,13 +262,13 @@ where
     }
 
     fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
-        if self.bg_color != prev.bg_color || self.border_color != prev.border_color {
+        if self.background != prev.background || self.border_color != prev.border_color {
             element.trigger_node.update_effects(ctx, |e| {
-                e.background_color = self.bg_color;
+                e.background = self.background.clone();
                 e.border.color = self.border_color;
             });
             element.menu_node.update_effects(ctx, |e| {
-                e.background_color = self.bg_color;
+                e.background = self.background.clone();
                 e.border.color = self.border_color;
             });
         }
@@ -293,7 +295,9 @@ where
                 },
             );
 
-            let is_dark = self.bg_color.r < 100 && self.bg_color.g < 100 && self.bg_color.b < 100;
+            let is_dark = self.background.primary_color().r < 100
+                && self.background.primary_color().g < 100
+                && self.background.primary_color().b < 100;
             let sel_bg = if is_dark {
                 rgba!(59, 130, 246, 60)
             } else {
@@ -326,7 +330,7 @@ where
                 );
 
                 node.update_effects(ctx, |e| {
-                    e.background_color = if is_sel { sel_bg } else { clr!(transparent) };
+                    e.background = if is_sel { sel_bg } else { clr!(transparent) }.into();
                 });
             }
         }
@@ -371,8 +375,9 @@ where
         match event {
             Event::CursorMoved { ref hit_nodes, .. } => {
                 if element.is_open {
-                    let is_dark =
-                        self.bg_color.r < 100 && self.bg_color.g < 100 && self.bg_color.b < 100;
+                    let is_dark = self.background.primary_color().r < 100
+                        && self.background.primary_color().g < 100
+                        && self.background.primary_color().b < 100;
                     let sel_bg = if is_dark {
                         rgba!(59, 130, 246, 60)
                     } else {
@@ -394,7 +399,7 @@ where
                         } else {
                             clr!(transparent)
                         };
-                        node.update_effects(ctx, |e| e.background_color = bg);
+                        node.update_effects(ctx, |e| e.background = bg.into());
                     }
                 }
                 (EventResult::Ignored, None)

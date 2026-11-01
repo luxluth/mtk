@@ -378,12 +378,13 @@ where
                     let target_a = self.scrim_color.a as f32;
                     let current_a = (target_a * progress.clamp(0.0, 1.0)) as u8;
                     element.scrim_node.update_effects(ctx, |eff| {
-                        eff.background_color = Color::new(
+                        eff.background = Color::new(
                             self.scrim_color.r,
                             self.scrim_color.g,
                             self.scrim_color.b,
                             current_a,
-                        );
+                        )
+                        .into();
                     });
                 }
 

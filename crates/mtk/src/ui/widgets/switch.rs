@@ -12,14 +12,14 @@ use crate::style::{
 use crate::text_property::FontWeight;
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
-use crate::{AccessibleInfo, Context, Node, clr, rgb, rgba};
+use crate::{AccessibleInfo, Background, Context, Node, clr, rgb, rgba};
 
 /// Visual styling configuration for a [`Switch`] widget.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SwitchStyle {
-    pub on_bg: Color,
-    pub off_bg: Color,
-    pub disabled_bg: Color,
+    pub on_bg: Background,
+    pub off_bg: Background,
+    pub disabled_bg: Background,
     pub knob_color: Color,
     pub label_style: Option<TextStyle>,
     pub gap: f32,
@@ -28,9 +28,9 @@ pub struct SwitchStyle {
 impl Default for SwitchStyle {
     fn default() -> Self {
         Self {
-            on_bg: rgb!(59, 130, 246),
-            off_bg: rgb!(226, 232, 240),
-            disabled_bg: rgb!(203, 213, 225),
+            on_bg: rgb!(59, 130, 246).into(),
+            off_bg: rgb!(226, 232, 240).into(),
+            disabled_bg: rgb!(203, 213, 225).into(),
             knob_color: clr!(white),
             label_style: None,
             gap: 10.0,
@@ -44,33 +44,33 @@ impl SwitchStyle {
         Self::default()
     }
 
-    /// Sets the background color of the track when the switch is active (on).
-    pub fn on_bg(mut self, color: Color) -> Self {
-        self.on_bg = color;
+    /// Sets the background of the track when the switch is active (on).
+    pub fn on_bg(mut self, bg: impl Into<Background>) -> Self {
+        self.on_bg = bg.into();
         self
     }
 
-    /// Sets the active (on) background color of the track.
-    pub fn active_color(mut self, color: Color) -> Self {
-        self.on_bg = color;
+    /// Sets the active (on) background of the track.
+    pub fn active_color(mut self, bg: impl Into<Background>) -> Self {
+        self.on_bg = bg.into();
         self
     }
 
-    /// Sets the background color of the track when the switch is inactive (off).
-    pub fn off_bg(mut self, color: Color) -> Self {
-        self.off_bg = color;
+    /// Sets the background of the track when the switch is inactive (off).
+    pub fn off_bg(mut self, bg: impl Into<Background>) -> Self {
+        self.off_bg = bg.into();
         self
     }
 
-    /// Sets the inactive (off) background color of the track.
-    pub fn inactive_color(mut self, color: Color) -> Self {
-        self.off_bg = color;
+    /// Sets the inactive (off) background of the track.
+    pub fn inactive_color(mut self, bg: impl Into<Background>) -> Self {
+        self.off_bg = bg.into();
         self
     }
 
-    /// Sets the background color of the track when the switch is disabled.
-    pub fn disabled_bg(mut self, color: Color) -> Self {
-        self.disabled_bg = color;
+    /// Sets the background of the track when the switch is disabled.
+    pub fn disabled_bg(mut self, bg: impl Into<Background>) -> Self {
+        self.disabled_bg = bg.into();
         self
     }
 
@@ -239,9 +239,9 @@ where
         let anim_start = Instant::now();
 
         let track_bg = if self.disabled {
-            self.style.disabled_bg
+            self.style.disabled_bg.clone()
         } else {
-            Color::interpolate(
+            Background::interpolate(
                 &self.style.off_bg,
                 &self.style.on_bg,
                 initial_progress as f64,
@@ -255,7 +255,7 @@ where
             .width(Size::Fixed(44))
             .height(Size::Fixed(24))
             .corner_radius(12.0)
-            .bg_color(track_bg)
+            .background(track_bg)
             .padding(Edges::symmetric(2.0, 2.0))
             .justify_content(JustifyContent::Start)
             .align_items(AlignItems::Center)
@@ -342,15 +342,15 @@ where
 
         if self.style.knob_color != prev.style.knob_color {
             element.knob_node.update_effects(ctx, |e| {
-                e.background_color = self.style.knob_color;
+                e.background = self.style.knob_color.into();
             });
         }
 
         if self.disabled != prev.disabled || self.style != prev.style {
             let track_bg = if self.disabled {
-                self.style.disabled_bg
+                self.style.disabled_bg.clone()
             } else {
-                Color::interpolate(
+                Background::interpolate(
                     &self.style.off_bg,
                     &self.style.on_bg,
                     element.anim_progress.get() as f64,
@@ -358,7 +358,7 @@ where
             };
 
             element.track_node.update_effects(ctx, |e| {
-                e.background_color = track_bg;
+                e.background = track_bg;
             });
         }
 
@@ -431,10 +431,13 @@ where
                 });
 
                 if !self.disabled {
-                    let bg =
-                        Color::interpolate(&self.style.off_bg, &self.style.on_bg, progress as f64);
+                    let bg = Background::interpolate(
+                        &self.style.off_bg,
+                        &self.style.on_bg,
+                        progress as f64,
+                    );
                     element.track_node.update_effects(ctx, |e| {
-                        e.background_color = bg;
+                        e.background = bg;
                     });
                 }
 

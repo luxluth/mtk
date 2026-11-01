@@ -274,9 +274,7 @@ fn property_changed(prop: TransitionProperty, a: &Style, b: &Style) -> bool {
             (a.base_effects.opacity - b.base_effects.opacity).abs() > 1e-4
         }
         TransitionProperty::Scale => (a.base_effects.scale - b.base_effects.scale).abs() > 1e-4,
-        TransitionProperty::BackgroundColor => {
-            a.base_effects.background_color != b.base_effects.background_color
-        }
+        TransitionProperty::Background => a.base_effects.background != b.base_effects.background,
         TransitionProperty::BorderColor => {
             a.base_effects.border.color != b.base_effects.border.color
         }
@@ -452,7 +450,7 @@ impl<V> StyledView<V> {
         // Apply effects
         if ctx.morph_suppressed_nodes.contains(&node) {
             let mut suppressed = active_style.base_effects.clone();
-            suppressed.background_color = crate::Color::transparent;
+            suppressed.background = crate::Color::transparent.into();
             suppressed.box_shadow = crate::BoxShadow::default();
             suppressed.additional_shadows.clear();
             suppressed.border.color = crate::Color::transparent;

@@ -1226,7 +1226,7 @@ fn prepare_command_slice<'a, I>(
             let constraints = node.get_constraints(context).unwrap_or_default();
             let mut effects = context.effects.get(&node).cloned().unwrap_or_default();
             if context.morph_suppressed_nodes.contains(&node) {
-                effects.background_color = crate::Color::transparent;
+                effects.background = crate::Background::Color(crate::Color::transparent);
                 effects.box_shadow = crate::BoxShadow::default();
                 effects.additional_shadows.clear();
                 effects.border.color = crate::Color::transparent;
@@ -1289,19 +1289,19 @@ fn prepare_command_slice<'a, I>(
 
             for s in effects.additional_shadows.iter().rev() {
                 let (s_offset, s_params, s_color) = make_shadow_data(s);
-                let shadow_quad = QuadInstance {
-                    pos: [scaled_x, scaled_y],
-                    quad_size: [scaled_w, scaled_h],
-                    color: [0.0; 4],
+                let shadow_quad = QuadInstance::solid(
+                    [scaled_x, scaled_y],
+                    [scaled_w, scaled_h],
+                    [0.0; 4],
                     border_radii,
-                    border_color: [0.0; 4],
-                    border_widths: [0.0; 4],
-                    shadow_color: s_color,
-                    shadow_offset: s_offset,
-                    shadow_params: s_params,
-                    effects: [0.0; 4],
+                    [0.0; 4],
+                    [0.0; 4],
+                    s_color,
+                    s_offset,
+                    s_params,
+                    [0.0; 4],
                     clip_rect,
-                };
+                );
                 push_solid_quad(quad_instances, draw_batches, shadow_quad);
             }
 
@@ -1413,10 +1413,92 @@ fn prepare_command_slice<'a, I>(
                     },
                 });
             } else {
+                let (color, grad_color, grad_color2, grad_params, grad_stops) =
+                    match &effects.background {
+                        crate::Background::Color(c) => (
+                            (*c).into(),
+                            [0.0; 4],
+                            [0.0; 4],
+                            [0.0; 4],
+                            [0.0, 1.0, 1.0, 1.0],
+                        ),
+                        crate::Background::Linear(lin) => {
+                            let (c0, c1, c2, p0, p1, p2, num) = match lin.stops.len() {
+                                0 => ([0.0; 4], [0.0; 4], [0.0; 4], 0.0, 1.0, 1.0, 0.0),
+                                1 => (
+                                    lin.stops[0].color.into(),
+                                    [0.0; 4],
+                                    [0.0; 4],
+                                    0.0,
+                                    1.0,
+                                    1.0,
+                                    1.0,
+                                ),
+                                2 => (
+                                    lin.stops[0].color.into(),
+                                    lin.stops[1].color.into(),
+                                    [0.0; 4],
+                                    lin.stops[0].position,
+                                    lin.stops[1].position,
+                                    1.0,
+                                    2.0,
+                                ),
+                                _ => (
+                                    lin.stops[0].color.into(),
+                                    lin.stops[1].color.into(),
+                                    lin.stops[2].color.into(),
+                                    lin.stops[0].position,
+                                    lin.stops[1].position,
+                                    lin.stops[2].position,
+                                    3.0,
+                                ),
+                            };
+                            (c0, c1, c2, [1.0, lin.angle, 0.0, 0.0], [p0, p1, p2, num])
+                        }
+                        crate::Background::Radial(rad) => {
+                            let (c0, c1, c2, p0, p1, p2, num) = match rad.stops.len() {
+                                0 => ([0.0; 4], [0.0; 4], [0.0; 4], 0.0, 1.0, 1.0, 0.0),
+                                1 => (
+                                    rad.stops[0].color.into(),
+                                    [0.0; 4],
+                                    [0.0; 4],
+                                    0.0,
+                                    1.0,
+                                    1.0,
+                                    1.0,
+                                ),
+                                2 => (
+                                    rad.stops[0].color.into(),
+                                    rad.stops[1].color.into(),
+                                    [0.0; 4],
+                                    rad.stops[0].position,
+                                    rad.stops[1].position,
+                                    1.0,
+                                    2.0,
+                                ),
+                                _ => (
+                                    rad.stops[0].color.into(),
+                                    rad.stops[1].color.into(),
+                                    rad.stops[2].color.into(),
+                                    rad.stops[0].position,
+                                    rad.stops[1].position,
+                                    rad.stops[2].position,
+                                    3.0,
+                                ),
+                            };
+                            (
+                                c0,
+                                c1,
+                                c2,
+                                [2.0, rad.center.0, rad.center.1, rad.radius],
+                                [p0, p1, p2, num],
+                            )
+                        }
+                    };
                 let quad = QuadInstance {
                     pos: [scaled_x, scaled_y],
                     quad_size: [scaled_w, scaled_h],
-                    color: effects.background_color.into(),
+                    color,
                     border_radii,
                     border_color: effects.border.color.into(),
                     border_widths,
@@ -1425,6 +1507,10 @@ fn prepare_command_slice<'a, I>(
                     shadow_params: prim_params,
                     effects: [vibrancy, 0.0, passes, 0.0],
                     clip_rect,
+                    gradient_color: grad_color,
+                    gradient_color2: grad_color2,
+                    gradient_params: grad_params,
+                    gradient_stops: grad_stops,
                 };
                 push_solid_quad(quad_instances, draw_batches, quad);
             }
@@ -1458,22 +1544,22 @@ fn prepare_command_slice<'a, I>(
                         border_radii[2] + ring_thickness,
                         border_radii[3] + ring_thickness,
                     ];
-                    let ring_quad = QuadInstance {
-                        pos: [scaled_x - ring_thickness, scaled_y - ring_thickness],
-                        quad_size: [
+                    let ring_quad = QuadInstance::solid(
+                        [scaled_x - ring_thickness, scaled_y - ring_thickness],
+                        [
                             scaled_w + ring_thickness * 2.0,
                             scaled_h + ring_thickness * 2.0,
                         ],
-                        color: [0.0; 4],
-                        border_radii: ring_radii,
-                        border_color: [0.0, 0.47, 1.0, 1.0],
-                        border_widths: [ring_thickness; 4],
-                        shadow_color: [0.0; 4],
-                        shadow_offset: [0.0; 4],
-                        shadow_params: [0.0, 0.0, 0.0, effective_alpha],
-                        effects: [0.0; 4],
+                        [0.0; 4],
+                        ring_radii,
+                        [0.0, 0.47, 1.0, 1.0],
+                        [ring_thickness; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0, 0.0, 0.0, effective_alpha],
+                        [0.0; 4],
                         clip_rect,
-                    };
+                    );
                     push_solid_quad(quad_instances, draw_batches, ring_quad);
                 }
             }
@@ -1492,19 +1578,19 @@ fn prepare_command_slice<'a, I>(
 
             if let Some(range) = text_ranges.get(&cmd_index) {
                 for s_rect in &range.selections {
-                    let s_quad = QuadInstance {
-                        pos: [s_rect[0] * scale_factor, s_rect[1] * scale_factor],
-                        quad_size: [s_rect[2] * scale_factor, s_rect[3] * scale_factor],
-                        color: range.style.selection_bg.into(),
-                        border_radii: [0.0; 4],
-                        border_color: [0.0; 4],
-                        border_widths: [0.0; 4],
-                        shadow_color: [0.0; 4],
-                        shadow_offset: [0.0; 4],
-                        shadow_params: [0.0, 0.0, 0.0, range.alpha],
-                        effects: [0.0; 4],
+                    let s_quad = QuadInstance::solid(
+                        [s_rect[0] * scale_factor, s_rect[1] * scale_factor],
+                        [s_rect[2] * scale_factor, s_rect[3] * scale_factor],
+                        range.style.selection_bg.into(),
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0, 0.0, 0.0, range.alpha],
+                        [0.0; 4],
                         clip_rect,
-                    };
+                    );
                     push_solid_quad(quad_instances, draw_batches, s_quad);
                 }
 
@@ -1537,53 +1623,53 @@ fn prepare_command_slice<'a, I>(
                 }
 
                 if let Some(c_rect) = range.caret {
-                    let c_quad = QuadInstance {
-                        pos: [c_rect[0] * scale_factor, c_rect[1] * scale_factor],
-                        quad_size: [c_rect[2] * scale_factor, c_rect[3] * scale_factor],
-                        color: range.style.caret_color.into(),
-                        border_radii: [0.0; 4],
-                        border_color: [0.0; 4],
-                        border_widths: [0.0; 4],
-                        shadow_color: [0.0; 4],
-                        shadow_offset: [0.0; 4],
-                        shadow_params: [0.0, 0.0, 0.0, range.alpha],
-                        effects: [0.0; 4],
+                    let c_quad = QuadInstance::solid(
+                        [c_rect[0] * scale_factor, c_rect[1] * scale_factor],
+                        [c_rect[2] * scale_factor, c_rect[3] * scale_factor],
+                        range.style.caret_color.into(),
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0, 0.0, 0.0, range.alpha],
+                        [0.0; 4],
                         clip_rect,
-                    };
+                    );
                     push_solid_quad(quad_instances, draw_batches, c_quad);
                 }
 
                 for st in &range.strikethroughs {
-                    let st_quad = QuadInstance {
-                        pos: [st.rect[0] * scale_factor, st.rect[1] * scale_factor],
-                        quad_size: [st.rect[2] * scale_factor, st.rect[3] * scale_factor],
-                        color: st.color,
-                        border_radii: [0.0; 4],
-                        border_color: [0.0; 4],
-                        border_widths: [0.0; 4],
-                        shadow_color: [0.0; 4],
-                        shadow_offset: [0.0; 4],
-                        shadow_params: [0.0, 0.0, 0.0, range.alpha],
-                        effects: [0.0; 4],
+                    let st_quad = QuadInstance::solid(
+                        [st.rect[0] * scale_factor, st.rect[1] * scale_factor],
+                        [st.rect[2] * scale_factor, st.rect[3] * scale_factor],
+                        st.color,
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0, 0.0, 0.0, range.alpha],
+                        [0.0; 4],
                         clip_rect,
-                    };
+                    );
                     push_solid_quad(quad_instances, draw_batches, st_quad);
                 }
 
                 for un in &range.underlines {
-                    let un_quad = QuadInstance {
-                        pos: [un.rect[0] * scale_factor, un.rect[1] * scale_factor],
-                        quad_size: [un.rect[2] * scale_factor, un.rect[3] * scale_factor],
-                        color: un.color,
-                        border_radii: [0.0; 4],
-                        border_color: [0.0; 4],
-                        border_widths: [0.0; 4],
-                        shadow_color: [0.0; 4],
-                        shadow_offset: [0.0; 4],
-                        shadow_params: [0.0, 0.0, 0.0, range.alpha],
-                        effects: [0.0; 4],
+                    let un_quad = QuadInstance::solid(
+                        [un.rect[0] * scale_factor, un.rect[1] * scale_factor],
+                        [un.rect[2] * scale_factor, un.rect[3] * scale_factor],
+                        un.color,
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0, 0.0, 0.0, range.alpha],
+                        [0.0; 4],
                         clip_rect,
-                    };
+                    );
                     push_solid_quad(quad_instances, draw_batches, un_quad);
                 }
             }
@@ -1645,19 +1731,19 @@ fn prepare_command_slice<'a, I>(
                         // Top track segment: [track_top .. thumb_y - gap]
                         let top_track_h = (thumb_y - track_top - gap).max(0.0);
                         if top_track_h > 0.5 {
-                            let top_track_quad = QuadInstance {
-                                pos: [thumb_x, track_top],
-                                quad_size: [thumb_w, top_track_h],
-                                color: track_rgba,
+                            let top_track_quad = QuadInstance::solid(
+                                [thumb_x, track_top],
+                                [thumb_w, top_track_h],
+                                track_rgba,
                                 border_radii,
-                                border_color: [0.0; 4],
-                                border_widths: [0.0; 4],
-                                shadow_color: [0.0; 4],
-                                shadow_offset: [0.0; 4],
-                                shadow_params: [0.0, 0.0, 0.0, 1.0],
-                                effects: [0.0; 4],
+                                [0.0; 4],
+                                [0.0; 4],
+                                [0.0; 4],
+                                [0.0; 4],
+                                [0.0, 0.0, 0.0, 1.0],
+                                [0.0; 4],
                                 clip_rect,
-                            };
+                            );
                             push_solid_quad(quad_instances, draw_batches, top_track_quad);
                         }
 
@@ -1665,37 +1751,37 @@ fn prepare_command_slice<'a, I>(
                         let bot_track_y = thumb_y + thumb_h + gap;
                         let bot_track_h = (track_bottom - bot_track_y).max(0.0);
                         if bot_track_h > 0.5 {
-                            let bot_track_quad = QuadInstance {
-                                pos: [thumb_x, bot_track_y],
-                                quad_size: [thumb_w, bot_track_h],
-                                color: track_rgba,
+                            let bot_track_quad = QuadInstance::solid(
+                                [thumb_x, bot_track_y],
+                                [thumb_w, bot_track_h],
+                                track_rgba,
                                 border_radii,
-                                border_color: [0.0; 4],
-                                border_widths: [0.0; 4],
-                                shadow_color: [0.0; 4],
-                                shadow_offset: [0.0; 4],
-                                shadow_params: [0.0, 0.0, 0.0, 1.0],
-                                effects: [0.0; 4],
+                                [0.0; 4],
+                                [0.0; 4],
+                                [0.0; 4],
+                                [0.0; 4],
+                                [0.0, 0.0, 0.0, 1.0],
+                                [0.0; 4],
                                 clip_rect,
-                            };
+                            );
                             push_solid_quad(quad_instances, draw_batches, bot_track_quad);
                         }
                     }
 
                     // Draggable Thumb
-                    let thumb_quad = QuadInstance {
-                        pos: [thumb_x, thumb_y],
-                        quad_size: [thumb_w, thumb_h],
-                        color: scrollbar_style.thumb_color.into(),
+                    let thumb_quad = QuadInstance::solid(
+                        [thumb_x, thumb_y],
+                        [thumb_w, thumb_h],
+                        scrollbar_style.thumb_color.into(),
                         border_radii,
-                        border_color: [0.0; 4],
-                        border_widths: [0.0; 4],
-                        shadow_color: [0.0; 4],
-                        shadow_offset: [0.0; 4],
-                        shadow_params: [0.0, 0.0, 0.0, 1.0],
-                        effects: [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0, 0.0, 0.0, 1.0],
+                        [0.0; 4],
                         clip_rect,
-                    };
+                    );
                     push_solid_quad(quad_instances, draw_batches, thumb_quad);
                 }
             }
@@ -1758,19 +1844,19 @@ fn prepare_command_slice<'a, I>(
                         // Left track segment: [track_left .. thumb_x - gap]
                         let left_track_w = (thumb_x - track_left - gap).max(0.0);
                         if left_track_w > 0.5 {
-                            let left_track_quad = QuadInstance {
-                                pos: [track_left, thumb_y],
-                                quad_size: [left_track_w, thumb_h],
-                                color: track_rgba,
+                            let left_track_quad = QuadInstance::solid(
+                                [track_left, thumb_y],
+                                [left_track_w, thumb_h],
+                                track_rgba,
                                 border_radii,
-                                border_color: [0.0; 4],
-                                border_widths: [0.0; 4],
-                                shadow_color: [0.0; 4],
-                                shadow_offset: [0.0; 4],
-                                shadow_params: [0.0, 0.0, 0.0, 1.0],
-                                effects: [0.0; 4],
+                                [0.0; 4],
+                                [0.0; 4],
+                                [0.0; 4],
+                                [0.0; 4],
+                                [0.0, 0.0, 0.0, 1.0],
+                                [0.0; 4],
                                 clip_rect,
-                            };
+                            );
                             push_solid_quad(quad_instances, draw_batches, left_track_quad);
                         }
 
@@ -1778,37 +1864,37 @@ fn prepare_command_slice<'a, I>(
                         let right_track_x = thumb_x + thumb_w + gap;
                         let right_track_w = (track_right - right_track_x).max(0.0);
                         if right_track_w > 0.5 {
-                            let right_track_quad = QuadInstance {
-                                pos: [right_track_x, thumb_y],
-                                quad_size: [right_track_w, thumb_h],
-                                color: track_rgba,
+                            let right_track_quad = QuadInstance::solid(
+                                [right_track_x, thumb_y],
+                                [right_track_w, thumb_h],
+                                track_rgba,
                                 border_radii,
-                                border_color: [0.0; 4],
-                                border_widths: [0.0; 4],
-                                shadow_color: [0.0; 4],
-                                shadow_offset: [0.0; 4],
-                                shadow_params: [0.0, 0.0, 0.0, 1.0],
-                                effects: [0.0; 4],
+                                [0.0; 4],
+                                [0.0; 4],
+                                [0.0; 4],
+                                [0.0; 4],
+                                [0.0, 0.0, 0.0, 1.0],
+                                [0.0; 4],
                                 clip_rect,
-                            };
+                            );
                             push_solid_quad(quad_instances, draw_batches, right_track_quad);
                         }
                     }
 
                     // Draggable Thumb
-                    let thumb_quad = QuadInstance {
-                        pos: [thumb_x, thumb_y],
-                        quad_size: [thumb_w, thumb_h],
-                        color: scrollbar_style.thumb_color.into(),
+                    let thumb_quad = QuadInstance::solid(
+                        [thumb_x, thumb_y],
+                        [thumb_w, thumb_h],
+                        scrollbar_style.thumb_color.into(),
                         border_radii,
-                        border_color: [0.0; 4],
-                        border_widths: [0.0; 4],
-                        shadow_color: [0.0; 4],
-                        shadow_offset: [0.0; 4],
-                        shadow_params: [0.0, 0.0, 0.0, 1.0],
-                        effects: [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0, 0.0, 0.0, 1.0],
+                        [0.0; 4],
                         clip_rect,
-                    };
+                    );
                     push_solid_quad(quad_instances, draw_batches, thumb_quad);
                 }
             }
@@ -1829,24 +1915,24 @@ fn prepare_debug_highlight(
     if let Some(computed) = highlighted.get_computed(context) {
         let effects = highlighted.get_effects(context).unwrap_or_default();
         let outline_thickness = 2.0 * scale_factor;
-        let highlight_quad = QuadInstance {
-            pos: [computed.x * scale_factor, computed.y * scale_factor],
-            quad_size: [computed.w * scale_factor, computed.h * scale_factor],
-            color: [0.06, 0.72, 0.95, 0.15],
-            border_radii: [
+        let highlight_quad = QuadInstance::solid(
+            [computed.x * scale_factor, computed.y * scale_factor],
+            [computed.w * scale_factor, computed.h * scale_factor],
+            [0.06, 0.72, 0.95, 0.15],
+            [
                 effects.border.radius.tl * scale_factor,
                 effects.border.radius.tr * scale_factor,
                 effects.border.radius.br * scale_factor,
                 effects.border.radius.bl * scale_factor,
             ],
-            border_color: [0.06, 0.72, 0.95, 0.9],
-            border_widths: [outline_thickness; 4],
-            shadow_color: [0.0; 4],
-            shadow_offset: [0.0; 4],
-            shadow_params: [0.0, 0.0, 0.0, 1.0],
-            effects: [0.0; 4],
-            clip_rect: [-1.0, -1.0, -1.0, -1.0],
-        };
+            [0.06, 0.72, 0.95, 0.9],
+            [outline_thickness; 4],
+            [0.0; 4],
+            [0.0; 4],
+            [0.0; 4],
+            [0.0; 4],
+            [-1.0, -1.0, -1.0, -1.0],
+        );
         push_solid_quad(quad_instances, draw_batches, highlight_quad);
     }
 }
@@ -2072,11 +2158,12 @@ mod tests {
                 c.height = Size::Fixed(40);
             });
             child.update_effects(&mut ctx, |e| {
-                e.background_color = if i % 2 == 0 {
+                e.background = if i % 2 == 0 {
                     crate::colors::Color::red
                 } else {
                     crate::colors::Color::blue
-                };
+                }
+                .into();
             });
             root.append(&mut ctx, child);
         }
@@ -2466,7 +2553,7 @@ mod tests {
         node.set_effects(
             &mut ctx,
             crate::effects::Effects {
-                background_color: crate::rgb!(255, 0, 0),
+                background: crate::rgb!(255, 0, 0).into(),
                 box_shadow: crate::BoxShadow::drop(crate::rgba!(0, 0, 0, 100)).blur(10.0),
                 ..Default::default()
             },
@@ -2646,5 +2733,82 @@ mod tests {
             }
             prev_a_pos = visual_a;
         }
+    }
+
+    #[test]
+    fn test_gradient_quad_generation() {
+        use crate::colors::{Color, LinearGradient, RadialGradient};
+        use crate::style::{Size, Style};
+
+        let mut ctx = crate::Context::new();
+        let root = ctx.create_node();
+        ctx.root_attach(root);
+
+        let linear_node = ctx.create_node();
+        let radial_node = ctx.create_node();
+        root.append(&mut ctx, linear_node);
+        root.append(&mut ctx, radial_node);
+
+        let red = Color::new(255, 0, 0, 255);
+        let blue = Color::new(0, 0, 255, 255);
+
+        Style::new()
+            .width(Size::Fixed(100))
+            .height(Size::Fixed(100))
+            .bg_gradient(LinearGradient::vertical(red, blue))
+            .apply_to_node(&mut ctx, linear_node);
+
+        Style::new()
+            .width(Size::Fixed(100))
+            .height(Size::Fixed(100))
+            .bg_gradient(RadialGradient::circle(red, blue))
+            .apply_to_node(&mut ctx, radial_node);
+
+        ctx.compute_layout(800.0, 600.0);
+        ctx.build_render_list(crate::style::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 800.0,
+            h: 600.0,
+        });
+
+        let mut quad_instances = Vec::new();
+        let mut draw_batches = Vec::new();
+        let dummy_text = HashMap::new();
+        let dummy_canvas = HashMap::new();
+        let dummy_images = HashMap::new();
+        let dummy_svgs = HashMap::new();
+
+        prepare_command_slice(
+            ctx.render_list().enumerate(),
+            800,
+            600,
+            &dummy_text,
+            &dummy_canvas,
+            &dummy_images,
+            &dummy_svgs,
+            &ctx,
+            &mut quad_instances,
+            &mut draw_batches,
+        );
+
+        // Find the quads for linear and radial nodes
+        let lin_quad = quad_instances.iter().find(|q| q.gradient_params[0] == 1.0);
+        assert!(lin_quad.is_some(), "Linear gradient quad must be generated");
+        let lq = lin_quad.unwrap();
+        assert_eq!(lq.gradient_params[1], 180.0); // 180 deg (vertical)
+        assert_eq!(lq.color, [1.0, 0.0, 0.0, 1.0]); // red
+        assert_eq!(lq.gradient_color, [0.0, 0.0, 1.0, 1.0]); // blue
+        assert_eq!(lq.gradient_stops[3], 2.0); // 2 stops
+
+        let rad_quad = quad_instances.iter().find(|q| q.gradient_params[0] == 2.0);
+        assert!(rad_quad.is_some(), "Radial gradient quad must be generated");
+        let rq = rad_quad.unwrap();
+        assert_eq!(rq.gradient_params[1], 0.5); // center.x
+        assert_eq!(rq.gradient_params[2], 0.5); // center.y
+        assert_eq!(rq.gradient_params[3], 0.5); // radius
+        assert_eq!(rq.color, [1.0, 0.0, 0.0, 1.0]); // red
+        assert_eq!(rq.gradient_color, [0.0, 0.0, 1.0, 1.0]); // blue
+        assert_eq!(rq.gradient_stops[3], 2.0); // 2 stops
     }
 }

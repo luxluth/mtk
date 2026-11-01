@@ -357,7 +357,7 @@ mod tests {
         assert_eq!(text_style.font_size, 14.0);
 
         let effects = node.get_effects(&ctx).unwrap();
-        assert_eq!(effects.background_color, rgb!(241, 245, 249));
+        assert_eq!(effects.background_color(), rgb!(241, 245, 249));
 
         let _ = View::<()>::handle_event(
             &btn,
@@ -374,7 +374,7 @@ mod tests {
         );
 
         let hover_effects = node.get_effects(&ctx).unwrap();
-        assert_eq!(hover_effects.background_color, rgb!(226, 232, 240));
+        assert_eq!(hover_effects.background_color(), rgb!(226, 232, 240));
 
         let _ = View::<()>::handle_event(
             &btn,
@@ -391,7 +391,7 @@ mod tests {
         );
 
         let unhover_effects = node.get_effects(&ctx).unwrap();
-        assert_eq!(unhover_effects.background_color, rgb!(241, 245, 249));
+        assert_eq!(unhover_effects.background_color(), rgb!(241, 245, 249));
     }
 
     #[test]

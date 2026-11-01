@@ -1,17 +1,16 @@
 use std::marker::PhantomData;
 
-use crate::colors::Color;
 use crate::debugger::SourceLocation;
 use crate::style::{Size, Style};
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
-use crate::{Context, Node, rgb};
+use crate::{Background, Context, Node, rgb};
 
 /// A visual separator line.
 pub struct Divider<Msg> {
     pub(crate) is_vertical: bool,
     pub(crate) thickness: f32,
-    pub(crate) color: Color,
+    pub(crate) background: Background,
     pub(crate) source_loc: Option<SourceLocation>,
     _marker: PhantomData<Msg>,
 }
@@ -22,7 +21,7 @@ pub fn divider<Msg>() -> Divider<Msg> {
     Divider {
         is_vertical: false,
         thickness: 1.0,
-        color: rgb!(226, 232, 240),
+        background: rgb!(226, 232, 240).into(),
         source_loc: Some(SourceLocation::here("Divider")),
         _marker: PhantomData,
     }
@@ -34,7 +33,7 @@ pub fn v_divider<Msg>() -> Divider<Msg> {
     Divider {
         is_vertical: true,
         thickness: 1.0,
-        color: rgb!(226, 232, 240),
+        background: rgb!(226, 232, 240).into(),
         source_loc: Some(SourceLocation::here("Divider")),
         _marker: PhantomData,
     }
@@ -47,9 +46,9 @@ impl<Msg> Divider<Msg> {
         self
     }
 
-    /// Sets custom divider color.
-    pub fn color(mut self, color: Color) -> Self {
-        self.color = color;
+    /// Sets custom divider background.
+    pub fn background(mut self, bg: impl Into<Background>) -> Self {
+        self.background = bg.into();
         self
     }
 }
@@ -68,7 +67,7 @@ impl<State, Msg> View<State> for Divider<Msg> {
             ctx.set_node_source(node, loc);
         }
 
-        let mut style = Style::new().bg_color(self.color);
+        let mut style = Style::new().background(self.background.clone());
         if self.is_vertical {
             style = style
                 .width(Size::Fixed(self.thickness as u32))
@@ -84,9 +83,9 @@ impl<State, Msg> View<State> for Divider<Msg> {
     }
 
     fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
-        if self.color != prev.color {
+        if self.background != prev.background {
             element.node.update_effects(ctx, |e| {
-                e.background_color = self.color;
+                e.background = self.background.clone();
             });
         }
     }

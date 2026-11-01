@@ -1,9 +1,8 @@
-use crate::colors::Color;
 use crate::debugger::SourceLocation;
 use crate::style::{Edges, Size, Style};
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
-use crate::{Context, Node};
+use crate::{Background, Context, Node};
 
 /// A container widget that insets its child by the window's safe area insets (e.g. status bar, camera notch, navigation bar).
 pub struct SafeArea<Child> {
@@ -12,7 +11,7 @@ pub struct SafeArea<Child> {
     pub(crate) bottom: bool,
     pub(crate) left: bool,
     pub(crate) right: bool,
-    pub(crate) bg_color: Option<Color>,
+    pub(crate) background: Option<Background>,
     pub(crate) source_loc: Option<SourceLocation>,
 }
 
@@ -25,7 +24,7 @@ pub fn safe_area<Child>(child: Child) -> SafeArea<Child> {
         bottom: true,
         left: true,
         right: true,
-        bg_color: None,
+        background: None,
         source_loc: Some(SourceLocation::here("SafeArea")),
     }
 }
@@ -55,9 +54,9 @@ impl<Child> SafeArea<Child> {
         self
     }
 
-    /// Sets the background color of the safe area container, filling the entire window including the inset regions.
-    pub fn bg_color(mut self, color: Color) -> Self {
-        self.bg_color = Some(color);
+    /// Sets the background of the safe area container, filling the entire window including the inset regions.
+    pub fn background(mut self, bg: impl Into<Background>) -> Self {
+        self.background = Some(bg.into());
         self
     }
 }
@@ -85,8 +84,8 @@ impl<State, Child: View<State>> View<State> for SafeArea<Child> {
             .height(Size::Percent(1.0))
             .padding(padding);
 
-        if let Some(bg) = self.bg_color {
-            style = style.bg_color(bg);
+        if let Some(bg) = &self.background {
+            style = style.background(bg.clone());
         }
 
         style.apply_to_node(ctx, parent);
@@ -109,10 +108,10 @@ impl<State, Child: View<State>> View<State> for SafeArea<Child> {
             c.padding = padding;
         });
 
-        if self.bg_color != prev.bg_color {
-            if let Some(bg) = self.bg_color {
+        if self.background != prev.background {
+            if let Some(bg) = &self.background {
                 element.0.update_effects(ctx, |e| {
-                    e.background_color = bg;
+                    e.background = bg.clone();
                 });
             }
         }

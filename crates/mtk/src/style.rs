@@ -9,7 +9,7 @@ pub use mtk_layout::{
 
 use crate::animation::Curve;
 use crate::clr;
-use crate::colors::Color;
+use crate::colors::{Background, Color};
 use crate::effects::{BoxShadow, Effects, Filter, Radius};
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
@@ -87,7 +87,7 @@ pub enum TransitionProperty {
     Height,
     Size,
     Gap,
-    BackgroundColor,
+    Background,
     BorderColor,
     CornerRadius,
     Scale,
@@ -122,8 +122,8 @@ impl Transition {
 impl Effects {
     /// Merges non-default visual effects from `other` into `self`.
     pub fn merge(&mut self, other: &Effects) {
-        if other.background_color != Color::transparent {
-            self.background_color = other.background_color;
+        if !other.background.is_transparent() {
+            self.background = other.background.clone();
         }
         if other.border.color != Color::transparent {
             self.border.color = other.border.color;
@@ -611,7 +611,7 @@ impl Style {
             }
 
             if other.flags.contains(StyleFlags::BG_COLOR) {
-                self.base_effects.background_color = other.base_effects.background_color;
+                self.base_effects.background = other.base_effects.background.clone();
             }
             if other.flags.contains(StyleFlags::BORDER_COLOR) {
                 self.base_effects.border.color = other.base_effects.border.color;
@@ -1032,7 +1032,21 @@ impl Style {
     }
 
     pub fn bg_color(mut self, color: Color) -> Self {
-        self.base_effects.background_color = color;
+        self.base_effects.background = Background::Color(color);
+        self.flags.insert(StyleFlags::BG_COLOR);
+        self
+    }
+
+    /// Sets the background to a linear or radial gradient.
+    pub fn bg_gradient(mut self, gradient: impl Into<Background>) -> Self {
+        self.base_effects.background = gradient.into();
+        self.flags.insert(StyleFlags::BG_COLOR);
+        self
+    }
+
+    /// Sets the background fill (solid color or gradient).
+    pub fn background(mut self, bg: impl Into<Background>) -> Self {
+        self.base_effects.background = bg.into();
         self.flags.insert(StyleFlags::BG_COLOR);
         self
     }
@@ -1867,7 +1881,10 @@ pub(crate) mod tests {
         let base = Style::new().bg_color(Color::new(255, 0, 0, 255));
         let override_style = Style::new().bg_color(Color::transparent);
         let merged = base.merge(override_style);
-        assert_eq!(merged.base_effects.background_color, Color::transparent);
+        assert_eq!(
+            merged.base_effects.background,
+            Background::Color(Color::transparent)
+        );
 
         // Explicit font size 16.0 override (previously ignored because 16.0 was default)
         let base = Style::new().font_size(24.0);
@@ -1893,8 +1910,8 @@ pub(crate) mod tests {
 
         assert!(style.interaction.is_some());
         assert_eq!(
-            style.hover().unwrap().base_effects.background_color,
-            Color::new(40, 50, 60, 255)
+            style.hover().unwrap().base_effects.background,
+            Background::Color(Color::new(40, 50, 60, 255))
         );
         assert_eq!(style.active().unwrap().base_effects.scale, 0.95);
         assert_eq!(

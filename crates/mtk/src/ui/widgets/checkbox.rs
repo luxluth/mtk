@@ -325,7 +325,8 @@ where
                 self.style.checked_bg
             } else {
                 self.style.unchecked_bg
-            };
+            }
+            .into();
 
             let box_border = if self.disabled {
                 self.style.disabled_border
@@ -342,7 +343,7 @@ where
             };
 
             element.box_node.update_effects(ctx, |e| {
-                e.background_color = box_bg;
+                e.background = box_bg;
                 e.border.color = box_border;
             });
 

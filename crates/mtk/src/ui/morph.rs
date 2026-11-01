@@ -381,14 +381,14 @@ pub fn apply_morph_step(
                         ctx.morph_suppressed_nodes.insert(flight.target_node);
 
                         let mut clear_s = s_eff.clone();
-                        clear_s.background_color = Color::transparent;
+                        clear_s.background = Color::transparent.into();
                         clear_s.box_shadow = BoxShadow::default();
                         clear_s.additional_shadows.clear();
                         clear_s.border.color = Color::transparent;
                         flight.source_node.set_effects(ctx, clear_s);
 
                         let mut clear_t = t_eff.clone();
-                        clear_t.background_color = Color::transparent;
+                        clear_t.background = Color::transparent.into();
                         clear_t.box_shadow = BoxShadow::default();
                         clear_t.additional_shadows.clear();
                         clear_t.border.color = Color::transparent;
@@ -975,7 +975,7 @@ mod tests {
         assert_eq!(cons.aspect_ratio, 1.0);
 
         let eff = ctx.effects.get(&node).unwrap();
-        assert_eq!(eff.background_color, crate::rgb!(255, 0, 0));
+        assert_eq!(eff.background, crate::rgb!(255, 0, 0).into());
     }
 
     #[test]

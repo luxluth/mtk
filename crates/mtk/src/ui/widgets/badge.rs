@@ -6,12 +6,12 @@ use crate::style::{AlignItems, Edges, JustifyContent, Style, TextStyle};
 use crate::text_property::FontWeight;
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
-use crate::{Context, Node, rgb};
+use crate::{Background, Context, Node, rgb};
 
 /// A compact status indicator or pill badge.
 pub struct Badge<Msg> {
     pub(crate) text: String,
-    pub(crate) bg_color: Color,
+    pub(crate) background: Background,
     pub(crate) text_color: Color,
     pub(crate) source_loc: Option<SourceLocation>,
     _marker: PhantomData<Msg>,
@@ -27,7 +27,7 @@ pub struct Badge<Msg> {
 pub fn badge<Msg>(text: impl Into<String>) -> Badge<Msg> {
     Badge {
         text: text.into(),
-        bg_color: rgb!(241, 245, 249),
+        background: rgb!(241, 245, 249).into(),
         text_color: rgb!(71, 85, 105),
         source_loc: Some(SourceLocation::here("Badge")),
         _marker: PhantomData,
@@ -37,35 +37,35 @@ pub fn badge<Msg>(text: impl Into<String>) -> Badge<Msg> {
 impl<Msg> Badge<Msg> {
     /// Sets the badge to a success green appearance.
     pub fn success(mut self) -> Self {
-        self.bg_color = rgb!(220, 252, 231);
+        self.background = rgb!(220, 252, 231).into();
         self.text_color = rgb!(22, 101, 52);
         self
     }
 
     /// Sets the badge to a warning yellow/orange appearance.
     pub fn warning(mut self) -> Self {
-        self.bg_color = rgb!(254, 243, 199);
+        self.background = rgb!(254, 243, 199).into();
         self.text_color = rgb!(146, 64, 14);
         self
     }
 
     /// Sets the badge to an error red appearance.
     pub fn error(mut self) -> Self {
-        self.bg_color = rgb!(254, 226, 226);
+        self.background = rgb!(254, 226, 226).into();
         self.text_color = rgb!(153, 27, 27);
         self
     }
 
     /// Sets the badge to an informative blue appearance.
     pub fn info(mut self) -> Self {
-        self.bg_color = rgb!(219, 234, 254);
+        self.background = rgb!(219, 234, 254).into();
         self.text_color = rgb!(30, 64, 175);
         self
     }
 
     /// Sets custom background and text colors.
-    pub fn custom(mut self, bg: Color, text: Color) -> Self {
-        self.bg_color = bg;
+    pub fn custom(mut self, bg: impl Into<Background>, text: Color) -> Self {
+        self.background = bg.into();
         self.text_color = text;
         self
     }
@@ -100,7 +100,7 @@ impl<State, Msg> View<State> for Badge<Msg> {
         Style::new()
             .padding(Edges::symmetric(8.0, 3.0))
             .corner_radius(12.0)
-            .bg_color(self.bg_color)
+            .background(self.background.clone())
             .align_items(AlignItems::Center)
             .justify_content(JustifyContent::Center)
             .apply_to_node(ctx, node);
@@ -122,9 +122,9 @@ impl<State, Msg> View<State> for Badge<Msg> {
                 },
             );
         }
-        if self.bg_color != prev.bg_color {
+        if self.background != prev.background {
             element.node.update_effects(ctx, |e| {
-                e.background_color = self.bg_color;
+                e.background = self.background.clone();
             });
         }
     }
@@ -153,7 +153,7 @@ impl<State, Msg> View<State> for Badge<Msg> {
 pub struct Chip<Msg, F = fn() -> Msg> {
     pub(crate) label: String,
     pub(crate) on_delete: Option<F>,
-    pub(crate) bg_color: Color,
+    pub(crate) background: Background,
     pub(crate) text_color: Color,
     pub(crate) source_loc: Option<SourceLocation>,
     _marker: std::marker::PhantomData<Msg>,
@@ -165,7 +165,7 @@ pub fn chip<Msg>(label: impl Into<String>) -> Chip<Msg, fn() -> Msg> {
     Chip {
         label: label.into(),
         on_delete: None,
-        bg_color: rgb!(241, 245, 249),
+        background: rgb!(241, 245, 249).into(),
         text_color: rgb!(30, 41, 59),
         source_loc: Some(SourceLocation::here("Chip")),
         _marker: std::marker::PhantomData,
@@ -178,7 +178,7 @@ impl<Msg, F> Chip<Msg, F> {
         Chip {
             label: self.label,
             on_delete: Some(on_delete),
-            bg_color: self.bg_color,
+            background: self.background,
             text_color: self.text_color,
             source_loc: self.source_loc,
             _marker: std::marker::PhantomData,
@@ -186,8 +186,8 @@ impl<Msg, F> Chip<Msg, F> {
     }
 
     /// Sets custom background color.
-    pub fn bg_color(mut self, color: Color) -> Self {
-        self.bg_color = color;
+    pub fn background(mut self, bg: impl Into<Background>) -> Self {
+        self.background = bg.into();
         self
     }
 
@@ -236,7 +236,7 @@ where
             .padding(Edges::symmetric(10.0, 5.0))
             .gap(6.0)
             .corner_radius(14.0)
-            .bg_color(self.bg_color)
+            .background(self.background.clone())
             .border(1.0, rgb!(203, 213, 225))
             .apply_to_node(ctx, container_node);
 
@@ -295,9 +295,9 @@ where
                 );
             }
         }
-        if self.bg_color != prev.bg_color {
+        if self.background != prev.background {
             element.container_node.update_effects(ctx, |e| {
-                e.background_color = self.bg_color;
+                e.background = self.background.clone();
             });
         }
     }

@@ -23,7 +23,9 @@ use ::winit::window::Window;
 pub use mtk_macro::Lens;
 
 pub use crate::accessibility::{AccessibleInfo, AccessibleView, AccessibleViewExt};
-pub use crate::colors::{Color, ParseColorError};
+pub use crate::colors::{
+    Background, Color, ColorStop, LinearGradient, ParseColorError, RadialGradient,
+};
 pub use crate::command::{Command, IntoCommand};
 pub use crate::debugger::{LayoutSnapshot, NodeDebugInfo, SourceLocation};
 pub use crate::effects::{Border, BoxShadow, Effects, Radius};

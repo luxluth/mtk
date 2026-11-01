@@ -133,7 +133,7 @@ fn main() {
     for _ in 0..ITERS {
         let hover_bg = black_box(&interactive_style)
             .hover()
-            .map(|h| h.base_effects.background_color);
+            .map(|h| h.base_effects.background.clone());
         let active_scale = black_box(&interactive_style)
             .active()
             .map(|a| a.base_effects.scale);

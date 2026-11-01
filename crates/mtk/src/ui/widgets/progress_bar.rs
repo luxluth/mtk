@@ -122,10 +122,10 @@ impl<State, Msg> View<State> for ProgressBar<Msg> {
 
         if self.fill_color != prev.fill_color || self.track_color != prev.track_color {
             element.track_node.update_effects(ctx, |e| {
-                e.background_color = self.track_color;
+                e.background = self.track_color.into();
             });
             element.fill_node.update_effects(ctx, |e| {
-                e.background_color = self.fill_color;
+                e.background = self.fill_color.into();
             });
         }
     }

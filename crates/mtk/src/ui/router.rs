@@ -805,19 +805,19 @@ mod tests {
         let shuttle_eff = ctx.effects.get(&shuttle_node).cloned().unwrap_or_default();
 
         // Inner elements have their background and box shadow suppressed to prevent clipped corner triangles
-        assert_eq!(s_inner_eff.background_color.a, 0);
+        assert_eq!(s_inner_eff.background_color().a, 0);
         assert_eq!(s_inner_eff.box_shadow.blur_radius, 0.0);
-        assert_eq!(t_inner_eff.background_color.a, 0);
+        assert_eq!(t_inner_eff.background_color().a, 0);
         assert_eq!(t_inner_eff.box_shadow.blur_radius, 0.0);
 
         // Shuttle is the active shell rendering the interpolated effects
         assert!(shuttle_eff.box_shadow.blur_radius > 0.0);
-        assert!(shuttle_eff.background_color.a > 0);
+        assert!(shuttle_eff.background_color().a > 0);
 
         // Simulate an intermediate rebuild (e.g. mouse movement or state change) mid-flight
         View::<()>::rebuild(&r2, &r2, &mut ctx, &mut el);
         let t_eff_after_rebuild = ctx.effects.get(&target_node).cloned().unwrap_or_default();
-        assert_eq!(t_eff_after_rebuild.background_color.a, 0);
+        assert_eq!(t_eff_after_rebuild.background_color().a, 0);
         assert_eq!(t_eff_after_rebuild.box_shadow.blur_radius, 0.0);
 
         // End of transition: elapsed 1000ms
@@ -831,7 +831,7 @@ mod tests {
         assert!(!ctx.morph_suppressed_nodes.contains(&source_node));
 
         let settled_eff = ctx.effects.get(&target_node).cloned().unwrap_or_default();
-        assert_eq!(settled_eff.background_color, crate::rgb!(67, 56, 202));
+        assert_eq!(settled_eff.background_color(), crate::rgb!(67, 56, 202));
         assert_eq!(settled_eff.box_shadow.blur_radius, 28.0);
         assert_eq!(settled_eff.border.radius.tl, 26.0);
 

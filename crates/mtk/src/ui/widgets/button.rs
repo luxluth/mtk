@@ -56,6 +56,14 @@ impl<Msg: Clone> Button<Msg> {
         self
     }
 
+    /// Sets a custom background color or gradient for the button.
+    pub fn background(mut self, bg: impl Into<crate::colors::Background>) -> Self {
+        let mut st = self.custom_style.unwrap_or_default();
+        st = st.background(bg);
+        self.custom_style = Some(st);
+        self
+    }
+
     /// Sets the button to a secondary light/neutral style.
     pub fn secondary(mut self) -> Self {
         self.custom_style = Some(
@@ -268,21 +276,22 @@ impl<State, Msg: Clone> View<State> for Button<Msg> {
                         rgb!(37, 99, 235)
                     } else {
                         rgb!(59, 130, 246)
-                    };
+                    }
+                    .into();
                     element.node.update_effects(ctx, |e| {
                         if let Some(custom) = &self.custom_style {
                             if let Some(hover) = custom.hover() {
                                 if element.is_hovered {
                                     if hover.flags.contains(crate::style::StyleFlags::BG_COLOR) {
-                                        e.background_color = hover.base_effects.background_color;
+                                        e.background = hover.base_effects.background.clone();
                                     }
                                 } else if custom.flags.contains(crate::style::StyleFlags::BG_COLOR)
                                 {
-                                    e.background_color = custom.base_effects.background_color;
+                                    e.background = custom.base_effects.background.clone();
                                 }
                             }
                         } else {
-                            e.background_color = default_bg;
+                            e.background = default_bg;
                         }
                     });
                     ctx.request_frame();

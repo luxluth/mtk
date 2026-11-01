@@ -1156,6 +1156,157 @@ pub mod macros {
     }
 }
 
+/// A color stop along a linear or radial gradient ramp.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ColorStop {
+    /// Normalized position along the gradient line from 0.0 to 1.0.
+    pub position: f32,
+    /// Color at this stop position.
+    pub color: Color,
+}
+
+impl ColorStop {
+    /// Creates a new color stop at `position` (clamped between 0.0 and 1.0).
+    pub fn new(position: f32, color: Color) -> Self {
+        Self {
+            position: position.clamp(0.0, 1.0),
+            color,
+        }
+    }
+}
+
+/// A linear color gradient interpolating across a specific angle.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LinearGradient {
+    /// Angle in degrees. 0° = to top, 90° = to right, 180° = to bottom, 270° = to left (matches CSS).
+    pub angle: f32,
+    /// Color stops along the gradient vector.
+    pub stops: Vec<ColorStop>,
+}
+
+impl LinearGradient {
+    /// Creates a linear gradient with a custom angle in degrees and color stops.
+    pub fn new(angle: f32, stops: impl IntoIterator<Item = ColorStop>) -> Self {
+        Self {
+            angle,
+            stops: stops.into_iter().collect(),
+        }
+    }
+
+    /// Creates a vertical linear gradient from top to bottom (180°).
+    pub fn vertical(from: Color, to: Color) -> Self {
+        Self::new(180.0, [ColorStop::new(0.0, from), ColorStop::new(1.0, to)])
+    }
+
+    /// Creates a horizontal linear gradient from left to right (90°).
+    pub fn horizontal(from: Color, to: Color) -> Self {
+        Self::new(90.0, [ColorStop::new(0.0, from), ColorStop::new(1.0, to)])
+    }
+
+    /// Creates an angled linear gradient between two colors.
+    pub fn angled(angle: f32, from: Color, to: Color) -> Self {
+        Self::new(angle, [ColorStop::new(0.0, from), ColorStop::new(1.0, to)])
+    }
+}
+
+/// A radial color gradient radiating outward from a center point.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RadialGradient {
+    /// Normalized center coordinate `(x, y)` where `(0.5, 0.5)` is the center of the element.
+    pub center: (f32, f32),
+    /// Normalized radius where `0.5` extends to the element boundaries from center.
+    pub radius: f32,
+    /// Color stops radiating from center outward.
+    pub stops: Vec<ColorStop>,
+}
+
+impl RadialGradient {
+    /// Creates a radial gradient with custom center, radius, and color stops.
+    pub fn new(
+        center: (f32, f32),
+        radius: f32,
+        stops: impl IntoIterator<Item = ColorStop>,
+    ) -> Self {
+        Self {
+            center,
+            radius,
+            stops: stops.into_iter().collect(),
+        }
+    }
+
+    /// Creates a circular radial gradient radiating from container center `(0.5, 0.5)` with radius `0.5`.
+    pub fn circle(from: Color, to: Color) -> Self {
+        Self::new(
+            (0.5, 0.5),
+            0.5,
+            [ColorStop::new(0.0, from), ColorStop::new(1.0, to)],
+        )
+    }
+}
+
+/// Defines the background fill of a UI element (solid color, linear gradient, or radial gradient).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Background {
+    /// Flat solid color fill.
+    Color(Color),
+    /// Multi-stop linear gradient.
+    Linear(LinearGradient),
+    /// Multi-stop radial gradient.
+    Radial(RadialGradient),
+}
+
+impl Background {
+    /// Returns `true` if the background is completely transparent or empty.
+    pub fn is_transparent(&self) -> bool {
+        match self {
+            Background::Color(c) => c.a == 0,
+            Background::Linear(l) => l.stops.is_empty() || l.stops.iter().all(|s| s.color.a == 0),
+            Background::Radial(r) => r.stops.is_empty() || r.stops.iter().all(|s| s.color.a == 0),
+        }
+    }
+
+    /// Returns the primary color if solid, or the first stop color if a gradient.
+    pub fn primary_color(&self) -> Color {
+        match self {
+            Background::Color(c) => *c,
+            Background::Linear(l) => l
+                .stops
+                .first()
+                .map(|s| s.color)
+                .unwrap_or(Color::transparent),
+            Background::Radial(r) => r
+                .stops
+                .first()
+                .map(|s| s.color)
+                .unwrap_or(Color::transparent),
+        }
+    }
+}
+
+impl Default for Background {
+    fn default() -> Self {
+        Background::Color(Color::transparent)
+    }
+}
+
+impl From<Color> for Background {
+    fn from(c: Color) -> Self {
+        Background::Color(c)
+    }
+}
+
+impl From<LinearGradient> for Background {
+    fn from(g: LinearGradient) -> Self {
+        Background::Linear(g)
+    }
+}
+
+impl From<RadialGradient> for Background {
+    fn from(g: RadialGradient) -> Self {
+        Background::Radial(g)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1219,5 +1370,35 @@ mod tests {
         let navy = Color::Hex(0x0a192fff);
         let navy_text = navy.get_tinted_contrast_text(4.5, 0.12);
         assert!(navy.contrast_ratio(&navy_text) >= 4.5);
+    }
+
+    #[test]
+    fn test_gradient_and_background_primitives() {
+        let red = Color::new(255, 0, 0, 255);
+        let blue = Color::new(0, 0, 255, 255);
+
+        let linear = LinearGradient::vertical(red, blue);
+        assert_eq!(linear.angle, 180.0);
+        assert_eq!(linear.stops.len(), 2);
+        assert_eq!(linear.stops[0].position, 0.0);
+        assert_eq!(linear.stops[0].color, red);
+        assert_eq!(linear.stops[1].position, 1.0);
+        assert_eq!(linear.stops[1].color, blue);
+
+        let radial = RadialGradient::circle(red, blue);
+        assert_eq!(radial.center, (0.5, 0.5));
+        assert_eq!(radial.radius, 0.5);
+        assert_eq!(radial.stops.len(), 2);
+
+        let bg_solid = Background::Color(red);
+        assert!(!bg_solid.is_transparent());
+        assert_eq!(bg_solid.primary_color(), red);
+
+        let bg_trans = Background::Color(Color::transparent);
+        assert!(bg_trans.is_transparent());
+
+        let bg_lin: Background = linear.into();
+        assert!(!bg_lin.is_transparent());
+        assert_eq!(bg_lin.primary_color(), red);
     }
 }

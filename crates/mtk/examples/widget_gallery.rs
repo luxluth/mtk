@@ -9,7 +9,7 @@ use mtk::ui::widgets::{
 };
 use mtk::ui::{View, ViewLayerExt, ViewStyleExt};
 use mtk::windowing::{Window, WindowAttributes, WindowDimension};
-use mtk::{BoxShadow, Lens, TooltipAnimation, TooltipPlacement, clr, rgb, rgba};
+use mtk::{BoxShadow, Lens, LinearGradient, TooltipAnimation, TooltipPlacement, clr, rgb, rgba};
 
 #[derive(Clone, Debug, Lens)]
 pub struct GalleryState {
@@ -233,6 +233,13 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
                 .placement(TooltipPlacement::Bottom)
                 .animation(TooltipAnimation::FadeAndScale)
                 .delay_ms(500),
+            button("Gradient Flow")
+                .background(LinearGradient::horizontal(
+                    rgb!(99, 102, 241),
+                    rgb!(236, 72, 153),
+                ))
+                .tooltip("Linear gradient background")
+                .placement(TooltipPlacement::Bottom),
             button("Disabled")
                 .disabled(true)
                 .tooltip("Action is disabled"),
@@ -296,7 +303,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
                 .tooltip("Opens centered modal with backdrop scrim"),
         ))
         .style(Style::new().width(Size::Fill).gap(10.0).wrap()),
-        divider().color(border_card),
+        divider().background(border_card),
         column((
             text("Select Component Preset:").style(Style::new().set_text_style(TextStyle {
                 font_size: 13.0,
@@ -305,7 +312,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
                 ..Default::default()
             })),
             dropdown(Some(state.selected_framework), framework_options)
-                .bg_color(if dark { rgb!(15, 23, 42) } else { clr!(white) })
+                .background(if dark { rgb!(15, 23, 42) } else { clr!(white) })
                 .text_color(text_primary)
                 .border_color(border_card)
                 .on_select(GalleryMsg::SelectFramework),
@@ -360,7 +367,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
                 .on_toggle(GalleryMsg::ToggleAutoSave),
         ))
         .style(Style::new().gap(24.0).wrap()),
-        divider().color(border_card),
+        divider().background(border_card),
         column((
             text("Frame Rate & Sync Profile:").style(Style::new().set_text_style(TextStyle {
                 font_size: 13.0,
@@ -465,7 +472,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
         .map(|t| {
             let t_clone = t.clone();
             chip(t)
-                .bg_color(if dark {
+                .background(if dark {
                     rgb!(15, 23, 42)
                 } else {
                     rgb!(241, 245, 249)
@@ -505,7 +512,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
             badge("Degraded Mode").error(),
         ))
         .style(Style::new().gap(8.0).wrap()),
-        divider().color(border_card),
+        divider().background(border_card),
         row(tag_views).style(
             Style::new()
                 .width(Size::Percent(1.0))
@@ -761,7 +768,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
                 .width(Size::Percent(1.0))
                 .align_items(AlignItems::Center),
         ),
-        divider().color(border_card),
+        divider().background(border_card),
         spacer(),
         column((
             // Album art representation
@@ -854,7 +861,7 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
                 wrap: true,
                 ..Default::default()
             })),
-        divider().color(border_card),
+        divider().background(border_card),
         row((
             button("Cancel")
                 .secondary()

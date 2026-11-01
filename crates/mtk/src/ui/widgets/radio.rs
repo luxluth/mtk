@@ -8,7 +8,7 @@ use crate::style::{AlignItems, FlexDirection, JustifyContent, Size, Style, TextS
 use crate::text_property::FontWeight;
 use crate::ui::event::EventResult;
 use crate::ui::{Event, View};
-use crate::{AccessibleInfo, Context, Node, clr, rgb};
+use crate::{AccessibleInfo, Background, Context, Node, clr, rgb};
 
 /// Visual styling configuration for a [`Radio`] widget.
 #[derive(Clone, Debug, PartialEq)]
@@ -16,7 +16,7 @@ pub struct RadioStyle {
     pub selected_border: Color,
     pub unselected_border: Color,
     pub selected_dot: Color,
-    pub circle_bg: Color,
+    pub circle_bg: Background,
     pub disabled_border: Color,
     pub disabled_dot: Color,
     pub label_style: Option<TextStyle>,
@@ -29,7 +29,7 @@ impl Default for RadioStyle {
             selected_border: rgb!(37, 99, 235),
             unselected_border: rgb!(148, 163, 184),
             selected_dot: rgb!(37, 99, 235),
-            circle_bg: clr!(white),
+            circle_bg: clr!(white).into(),
             disabled_border: rgb!(203, 213, 225),
             disabled_dot: rgb!(203, 213, 225),
             label_style: None,
@@ -69,8 +69,8 @@ impl RadioStyle {
         self
     }
 
-    pub fn circle_bg(mut self, color: Color) -> Self {
-        self.circle_bg = color;
+    pub fn circle_bg(mut self, bg: impl Into<Background>) -> Self {
+        self.circle_bg = bg.into();
         self
     }
 
@@ -225,9 +225,9 @@ where
         };
 
         let circle_bg = if self.disabled {
-            self.style.disabled_border
+            self.style.disabled_border.into()
         } else {
-            self.style.circle_bg
+            self.style.circle_bg.clone()
         };
 
         Style::new()
@@ -241,7 +241,7 @@ where
             .height(Size::Fixed(20))
             .corner_radius(10.0)
             .border(2.0, border_color)
-            .bg_color(circle_bg)
+            .background(circle_bg)
             .align_items(AlignItems::Center)
             .justify_content(JustifyContent::Center)
             .transition_all(120.0, Curve::ease_out())
@@ -321,14 +321,14 @@ where
             };
 
             let circle_bg = if self.disabled {
-                self.style.disabled_border
+                self.style.disabled_border.into()
             } else {
-                self.style.circle_bg
+                self.style.circle_bg.clone()
             };
 
             element.outer_circle.update_effects(ctx, |e| {
                 e.border.color = border_color;
-                e.background_color = circle_bg;
+                e.background = circle_bg;
             });
 
             let dot_size = if self.is_selected { 10 } else { 0 };
@@ -337,7 +337,7 @@ where
                 c.height = Size::Fixed(dot_size);
             });
             element.inner_dot.update_effects(ctx, |e| {
-                e.background_color = dot_color;
+                e.background = dot_color.into();
             });
         }
 

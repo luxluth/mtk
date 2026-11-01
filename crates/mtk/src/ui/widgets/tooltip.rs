@@ -663,7 +663,7 @@ mod tests {
         let resolved = t.resolve_style();
 
         // Overridden properties
-        assert_eq!(resolved.base_effects.background_color, rgb!(255, 0, 0));
+        assert_eq!(resolved.base_effects.background_color(), rgb!(255, 0, 0));
         assert_eq!(resolved.base_effects.border.radius.tl, 8.0);
 
         // Preserved defaults
@@ -680,7 +680,7 @@ mod tests {
         let t = tooltip(button::<_, ()>("Action"), "Hint").override_style(overhaul);
         let resolved = t.resolve_style();
 
-        assert_eq!(resolved.base_effects.background_color, clr!(black));
+        assert_eq!(resolved.base_effects.background_color(), clr!(black));
         assert_eq!(resolved.base_constraints.padding.left, 16.0);
         assert_eq!(resolved.base_constraints.z_index, 0);
         assert_eq!(resolved.base_constraints.border.top, 0.0);
