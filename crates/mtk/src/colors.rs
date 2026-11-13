@@ -1207,6 +1207,39 @@ impl LinearGradient {
     pub fn angled(angle: f32, from: Color, to: Color) -> Self {
         Self::new(angle, [ColorStop::new(0.0, from), ColorStop::new(1.0, to)])
     }
+
+    /// Evaluates the interpolated color at normalized position `t` (0.0 to 1.0).
+    pub fn sample_at(&self, t: f32) -> Color {
+        if self.stops.is_empty() {
+            return Color::transparent;
+        }
+        if self.stops.len() == 1 || t <= self.stops[0].position {
+            return self.stops[0].color;
+        }
+        if t >= self.stops.last().unwrap().position {
+            return self.stops.last().unwrap().color;
+        }
+        for i in 0..self.stops.len() - 1 {
+            let s0 = &self.stops[i];
+            let s1 = &self.stops[i + 1];
+            if t >= s0.position && t <= s1.position {
+                let range = (s1.position - s0.position).max(1e-4);
+                let factor = ((t - s0.position) / range).clamp(0.0, 1.0);
+                return s0.color.lerp(&s1.color, factor as f64);
+            }
+        }
+        self.stops.last().unwrap().color
+    }
+
+    /// Evaluates the gradient color at normalized UV coordinate `(u, v)` where `(0, 0)` is top-left and `(1, 1)` is bottom-right.
+    pub fn sample_uv(&self, uv: (f32, f32)) -> Color {
+        let rad = self.angle.to_radians();
+        let dir = (rad.sin(), -rad.cos());
+        let half_extent = (0.5 * (dir.0.abs() + dir.1.abs())).max(0.0001);
+        let t = (((uv.0 - 0.5) * dir.0 + (uv.1 - 0.5) * dir.1) / (2.0 * half_extent) + 0.5)
+            .clamp(0.0, 1.0);
+        self.sample_at(t)
+    }
 }
 
 /// A radial color gradient radiating outward from a center point.
@@ -1241,6 +1274,38 @@ impl RadialGradient {
             0.5,
             [ColorStop::new(0.0, from), ColorStop::new(1.0, to)],
         )
+    }
+
+    /// Evaluates the interpolated color at normalized distance `t` (0.0 to 1.0).
+    pub fn sample_at(&self, t: f32) -> Color {
+        if self.stops.is_empty() {
+            return Color::transparent;
+        }
+        if self.stops.len() == 1 || t <= self.stops[0].position {
+            return self.stops[0].color;
+        }
+        if t >= self.stops.last().unwrap().position {
+            return self.stops.last().unwrap().color;
+        }
+        for i in 0..self.stops.len() - 1 {
+            let s0 = &self.stops[i];
+            let s1 = &self.stops[i + 1];
+            if t >= s0.position && t <= s1.position {
+                let range = (s1.position - s0.position).max(1e-4);
+                let factor = ((t - s0.position) / range).clamp(0.0, 1.0);
+                return s0.color.lerp(&s1.color, factor as f64);
+            }
+        }
+        self.stops.last().unwrap().color
+    }
+
+    /// Evaluates the radial gradient color at normalized UV coordinate `(u, v)`.
+    pub fn sample_uv(&self, uv: (f32, f32)) -> Color {
+        let dx = uv.0 - self.center.0;
+        let dy = uv.1 - self.center.1;
+        let dist = (dx * dx + dy * dy).sqrt();
+        let t = (dist / self.radius.max(0.0001)).clamp(0.0, 1.0);
+        self.sample_at(t)
     }
 }
 
@@ -1279,6 +1344,15 @@ impl Background {
                 .first()
                 .map(|s| s.color)
                 .unwrap_or(Color::transparent),
+        }
+    }
+
+    /// Evaluates the background color at normalized coordinate `(u, v)` (0.0 to 1.0).
+    pub fn sample_uv(&self, uv: (f32, f32)) -> Color {
+        match self {
+            Background::Color(c) => *c,
+            Background::Linear(lin) => lin.sample_uv(uv),
+            Background::Radial(rad) => rad.sample_uv(uv),
         }
     }
 }
@@ -1400,5 +1474,16 @@ mod tests {
         let bg_lin: Background = linear.into();
         assert!(!bg_lin.is_transparent());
         assert_eq!(bg_lin.primary_color(), red);
+
+        // Test gradient sampling
+        let mid = bg_lin.sample_uv((0.5, 0.5));
+        assert_eq!(mid.r, 128);
+        assert_eq!(mid.b, 128);
+
+        let top = bg_lin.sample_uv((0.5, 0.0));
+        assert_eq!(top, red);
+
+        let bottom = bg_lin.sample_uv((0.5, 1.0));
+        assert_eq!(bottom, blue);
     }
 }

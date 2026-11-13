@@ -357,6 +357,11 @@ impl Animatable for Effects {
         let t_f = t as f32;
         Effects {
             background: Background::interpolate(&start.background, &end.background, t),
+            background_clip: if t >= 0.5 {
+                end.background_clip
+            } else {
+                start.background_clip
+            },
             border: crate::effects::Border {
                 color: Color::interpolate(&start.border.color, &end.border.color, t),
                 radius: Radius::interpolate(&start.border.radius, &end.border.radius, t),

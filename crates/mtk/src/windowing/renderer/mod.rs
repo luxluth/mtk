@@ -1250,6 +1250,20 @@ fn prepare_command_slice<'a, I>(
                 constraints.border.left * total_scale * scale_factor,
             ];
 
+            let padding_widths = [
+                constraints.padding.top * total_scale * scale_factor,
+                constraints.padding.right * total_scale * scale_factor,
+                constraints.padding.bottom * total_scale * scale_factor,
+                constraints.padding.left * total_scale * scale_factor,
+            ];
+
+            let bg_clip_val = match effects.background_clip {
+                crate::effects::BackgroundClip::BorderBox => 0.0,
+                crate::effects::BackgroundClip::PaddingBox => 1.0,
+                crate::effects::BackgroundClip::ContentBox => 2.0,
+                crate::effects::BackgroundClip::Text => 3.0,
+            };
+
             let mut vibrancy = 0.0;
             let mut passes = 0.0;
             for f in &effects.filters {
@@ -1505,12 +1519,13 @@ fn prepare_command_slice<'a, I>(
                     shadow_color: prim_color,
                     shadow_offset: prim_offset,
                     shadow_params: prim_params,
-                    effects: [vibrancy, 0.0, passes, 0.0],
+                    effects: [vibrancy, 0.0, passes, bg_clip_val],
                     clip_rect,
                     gradient_color: grad_color,
                     gradient_color2: grad_color2,
                     gradient_params: grad_params,
                     gradient_stops: grad_stops,
+                    padding_widths,
                 };
                 push_solid_quad(quad_instances, draw_batches, quad);
             }
@@ -2810,5 +2825,117 @@ mod tests {
         assert_eq!(rq.color, [1.0, 0.0, 0.0, 1.0]); // red
         assert_eq!(rq.gradient_color, [0.0, 0.0, 1.0, 1.0]); // blue
         assert_eq!(rq.gradient_stops[3], 2.0); // 2 stops
+    }
+
+    #[test]
+    fn test_background_clip_quad_generation() {
+        use crate::colors::Color;
+        use crate::effects::BackgroundClip;
+        use crate::style::{Edges, Size, Style};
+
+        let mut ctx = crate::Context::new();
+        let root = ctx.create_node();
+        ctx.root_attach(root);
+
+        let border_box_node = ctx.create_node();
+        let padding_box_node = ctx.create_node();
+        let content_box_node = ctx.create_node();
+        let text_box_node = ctx.create_node();
+
+        root.append(&mut ctx, border_box_node);
+        root.append(&mut ctx, padding_box_node);
+        root.append(&mut ctx, content_box_node);
+        root.append(&mut ctx, text_box_node);
+
+        Style::new()
+            .width(Size::Fixed(100))
+            .height(Size::Fixed(100))
+            .padding(Edges::all(8.0))
+            .border(2.0, Color::new(255, 255, 255, 128))
+            .bg_color(Color::new(255, 0, 0, 255))
+            .bg_clip(BackgroundClip::BorderBox)
+            .apply_to_node(&mut ctx, border_box_node);
+
+        Style::new()
+            .width(Size::Fixed(100))
+            .height(Size::Fixed(100))
+            .padding(Edges::all(8.0))
+            .border(2.0, Color::new(255, 255, 255, 128))
+            .bg_color(Color::new(0, 255, 0, 255))
+            .bg_clip(BackgroundClip::PaddingBox)
+            .apply_to_node(&mut ctx, padding_box_node);
+
+        Style::new()
+            .width(Size::Fixed(100))
+            .height(Size::Fixed(100))
+            .padding(Edges::symmetric(12.0, 16.0))
+            .border(4.0, Color::new(255, 255, 255, 128))
+            .bg_color(Color::new(0, 0, 255, 255))
+            .bg_clip(BackgroundClip::ContentBox)
+            .apply_to_node(&mut ctx, content_box_node);
+
+        Style::new()
+            .width(Size::Fixed(100))
+            .height(Size::Fixed(100))
+            .bg_gradient(crate::colors::LinearGradient::horizontal(
+                Color::new(30, 144, 255, 255),
+                Color::new(0, 128, 0, 255),
+            ))
+            .bg_clip(BackgroundClip::Text)
+            .apply_to_node(&mut ctx, text_box_node);
+
+        ctx.compute_layout(800.0, 600.0);
+        ctx.build_render_list(crate::style::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 800.0,
+            h: 600.0,
+        });
+
+        let mut quad_instances = Vec::new();
+        let mut draw_batches = Vec::new();
+        let dummy_text = HashMap::new();
+        let dummy_canvas = HashMap::new();
+        let dummy_images = HashMap::new();
+        let dummy_svgs = HashMap::new();
+
+        prepare_command_slice(
+            ctx.render_list().enumerate(),
+            800,
+            600,
+            &dummy_text,
+            &dummy_canvas,
+            &dummy_images,
+            &dummy_svgs,
+            &ctx,
+            &mut quad_instances,
+            &mut draw_batches,
+        );
+
+        let bb_quad = quad_instances
+            .iter()
+            .find(|q| q.color == [1.0, 0.0, 0.0, 1.0])
+            .expect("BorderBox quad");
+        assert_eq!(bb_quad.effects[3], 0.0); // 0.0 = BorderBox
+        assert_eq!(bb_quad.padding_widths, [8.0, 8.0, 8.0, 8.0]);
+
+        let pb_quad = quad_instances
+            .iter()
+            .find(|q| q.color == [0.0, 1.0, 0.0, 1.0])
+            .expect("PaddingBox quad");
+        assert_eq!(pb_quad.effects[3], 1.0); // 1.0 = PaddingBox
+
+        let cb_quad = quad_instances
+            .iter()
+            .find(|q| q.color == [0.0, 0.0, 1.0, 1.0])
+            .expect("ContentBox quad");
+        assert_eq!(cb_quad.effects[3], 2.0); // 2.0 = ContentBox
+        assert_eq!(cb_quad.padding_widths, [16.0, 12.0, 16.0, 12.0]);
+
+        let tb_quad = quad_instances
+            .iter()
+            .find(|q| q.gradient_params[0] == 1.0 && q.effects[3] == 3.0)
+            .expect("Text clip quad");
+        assert_eq!(tb_quad.effects[3], 3.0); // 3.0 = Text
     }
 }

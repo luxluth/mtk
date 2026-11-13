@@ -10,7 +10,7 @@ pub use mtk_layout::{
 use crate::animation::Curve;
 use crate::clr;
 use crate::colors::{Background, Color};
-use crate::effects::{BoxShadow, Effects, Filter, Radius};
+pub use crate::effects::{BackgroundClip, BoxShadow, Effects, Filter, Radius};
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub enum LineHeight {
@@ -96,6 +96,7 @@ pub enum TransitionProperty {
     TextColor,
     FontSize,
     Scrollbar,
+    BackgroundClip,
 }
 
 /// Backwards compatibility alias for [`TransitionProperty`].
@@ -124,6 +125,9 @@ impl Effects {
     pub fn merge(&mut self, other: &Effects) {
         if !other.background.is_transparent() {
             self.background = other.background.clone();
+        }
+        if other.background_clip != BackgroundClip::BorderBox {
+            self.background_clip = other.background_clip;
         }
         if other.border.color != Color::transparent {
             self.border.color = other.border.color;
@@ -430,6 +434,7 @@ impl StyleFlags {
 
     pub const SCROLLBAR: Self = Self(1 << 42);
     pub const UNCLIPPED: Self = Self(1 << 43);
+    pub const BG_CLIP: Self = Self(1 << 44);
 
     #[inline]
     pub const fn is_empty(self) -> bool {
@@ -612,6 +617,9 @@ impl Style {
 
             if other.flags.contains(StyleFlags::BG_COLOR) {
                 self.base_effects.background = other.base_effects.background.clone();
+            }
+            if other.flags.contains(StyleFlags::BG_CLIP) {
+                self.base_effects.background_clip = other.base_effects.background_clip;
             }
             if other.flags.contains(StyleFlags::BORDER_COLOR) {
                 self.base_effects.border.color = other.base_effects.border.color;
@@ -1049,6 +1057,18 @@ impl Style {
         self.base_effects.background = bg.into();
         self.flags.insert(StyleFlags::BG_COLOR);
         self
+    }
+
+    /// Sets the background clipping boundary (`BorderBox`, `PaddingBox`, or `ContentBox`).
+    pub fn bg_clip(mut self, clip: BackgroundClip) -> Self {
+        self.base_effects.background_clip = clip;
+        self.flags.insert(StyleFlags::BG_CLIP);
+        self
+    }
+
+    /// Sets the background clipping boundary (`BorderBox`, `PaddingBox`, or `ContentBox`).
+    pub fn background_clip(self, clip: BackgroundClip) -> Self {
+        self.bg_clip(clip)
     }
 
     pub fn scale(mut self, s: f32) -> Self {

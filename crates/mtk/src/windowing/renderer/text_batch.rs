@@ -182,6 +182,19 @@ impl TextBatch {
 
                 let total_scale = super::compute_effective_scale(context, node);
 
+                let mut curr = Some(node);
+                let mut text_effects = None;
+                while let Some(n) = curr {
+                    if let Some(eff) = context.effects.get(&n) {
+                        if eff.background_clip == crate::effects::BackgroundClip::Text {
+                            text_effects = Some(eff.clone());
+                            break;
+                        }
+                    }
+                    curr = n.parent(context);
+                }
+                let is_bg_clip_text = text_effects.is_some();
+
                 // 1. Glyphs extraction
                 for line in layout.lines() {
                     for item in line.items() {
@@ -270,6 +283,23 @@ impl TextBatch {
 
                                 let mut color: [f32; 4] = if info.is_color {
                                     [1.0, 1.0, 1.0, brush.a as f32 / 255.0]
+                                } else if is_bg_clip_text {
+                                    let uv_x = if actual_text_width > 0.0 {
+                                        (glyph.x / actual_text_width).clamp(0.0, 1.0)
+                                    } else {
+                                        0.5
+                                    };
+                                    let uv_y = if actual_text_height > 0.0 {
+                                        (glyph.y / actual_text_height).clamp(0.0, 1.0)
+                                    } else {
+                                        0.5
+                                    };
+                                    text_effects
+                                        .as_ref()
+                                        .unwrap()
+                                        .background
+                                        .sample_uv((uv_x, uv_y))
+                                        .into()
                                 } else {
                                     brush.into()
                                 };

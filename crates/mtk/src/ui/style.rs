@@ -302,6 +302,9 @@ fn property_changed(prop: TransitionProperty, a: &Style, b: &Style) -> bool {
             (a.base_text_style.font_size - b.base_text_style.font_size).abs() > 1e-4
         }
         TransitionProperty::Scrollbar => a.scrollbar != b.scrollbar,
+        TransitionProperty::BackgroundClip => {
+            a.base_effects.background_clip != b.base_effects.background_clip
+        }
     }
 }
 

@@ -23,6 +23,7 @@ struct VertexInput {
     @location(12) gradient_color2: vec4<f32>,
     @location(13) gradient_params: vec4<f32>,
     @location(14) gradient_stops: vec4<f32>,
+    @location(15) padding_widths: vec4<f32>,
 }
 
 struct VertexOutput {
@@ -42,6 +43,7 @@ struct VertexOutput {
     @location(12) fragGradientColor2: vec4<f32>,
     @location(13) fragGradientParams: vec4<f32>,
     @location(14) fragGradientStops: vec4<f32>,
+    @location(15) fragPaddingWidths: vec4<f32>,
 }
 
 @vertex
@@ -98,6 +100,7 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     out.fragGradientColor2 = in.gradient_color2;
     out.fragGradientParams = in.gradient_params;
     out.fragGradientStops = in.gradient_stops;
+    out.fragPaddingWidths = in.padding_widths;
     return out;
 }
 
@@ -183,36 +186,61 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         base_color = vec4<f32>(tinted_rgb, 1.0);
     }
 
-    var boxColor = base_color;
-
     let border_widths = in.fragBorderWidths;
     let has_border = border_widths.x > 0.0 || border_widths.y > 0.0 || border_widths.z > 0.0 || border_widths.w > 0.0;
+    let bg_clip = in.fragEffects.w;
+
+    var inner_alpha = outer_alpha;
     if has_border {
         let inner_b = b - vec2<f32>(border_widths.w + border_widths.y, border_widths.x + border_widths.z) * 0.5;
         let inner_offset = vec2<f32>(border_widths.w - border_widths.y, border_widths.x - border_widths.z) * 0.5;
 
         let p_inner = p - inner_offset;
-        let min_border = min(min(border_widths.x, border_widths.y), min(border_widths.z, border_widths.w));
-        let inner_radii = max(vec4<f32>(0.0), in.fragBorderRadii - vec4<f32>(min_border));
-        let inner_dist = sdRoundedBox(p_inner, inner_b, inner_radii);
+        let inner_radii = max(vec4<f32>(0.0), in.fragBorderRadii - vec4<f32>(
+            max(border_widths.x, border_widths.w),
+            max(border_widths.x, border_widths.y),
+            max(border_widths.z, border_widths.y),
+            max(border_widths.z, border_widths.w)
+        ));
+        let inner_dist = sdRoundedBox(p_inner, max(vec2<f32>(0.0), inner_b), inner_radii);
+        inner_alpha = clamp(1.0 - smoothstep(-0.75, 0.75, inner_dist), 0.0, 1.0);
+    }
 
-        let inner_alpha = clamp(1.0 - smoothstep(-0.75, 0.75, inner_dist), 0.0, 1.0);
+    var bg_coverage = outer_alpha;
+    if bg_clip > 0.5 && bg_clip < 1.5 {
+        // PaddingBox (clip == 1.0)
+        bg_coverage = min(inner_alpha, outer_alpha);
+    } else if bg_clip >= 1.5 && bg_clip < 2.5 {
+        // ContentBox (clip == 2.0)
+        let insets = border_widths + in.fragPaddingWidths;
+        let content_b = b - vec2<f32>(insets.w + insets.y, insets.x + insets.z) * 0.5;
+        let content_offset = vec2<f32>(insets.w - insets.y, insets.x - insets.z) * 0.5;
 
-        let c1 = min(inner_alpha, outer_alpha);
-        let c2 = max(0.0, outer_alpha - inner_alpha);
+        let p_content = p - content_offset;
+        let content_radii = max(vec4<f32>(0.0), in.fragBorderRadii - vec4<f32>(
+            max(insets.x, insets.w),
+            max(insets.x, insets.y),
+            max(insets.z, insets.y),
+            max(insets.z, insets.w)
+        ));
+        let content_dist = sdRoundedBox(p_content, max(vec2<f32>(0.0), content_b), content_radii);
+        let content_alpha = clamp(1.0 - smoothstep(-0.75, 0.75, content_dist), 0.0, 1.0);
+        bg_coverage = min(content_alpha, outer_alpha);
+    } else if bg_clip >= 2.5 {
+        // Text (clip == 3.0): background is clipped to text glyphs, suppress container quad fill
+        bg_coverage = 0.0;
+    }
 
-        let bg_a = base_color.a * c1;
-        let bd_a = in.fragBorderColor.a * c2;
-        let total_a = bg_a + bd_a;
+    let border_mask = select(0.0, clamp(outer_alpha - inner_alpha, 0.0, 1.0), has_border);
 
-        if total_a > 0.0 {
-            let rgb = (base_color.rgb * bg_a + in.fragBorderColor.rgb * bd_a) / total_a;
-            boxColor = vec4<f32>(rgb, total_a);
-        } else {
-            boxColor = vec4<f32>(0.0, 0.0, 0.0, 0.0);
-        }
-    } else {
-        boxColor.a = boxColor.a * outer_alpha;
+    let bg_layer_a = base_color.a * bg_coverage;
+    let border_layer_a = in.fragBorderColor.a * border_mask;
+
+    let out_a = border_layer_a + bg_layer_a * (1.0 - border_layer_a);
+    var boxColor = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    if out_a > 0.0001 {
+        let out_rgb = (in.fragBorderColor.rgb * border_layer_a + base_color.rgb * bg_layer_a * (1.0 - border_layer_a)) / out_a;
+        boxColor = vec4<f32>(out_rgb, out_a);
     }
 
     let offset = in.fragShadowOffset.xy;
@@ -229,8 +257,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             let inner_b = b - vec2<f32>(border_widths.w + border_widths.y, border_widths.x + border_widths.z) * 0.5;
             let inner_offset = vec2<f32>(border_widths.w - border_widths.y, border_widths.x - border_widths.z) * 0.5;
             let p_inner = p - inner_offset;
-            let min_border = min(min(border_widths.x, border_widths.y), min(border_widths.z, border_widths.w));
-            let inner_radii = max(vec4<f32>(0.0), in.fragBorderRadii - vec4<f32>(min_border));
+            let inner_radii = max(vec4<f32>(0.0), in.fragBorderRadii - vec4<f32>(
+                max(border_widths.x, border_widths.w),
+                max(border_widths.x, border_widths.y),
+                max(border_widths.z, border_widths.y),
+                max(border_widths.z, border_widths.w)
+            ));
 
             let p_shadow = p_inner - offset;
             let dist_inner = sdRoundedBox(p_shadow, inner_b, inner_radii);

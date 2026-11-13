@@ -9,7 +9,10 @@ use mtk::ui::widgets::{
 };
 use mtk::ui::{View, ViewLayerExt, ViewStyleExt};
 use mtk::windowing::{Window, WindowAttributes, WindowDimension};
-use mtk::{BoxShadow, Lens, LinearGradient, TooltipAnimation, TooltipPlacement, clr, rgb, rgba};
+use mtk::{
+    BackgroundClip, BoxShadow, Lens, LinearGradient, TooltipAnimation, TooltipPlacement, clr, rgb,
+    rgba,
+};
 
 #[derive(Clone, Debug, Lens)]
 pub struct GalleryState {
@@ -261,6 +264,77 @@ fn app(state: &GalleryState) -> impl View<GalleryState, Message = GalleryMsg> + 
             },
             ..Default::default()
         })),
+        divider().background(border_card),
+        column((
+            text("Background Clipping Modes:").style(Style::new().set_text_style(TextStyle {
+                font_size: 13.0,
+                font_weight: FontWeight::MEDIUM,
+                color: text_secondary,
+                ..Default::default()
+            })),
+            row((
+                row((
+                    text("BorderBox").style(Style::new().set_text_style(TextStyle {
+                        font_size: 12.0,
+                        font_weight: FontWeight::SEMI_BOLD,
+                        color: clr!(white),
+                        ..Default::default()
+                    })),
+                ))
+                .style(
+                    Style::new()
+                        .padding(Edges::symmetric(14.0, 8.0))
+                        .corner_radius(8.0)
+                        .border(4.0, rgba!(255, 255, 255, 120))
+                        .bg_color(rgb!(99, 102, 241))
+                        .bg_clip(BackgroundClip::BorderBox),
+                ),
+                row((
+                    text("PaddingBox").style(Style::new().set_text_style(TextStyle {
+                        font_size: 12.0,
+                        font_weight: FontWeight::SEMI_BOLD,
+                        color: clr!(white),
+                        ..Default::default()
+                    })),
+                ))
+                .style(
+                    Style::new()
+                        .padding(Edges::symmetric(14.0, 8.0))
+                        .corner_radius(8.0)
+                        .border(4.0, rgba!(255, 255, 255, 120))
+                        .bg_color(rgb!(99, 102, 241))
+                        .bg_clip(BackgroundClip::PaddingBox),
+                ),
+                row((
+                    text("ContentBox").style(Style::new().set_text_style(TextStyle {
+                        font_size: 12.0,
+                        font_weight: FontWeight::SEMI_BOLD,
+                        color: clr!(white),
+                        ..Default::default()
+                    })),
+                ))
+                .style(
+                    Style::new()
+                        .padding(Edges::symmetric(14.0, 8.0))
+                        .corner_radius(8.0)
+                        .bg_color(rgb!(99, 102, 241))
+                        .bg_clip(BackgroundClip::ContentBox),
+                ),
+                row((text("Text (Dodger Blue → Green)").style(
+                    Style::new()
+                        .bg_gradient(LinearGradient::horizontal(clr!(dodger_blue), clr!(green)))
+                        .bg_clip(BackgroundClip::Text)
+                        .set_text_style(TextStyle {
+                            font_size: 14.0,
+                            font_weight: FontWeight::BOLD,
+                            ..Default::default()
+                        }),
+                ),))
+                .style(Style::new().padding(Edges::symmetric(10.0, 8.0))),
+            ))
+            .style(Style::new().gap(12.0).wrap()),
+        ))
+        .style(Style::new().gap(8.0).wrap()),
     ))
     .style(
         Style::new()

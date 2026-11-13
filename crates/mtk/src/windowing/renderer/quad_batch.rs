@@ -19,10 +19,11 @@ pub struct QuadInstance {
     pub gradient_color2: [f32; 4], // stop 2 color
     pub gradient_params: [f32; 4], // type (0=solid, 1=linear, 2=radial), angle/center_x, center_y, radius
     pub gradient_stops: [f32; 4],  // stop0_pos, stop1_pos, stop2_pos, num_stops
+    pub padding_widths: [f32; 4],  // top, right, bottom, left
 }
 
 impl QuadInstance {
-    pub const ATTRIBS: [wgpu::VertexAttribute; 15] = [
+    pub const ATTRIBS: [wgpu::VertexAttribute; 16] = [
         // 0: pos
         wgpu::VertexAttribute {
             format: wgpu::VertexFormat::Float32x2,
@@ -113,6 +114,12 @@ impl QuadInstance {
             offset: 208,
             shader_location: 14,
         },
+        // 15: padding_widths
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x4,
+            offset: 224,
+            shader_location: 15,
+        },
     ];
 
     pub fn solid(
@@ -144,6 +151,7 @@ impl QuadInstance {
             gradient_color2: [0.0; 4],
             gradient_params: [0.0; 4],
             gradient_stops: [0.0, 1.0, 1.0, 1.0],
+            padding_widths: [0.0; 4],
         }
     }
 
@@ -207,14 +215,14 @@ mod tests {
 
     #[test]
     fn test_quad_instance_layout() {
-        assert_eq!(std::mem::size_of::<QuadInstance>(), 224);
+        assert_eq!(std::mem::size_of::<QuadInstance>(), 240);
         assert_eq!(std::mem::align_of::<QuadInstance>(), 4);
         assert_eq!(std::mem::size_of::<SolidPushConstants>(), 8);
 
         let desc = QuadInstance::desc();
-        assert_eq!(desc.array_stride, 224);
+        assert_eq!(desc.array_stride, 240);
         assert_eq!(desc.step_mode, wgpu::VertexStepMode::Instance);
-        assert_eq!(desc.attributes.len(), 15);
+        assert_eq!(desc.attributes.len(), 16);
 
         // Verify that attributes are strictly contiguous and non-overlapping
         assert_eq!(desc.attributes[0].offset, 0);
@@ -232,5 +240,6 @@ mod tests {
         assert_eq!(desc.attributes[12].offset, 176);
         assert_eq!(desc.attributes[13].offset, 192);
         assert_eq!(desc.attributes[14].offset, 208);
+        assert_eq!(desc.attributes[15].offset, 224);
     }
 }

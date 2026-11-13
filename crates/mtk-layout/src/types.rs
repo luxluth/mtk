@@ -587,7 +587,7 @@ pub enum RenderCommandKind {
     ScrollbarH,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Copy)]
 pub struct RenderCommand {
     pub node: NodeId,
     pub kind: RenderCommandKind,

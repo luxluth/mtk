@@ -227,9 +227,24 @@ impl Filter {
     }
 }
 
+/// Specifies the clipping boundary of an element's background.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum BackgroundClip {
+    /// The background extends to the outside edge of the border (underneath translucent borders).
+    #[default]
+    BorderBox,
+    /// The background extends to the inside edge of the border (no background under borders).
+    PaddingBox,
+    /// The background is clipped strictly to the content box (inside border and padding).
+    ContentBox,
+    /// The background is clipped to foreground text glyphs.
+    Text,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Effects {
     pub background: Background,
+    pub background_clip: BackgroundClip,
     pub border: Border,
     pub box_shadow: BoxShadow,
     pub additional_shadows: Vec<BoxShadow>,
@@ -244,6 +259,7 @@ impl Default for Effects {
     fn default() -> Self {
         Self {
             background: Background::Color(Color::transparent),
+            background_clip: BackgroundClip::BorderBox,
             opacity: 1.,
             scale: 1.,
             border: Border::default(),
@@ -257,6 +273,12 @@ impl Default for Effects {
 }
 
 impl Effects {
+    /// Sets the background clipping boundary.
+    pub fn bg_clip(mut self, clip: BackgroundClip) -> Self {
+        self.background_clip = clip;
+        self
+    }
+
     /// Returns the primary color if solid, or first stop color if a gradient.
     pub fn background_color(&self) -> Color {
         self.background.primary_color()
