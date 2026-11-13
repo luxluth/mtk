@@ -15,7 +15,6 @@ path = "src/lib.rs"
 
 [dependencies]
 bytemuck = { workspace = true }
-env_logger = { workspace = true }
 parley = { workspace = true }
 pollster = { workspace = true }
 resvg = { workspace = true }

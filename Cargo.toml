@@ -12,10 +12,9 @@ categories = ["gui", "graphics"]
 
 [workspace.dependencies]
 bytemuck = "1.25"
-env_logger = "0.11"
-parley = { version = "0.12.0", features = ["complex-scripts"] }
+parley = { version = "0.13.0", features = ["complex-scripts"] }
 pollster = "1"
-resvg = "0.49.0"
+resvg = "0.50.0"
 swash = "0.2.10"
 wgpu = "30.0.1"
 winit = "=0.31.0-beta.4"

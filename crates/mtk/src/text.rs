@@ -775,7 +775,7 @@ pub fn get_cursor_geometry(
     };
 
     layout.break_all_lines(max_advance);
-    layout.align(text_style.alignment, AlignmentOptions::default());
+    layout.set_alignment(text_style.alignment, AlignmentOptions::default());
 
     let actual_text_width = layout.width();
     let horizontal_offset = match text_style.alignment {
