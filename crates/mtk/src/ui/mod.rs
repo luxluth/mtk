@@ -53,13 +53,19 @@ pub use presence::{Presence, PresenceViewExt, presence};
 pub use router::{Router, router};
 pub use style::ViewStyleExt;
 pub use transition::{Motion, MotionOffset, PageTransition, Transition, TransitionOrder};
-pub use widgets::{OsDraggable, OsDraggableElement, OsDraggableExt, os_draggable};
+pub use widgets::{
+    ActionButton, ActionButtons, ActionButtonsElement, CsdFrame, CsdFrameElement, CsdFrameExt,
+    OsDraggable, OsDraggableElement, OsDraggableExt, WindowControls, WindowControlsElement,
+    action_buttons, csd_frame, os_draggable, window_controls,
+};
 
 /// Represents user interaction, layout lifecycle, and system input events dispatched down the view tree.
 #[derive(Clone, Debug)]
 pub enum Event {
     /// Dispatched when the operating system interface theme changes (e.g. Light or Dark mode).
     ThemeChanged(::winit::window::Theme),
+    /// Dispatched when the window's tiling state changes.
+    WindowTiled(::winit::window::TiledEdges),
     /// Dispatched when the mouse cursor moves across the viewport.
     CursorMoved {
         /// Absolute horizontal pixel position.

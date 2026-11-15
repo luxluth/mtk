@@ -191,6 +191,19 @@ impl WindowAttributes {
     attr_fn!(with_min_size, min_size, Option<WindowDimension>);
     attr_fn!(with_max_size, max_size, Option<WindowDimension>);
 
+    /// Alias for [`with_transparency`](Self::with_transparency).
+    pub fn with_transparent(self, transparent: bool) -> Self {
+        self.with_transparency(transparent)
+    }
+
+    /// Configures the window for client-side decorations (CSD): disables system
+    /// decorations and enables per-pixel transparency for drop shadows and rounded corners.
+    pub fn with_csd(mut self, csd: bool) -> Self {
+        self.decorations = !csd;
+        self.transparent = csd;
+        self
+    }
+
     #[cfg(any(
         target_os = "linux",
         target_os = "freebsd",
@@ -1572,8 +1585,9 @@ where
         {
             use winit::platform::wayland::{ActiveEventLoopExtWayland, WindowAttributesWayland};
             if event_loop.is_wayland() {
-                let wayland_attr =
-                    WindowAttributesWayland::default().with_name(attr.app_id.clone(), "");
+                let wayland_attr = WindowAttributesWayland::default()
+                    .with_name(attr.app_id.clone(), "")
+                    .with_prefer_csd(!attr.decorations);
                 window_attributes =
                     window_attributes.with_platform_attributes(Box::new(wayland_attr));
             }
@@ -1811,6 +1825,16 @@ where
                     root.set_dirty(&mut self.context);
                 }
                 let mtk_event = Event::ThemeChanged(theme);
+                self.dispatch_and_rebuild(mtk_event);
+                window.request_redraw();
+            }
+            WindowEvent::Tiled(edges) => {
+                self.context.window_tiled_edges = edges;
+                if let (Some(view), Some(element)) = (&self.view, &self.element) {
+                    let root = view.get_node(element);
+                    root.set_dirty(&mut self.context);
+                }
+                let mtk_event = Event::WindowTiled(edges);
                 self.dispatch_and_rebuild(mtk_event);
                 window.request_redraw();
             }

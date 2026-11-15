@@ -169,7 +169,7 @@ impl Color {
     }
     /// Returns the HSL saturation component of this color in the range `[0.0, 1.0]`.
     #[inline]
-    pub fn saturation(&self) -> f32 {
+    pub const fn saturation(&self) -> f32 {
         self.to_hsl().1
     }
 
@@ -361,7 +361,7 @@ impl Color {
     /// assert_eq!(darker_red, red.darker(20.0));
     /// assert_eq!(darker_red.r, 204);
     /// ```
-    pub fn darker(&self, by_percent: f32) -> Color {
+    pub const fn darker(&self, by_percent: f32) -> Color {
         let factor = if by_percent.is_nan() || by_percent <= 0.0 {
             0.0
         } else if by_percent > 1.0 {
@@ -394,7 +394,7 @@ impl Color {
     /// assert_eq!(lightened, black.lighter(20.0));
     /// assert_eq!(lightened.r, 51);
     /// ```
-    pub fn lighter(&self, by_percent: f32) -> Color {
+    pub const fn lighter(&self, by_percent: f32) -> Color {
         let factor = if by_percent.is_nan() || by_percent <= 0.0 {
             0.0
         } else if by_percent > 1.0 {
@@ -411,7 +411,7 @@ impl Color {
     }
 
     /// Returns a copy of the color with its alpha channel multiplied by `factor` in `[0.0, 1.0]`.
-    pub fn fade(&self, factor: f32) -> Color {
+    pub const fn fade(&self, factor: f32) -> Color {
         let f = if factor.is_nan() || factor <= 0.0 {
             0.0
         } else if factor >= 1.0 {
@@ -429,7 +429,7 @@ impl Color {
 
     /// Converts this color to grayscale using standard ITU-R BT.709 luminance weights.
     /// The alpha channel is preserved.
-    pub fn grayscale(&self) -> Color {
+    pub const fn grayscale(&self) -> Color {
         let gray = (0.2126 * self.r as f32 + 0.7152 * self.g as f32 + 0.0722 * self.b as f32)
             .round() as u8;
         Color {
@@ -751,7 +751,7 @@ impl Color {
     /// * `h` - Hue in degrees `[0.0, 360.0)`
     /// * `s` - Saturation `[0.0, 1.0]`
     /// * `l` - Lightness `[0.0, 1.0]`
-    pub fn to_hsl(&self) -> (f32, f32, f32) {
+    pub const fn to_hsl(&self) -> (f32, f32, f32) {
         let r = self.r as f32 / 255.0;
         let g = self.g as f32 / 255.0;
         let b = self.b as f32 / 255.0;

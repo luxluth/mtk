@@ -108,6 +108,46 @@ impl<Msg: 'static + Send> Command<Msg> {
         })
     }
 
+    /// Convenience command to minimize the application window.
+    pub fn minimize_window() -> Self {
+        Self::perform(|ctx| {
+            ctx.minimize_window();
+            None
+        })
+    }
+
+    /// Convenience command to maximize the application window.
+    pub fn maximize_window() -> Self {
+        Self::perform(|ctx| {
+            ctx.maximize_window();
+            None
+        })
+    }
+
+    /// Convenience command to unmaximize (restore) the application window.
+    pub fn unmaximize_window() -> Self {
+        Self::perform(|ctx| {
+            ctx.unmaximize_window();
+            None
+        })
+    }
+
+    /// Convenience command to toggle between maximized and restored window states.
+    pub fn toggle_maximize_window() -> Self {
+        Self::perform(|ctx| {
+            ctx.toggle_maximize_window();
+            None
+        })
+    }
+
+    /// Convenience command to toggle fullscreen mode.
+    pub fn toggle_fullscreen() -> Self {
+        Self::perform(|ctx| {
+            ctx.toggle_window_fullscreen();
+            None
+        })
+    }
+
     /// Extracts the internal action vectors from this command.
     pub fn into_actions(self) -> (Vec<SyncAction<Msg>>, Vec<AsyncAction<Msg>>) {
         (self.sync_actions, self.async_actions)

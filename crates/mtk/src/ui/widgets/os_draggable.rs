@@ -18,6 +18,7 @@ use crate::{Context, Node};
 pub struct OsDraggable<State, V> {
     pub(crate) inner: V,
     pub(crate) enabled: bool,
+    pub(crate) double_click_maximize: bool,
     pub(crate) source_loc: Option<SourceLocation>,
     pub(crate) _marker: PhantomData<State>,
 }
@@ -25,12 +26,13 @@ pub struct OsDraggable<State, V> {
 /// Persistent DOM element state for an [`OsDraggable`] widget.
 pub struct OsDraggableElement<VEl> {
     pub(crate) inner_element: VEl,
+    pub(crate) last_click_instant: Option<std::time::Instant>,
 }
 
 /// Creates a new `OsDraggable` widget wrapping `inner`.
 ///
 /// Pressing down with the primary (left) mouse button on this view or any of its non-interactive
-/// child elements initiates an OS-level window drag.
+/// child elements initiates an OS-level window drag. Double-clicking toggles window maximization.
 ///
 /// # Examples
 /// ```rust,ignore
@@ -45,6 +47,7 @@ pub fn os_draggable<State, V: View<State>>(inner: V) -> OsDraggable<State, V> {
     OsDraggable {
         inner,
         enabled: true,
+        double_click_maximize: true,
         source_loc: Some(SourceLocation::here("OsDraggable")),
         _marker: PhantomData,
     }
@@ -54,6 +57,12 @@ impl<State, V: View<State>> OsDraggable<State, V> {
     /// Enables or disables OS window dragging.
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
+        self
+    }
+
+    /// Enables or disables double-clicking to toggle window maximization (defaults to `true`).
+    pub fn double_click_maximize(mut self, enabled: bool) -> Self {
+        self.double_click_maximize = enabled;
         self
     }
 }
@@ -78,7 +87,10 @@ impl<State, V: View<State>> View<State> for OsDraggable<State, V> {
             let node = self.inner.get_node(&inner_element);
             ctx.set_node_source(node, loc);
         }
-        OsDraggableElement { inner_element }
+        OsDraggableElement {
+            inner_element,
+            last_click_instant: None,
+        }
     }
 
     fn rebuild(&self, prev: &Self, ctx: &mut Context, element: &mut Self::Element) {
@@ -142,6 +154,17 @@ impl<State, V: View<State>> View<State> for OsDraggable<State, V> {
             } = &event
             {
                 if hit_nodes.contains(&self_node) {
+                    if self.double_click_maximize {
+                        let now = std::time::Instant::now();
+                        if let Some(prev) = element.last_click_instant {
+                            if now.duration_since(prev) < std::time::Duration::from_millis(350) {
+                                element.last_click_instant = None;
+                                ctx.toggle_maximize_window();
+                                return (EventResult::Handled, None);
+                            }
+                        }
+                        element.last_click_instant = Some(now);
+                    }
                     let _ = ctx.drag_window();
                     return (EventResult::Handled, None);
                 }
@@ -293,6 +316,48 @@ mod tests {
         );
 
         assert_eq!(res, EventResult::Handled);
+        view.teardown(&mut ctx, &mut element);
+    }
+
+    #[test]
+    fn test_os_draggable_double_click_maximize() {
+        let mut ctx = Context::new();
+        let view = os_draggable::<(), _>(text::<&str, ()>("Title Bar"));
+        let mut element = view.build(&mut ctx);
+        let node = view.get_node(&element);
+
+        // First click
+        let (res1, _) = view.handle_event(
+            &mut element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Left,
+                pressed: true,
+                x: 0.0,
+                y: 0.0,
+                hit_nodes: vec![node],
+            },
+            &mut ctx,
+        );
+        assert_eq!(res1, EventResult::Handled);
+        assert!(element.last_click_instant.is_some());
+
+        // Second click within 350ms triggers toggle_maximize
+        let (res2, _) = view.handle_event(
+            &mut element,
+            &(),
+            Event::MouseInput {
+                button: winit::event::MouseButton::Left,
+                pressed: true,
+                x: 0.0,
+                y: 0.0,
+                hit_nodes: vec![node],
+            },
+            &mut ctx,
+        );
+        assert_eq!(res2, EventResult::Handled);
+        assert!(element.last_click_instant.is_none());
+
         view.teardown(&mut ctx, &mut element);
     }
 }

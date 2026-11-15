@@ -18,7 +18,8 @@ pub mod windowing;
 
 use crate::ui::morph::{MorphId, MorphInfo, MorphPair, MorphTransition};
 use ::winit::keyboard::ModifiersState;
-pub use ::winit::window::Theme;
+pub use ::winit::cursor::CursorIcon;
+pub use ::winit::window::{ResizeDirection, Theme, TiledEdges};
 use ::winit::window::Window;
 pub use mtk_macro::Lens;
 
@@ -53,7 +54,8 @@ pub use crate::ui::{
     ScrollSource, ThumbScrollContext, ThumbScrollHandler, Transition, TransitionOrder,
     ViewEitherExt, ViewEventExt, ViewOverlayExt, ViewStyleExt, adaptive, boxed,
     compute_overlay_position, either, keyed, keyed_sequence, os_draggable, overlay, presence,
-    router,
+    router, ActionButton, ActionButtons, ActionButtonsElement, CsdFrame, CsdFrameElement,
+    CsdFrameExt, WindowControls, WindowControlsElement, action_buttons, csd_frame, window_controls,
 };
 pub use accesskit::{Action, ActionData, ActionRequest, Role, TreeUpdate};
 use std::cell::RefCell;
@@ -148,6 +150,8 @@ pub struct Context {
     pub captured_pointer: Option<PointerCapture>,
     pub theme: Option<Theme>,
     pub(crate) close_requested: bool,
+    pub window_tiled_override: Option<bool>,
+    pub window_tiled_edges: TiledEdges,
 
     // Shared element morph registry
     pub morph_registry: HashMap<Node, MorphInfo>,
@@ -217,6 +221,8 @@ impl Context {
             captured_pointer: None,
             theme: None,
             close_requested: false,
+            window_tiled_override: None,
+            window_tiled_edges: TiledEdges::default(),
 
             morph_registry: HashMap::new(),
             morph_nodes_by_id: HashMap::new(),
@@ -633,6 +639,146 @@ impl Context {
             Err(::winit::error::RequestError::NotSupported(
                 ::winit::error::NotSupportedError::new("No active window attached to Context"),
             ))
+        }
+    }
+
+    /// Initiates an interactive window drag-resize operation with the OS window manager in the specified direction.
+    pub fn drag_resize_window(
+        &self,
+        direction: ::winit::window::ResizeDirection,
+    ) -> Result<(), ::winit::error::RequestError> {
+        if let Some(window) = self.window.as_ref() {
+            window.drag_resize_window(direction)
+        } else {
+            Err(::winit::error::RequestError::NotSupported(
+                ::winit::error::NotSupportedError::new("No active window attached to Context"),
+            ))
+        }
+    }
+
+    /// Sets the mouse cursor icon for the application window.
+    pub fn set_cursor_icon(&self, icon: ::winit::cursor::CursorIcon) {
+        if let Some(window) = self.window.as_ref() {
+            window.set_cursor(::winit::cursor::Cursor::Icon(icon));
+        }
+    }
+
+    /// Minimizes the application window to the taskbar/dock.
+    pub fn minimize_window(&self) {
+        if let Some(window) = self.window.as_ref() {
+            window.set_minimized(true);
+        }
+    }
+
+    /// Maximizes the application window.
+    pub fn maximize_window(&self) {
+        if let Some(window) = self.window.as_ref() {
+            window.set_maximized(true);
+        }
+    }
+
+    /// Unmaximizes (restores) the application window.
+    pub fn unmaximize_window(&self) {
+        if let Some(window) = self.window.as_ref() {
+            window.set_maximized(false);
+        }
+    }
+
+    /// Toggles the application window between maximized and restored states.
+    pub fn toggle_maximize_window(&self) {
+        if let Some(window) = self.window.as_ref() {
+            let is_max = window.is_maximized();
+            window.set_maximized(!is_max);
+        }
+    }
+
+    /// Returns `true` if the application window is currently maximized.
+    pub fn is_window_maximized(&self) -> bool {
+        self.window.as_ref().map_or(false, |w| w.is_maximized())
+    }
+
+    /// Returns `true` if the application window is currently minimized, if supported by the OS platform.
+    pub fn is_window_minimized(&self) -> Option<bool> {
+        self.window.as_ref().and_then(|w| w.is_minimized())
+    }
+
+    /// Sets whether the application window is in fullscreen mode.
+    pub fn set_window_fullscreen(&self, fullscreen: bool) {
+        if let Some(window) = self.window.as_ref() {
+            window.set_fullscreen(if fullscreen {
+                Some(::winit::monitor::Fullscreen::Borderless(None))
+            } else {
+                None
+            });
+        }
+    }
+
+    /// Returns `true` if the application window is currently in fullscreen mode.
+    pub fn is_window_fullscreen(&self) -> bool {
+        self.window.as_ref().map_or(false, |w| w.fullscreen().is_some())
+    }
+
+    /// Toggles fullscreen mode on the application window.
+    pub fn toggle_window_fullscreen(&self) {
+        let current = self.is_window_fullscreen();
+        self.set_window_fullscreen(!current);
+    }
+
+    /// Returns the current tiling edges if the window is tiled.
+    pub fn window_tiled_edges(&self) -> TiledEdges {
+        if let Some(tiled) = self.window_tiled_override {
+            if tiled {
+                if self.window_tiled_edges.is_any() {
+                    self.window_tiled_edges
+                } else {
+                    TiledEdges {
+                        top: true,
+                        right: true,
+                        bottom: true,
+                        left: true,
+                    }
+                }
+            } else {
+                TiledEdges::default()
+            }
+        } else if let Some(window) = self.window.as_ref() {
+            window.tiled_edges()
+        } else {
+            self.window_tiled_edges
+        }
+    }
+
+    /// Returns `true` if the window is currently tiled, maximized, or fullscreen.
+    pub fn is_window_tiled(&self) -> bool {
+        if let Some(tiled) = self.window_tiled_override {
+            return tiled;
+        }
+        if let Some(window) = self.window.as_ref() {
+            if window.is_tiled() {
+                return true;
+            }
+        } else if self.window_tiled_edges.is_any() {
+            return true;
+        }
+        self.is_window_maximized() || self.is_window_fullscreen()
+    }
+
+    /// Explicitly overrides the tiled state of the window.
+    pub fn set_window_tiled_override(&mut self, tiled: Option<bool>) {
+        self.window_tiled_override = tiled;
+        if tiled == Some(false) {
+            self.window_tiled_edges = TiledEdges::default();
+        }
+    }
+
+    /// Explicitly overrides the tiled edges of the window.
+    pub fn set_window_tiled_edges_override(&mut self, edges: Option<TiledEdges>) {
+        if let Some(e) = edges {
+            self.window_tiled_edges = e;
+            self.window_tiled_override = Some(e.is_any());
+        } else {
+            self.window_tiled_override = None;
+            self.window_tiled_edges = TiledEdges::default();
         }
     }
 
