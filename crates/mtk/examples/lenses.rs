@@ -89,8 +89,6 @@ fn update(state: &mut AppState, msg: AppMsg) {
 }
 
 fn main() {
-    env_logger::init();
-
     let state = AppState {
         click_count: 0,
         dark_mode: false,

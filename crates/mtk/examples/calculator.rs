@@ -374,8 +374,6 @@ fn app_view(state: &CalcState) -> impl View<CalcState, Message = CalcMsg> + use<
 }
 
 fn main() {
-    env_logger::init();
-
     let state = CalcState {
         display: "0".to_string(),
         operand: 0.0,

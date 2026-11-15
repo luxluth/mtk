@@ -359,8 +359,6 @@ fn app(state: &TodoState) -> impl View<TodoState, Message = TodoMsg> + use<> {
 }
 
 fn main() {
-    env_logger::init();
-
     let initial_state = TodoState {
         new_input: String::new(),
         todos: vec![

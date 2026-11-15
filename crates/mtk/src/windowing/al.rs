@@ -10,7 +10,7 @@ use winit::{
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
     window::{
         ImeCapabilities, ImeEnableRequest, ImeHint, ImePurpose, ImeRequest, ImeRequestData,
-        Window as WWindow, WindowAttributes as WinitWindowAttributes, WindowId,
+        Window as WinitWindow, WindowAttributes as WinitWindowAttributes, WindowId,
     },
 };
 
@@ -80,7 +80,7 @@ where
     event_proxy: Arc<Mutex<Option<EventLoopProxy>>>,
     renderer: Option<Renderer>,
 
-    window: Option<Arc<dyn WWindow>>,
+    window: Option<Arc<dyn WinitWindow>>,
     context: Context,
     state: S,
 
@@ -1601,7 +1601,7 @@ where
             window_attributes = window_attributes.with_max_surface_size(max_size);
         }
 
-        let window: Arc<dyn WWindow> =
+        let window: Arc<dyn WinitWindow> =
             Arc::from(event_loop.create_window(window_attributes).unwrap());
         let ime_pos = PhysicalPosition::new(0, 0);
         let ime_size = PhysicalSize::new(0, 0);
